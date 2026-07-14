@@ -25,6 +25,8 @@ src/deciwaves/
     ds/            Death Stranding specifics
     hzd/            Horizon Zero Dawn Remastered specifics
     fw/            Horizon Forbidden West specifics
+  cli/             the `deciwaves` console-script entry point: stage dispatch,
+                   workspace handling, persisted tool/install config
   _vendor/
     pydecima/      a patched, MIT-licensed Decima .core reader, bundled in-tree
   data/            small, non-prose packaged data files (ID/timing manifests, name rosters)
@@ -85,21 +87,52 @@ The DS and HZD pipelines share this shape (FW's is described in its own section 
    bitrate), inserting small silence gaps between lines and a longer one between scenes,
    and writes a tracklist CSV alongside each MP3 so the reel is navigable.
 
-HZD reuses `engine.selection` and the general shape of catalog/render, but has its own
-`games/hzd/render.py` and its own binding stage in place of DS's transcript anchoring
-(see below) — the two games don't share `story_order.py` itself.
+HZD reuses the general shape of catalog/render — `games/hzd/render.py`'s own docstring
+notes it reuses `engine.render`'s game-agnostic packing/concat (`pack_episodes`, silence
+gaps, `_ffmpeg_concat`) — but it does **not** reuse `engine.selection`: nothing under
+`games/hzd/` imports `filter_and_dedup` or anything else from that module. Instead HZD has
+its own binding stage in place of both DS's transcript anchoring and DS's
+`engine.selection` dedup — its structural (A, B)-bucket join (see below) binds at most one
+line to one clip per bucket by construction, which is a different mechanism from, not a
+reuse of, `filter_and_dedup`. The two games don't share `story_order.py` itself.
 
 ## Command-line interface
 
 The package declares a single console-script entry point (`deciwaves`, see
-`pyproject.toml`) that is meant to give every stage above a uniform
-`deciwaves <game> <stage>` invocation, plus `setup` (fetch the external decode tools and
-record install paths) and `doctor` (preflight check) subcommands. Until that wrapper
-lands, every stage module is independently runnable as `python -m deciwaves.<module>` —
-each one already exposes a `main(argv=None) -> int` entry point, which is exactly the
-shape the CLI dispatches to. If you're looking for where a given stage's flags are
-defined, read the `argparse` block at the bottom of that stage's own module; the CLI layer
-is a thin dispatcher, not a second source of truth for flags.
+`pyproject.toml`) pointing at `deciwaves.cli.main:main`, giving every stage a uniform
+`deciwaves [--workspace DIR] <game> <stage>` invocation.
+
+- **Stage dispatch.** `deciwaves/cli/main.py` keeps a `STAGES` registry — a
+  `{game: {stage_name: (module_path, help_text)}}` mapping covering every stage in all
+  three pipelines (DS: `catalog` / `cutscenes` / `trim` / `order` / `render`; HZD:
+  `catalog` / `clip-index` / `wem-metadata` / `bind` / `render`; FW: `extract` / `asr` /
+  `subtitle-bind` / `match` / `full-reel` / `weave` / `dlc` / `assemble` / `render`). Each
+  stage module already exposes its own `main(argv=None) -> int`, and dispatch is exactly
+  `importlib.import_module(module_name).main(rest)` — the CLI doesn't reimplement stage
+  logic or flags, it just imports the right module and calls its `main`. If you're looking
+  for where a given stage's flags are defined, read the `argparse` block at the bottom of
+  that stage's own module, not the CLI layer.
+- **Workspace.** `--workspace` (default `.`) is resolved to an absolute path, created if
+  it doesn't exist, and the process `chdir`s into it before a stage runs. Stage modules
+  default their own outputs to CWD-relative `out/` paths, so this `chdir` is what lets one
+  flag redirect an entire run without touching every stage's individual path arguments.
+- **Config env application.** `deciwaves/cli/config.py` persists a small JSON config
+  (`tools_dir`, `ds_install`, `hzd_package`, `fw_package`, `oodle_dll`) under
+  `%LOCALAPPDATA%/DeciWaves/config.json` (overridable via `DECIWAVES_CONFIG_DIR`).
+  Before dispatching to any stage, `main()` calls `_apply_config_env()`, which prepends
+  the saved `tools_dir` onto `PATH` and sets `DECIWAVES_VGMSTREAM` / `DECIWAVES_VGAUDIO`
+  when the corresponding executables are found there. This has to happen *before* the
+  stage module is imported: `engine/audio_clip.py`, `games/fw/extract.py`, and
+  `games/hzd/atrac9.py` all read those environment variables to resolve their tool-path
+  constants at import time, not lazily.
+- **`setup` / `doctor` / `run`.** The top-level parser also accepts `setup` (fetch the
+  external decode tools and record install paths) and `doctor` (preflight check) as
+  subcommands, and each per-game subparser accepts `run` alongside its real stage names as
+  a future whole-pipeline shortcut. All three are registered in the argparse surface today
+  as stubs — `main()` dispatches to `deciwaves.cli.setup`, `deciwaves.cli.doctor`, and
+  `deciwaves.cli.run`, which don't exist as modules yet — so the individual `<game>
+  <stage>` invocations are the reliable path today; `setup`/`doctor`/`run` are wired up
+  for later work to fill in.
 
 ## Death Stranding: Director's Cut
 
