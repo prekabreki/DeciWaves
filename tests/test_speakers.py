@@ -269,3 +269,39 @@ class TestSimpleTextFilter:
         reject_all = lambda p: False
         smap = self._make_smap(file_list, fake_idx, simpletext_filter=reject_all)
         assert len(smap) == 0
+
+
+class TestPackagedFileListSimpletextPaths:
+    """The bundled ds/data-file-list.txt (Task 18) carries the voice simpletext
+    paths SpeakerMap needs, alongside the dialogue sentence cores, so an
+    out-of-box run derives speaker names live from the user's own install
+    (no bundled name content)."""
+
+    def test_packaged_file_list_simpletext_paths_are_picked_up(self):
+        from deciwaves import data
+        from deciwaves.engine.speakers import SpeakerMap, _DS_SIMPLETEXT_FILTER
+        import deciwaves._vendor.pydecima.reader as reader
+        from deciwaves._vendor.pydecima.resources.LocalizedTextResource import LocalizedTextResource
+
+        file_list = data.packaged("ds/data-file-list.txt").read_text(encoding="utf-8").splitlines()
+        simpletext_paths = [p for p in file_list if _DS_SIMPLETEXT_FILTER(p)]
+        assert len(simpletext_paths) == 96
+
+        # Stub the install: every simpletext core "exists" and decodes to a name
+        # derived deterministically from its own stem (content doesn't matter —
+        # only that the path was read and dispatched through the real filter).
+        core_map = {vp: vp.encode("ascii") for vp in simpletext_paths}
+        fake_idx = _make_fake_idx(core_map)
+
+        def fake_read_objects(stream, objs):
+            vp = stream.read().decode("ascii")
+            stem = vp.rstrip("/").split("/")[-2]
+            obj = MagicMock(spec=LocalizedTextResource)
+            obj.language = [stem]
+            objs["obj0"] = obj
+
+        with patch.object(reader, "read_objects_from_stream", side_effect=fake_read_objects):
+            smap = SpeakerMap(fake_idx, file_list, cache_path="")
+
+        assert len(smap) == 96
+        assert smap.name_for("localized/voices/vr0010_sam") == "vr0010_sam"

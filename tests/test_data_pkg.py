@@ -21,6 +21,22 @@ def test_packaged_ds_file_list_has_sentence_paths():
     assert lines
     assert any("localized/sentences" in ln for ln in lines)
 
+def test_packaged_ds_file_list_has_dialogue_and_simpletext_paths():
+    """The bundled DS file list carries both the dialogue sentence cores (what
+    engine.catalog.select_core_paths selects) and the voice simpletext cores
+    (what engine.speakers.SpeakerMap's default filter selects), so an
+    out-of-box `deciwaves ds` run can derive speaker names live from the
+    user's install."""
+    lines = data.packaged("ds/data-file-list.txt").read_text(encoding="utf-8").splitlines()
+    dialogue = [ln for ln in lines if ln.strip().endswith("/sentences")]
+    simpletext = [
+        ln for ln in lines if "sentences/voices/" in ln and ln.strip().endswith("/simpletext")
+    ]
+    assert len(dialogue) == 282
+    assert len(simpletext) == 96
+    # No overlap between the two shapes, and every line is one or the other.
+    assert len(dialogue) + len(simpletext) == len(lines)
+
 def test_packaged_ds_cutscene_tracks_parses_with_expected_header():
     p = data.packaged("ds/cutscene_tracks.csv")
     assert p.is_file()
