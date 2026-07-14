@@ -16,17 +16,28 @@ Filtered DS:DC virtual-path listing — the default `--file-list` for
   against a real install (282 dialogue sentence cores) — no external tool required to use
   this repo.
 - **Generated:** 2026-07-14.
-- **Contents:** one virtual path per line, no header, each ending `/sentences` under a
+- **Contents:** one virtual path per line, no header. 282 lines end `/sentences` under a
   `games.ds.profile.DS_CORE_PREFIXES` prefix (exactly what
-  `engine.catalog.select_core_paths` selects). Pure paths, no dialogue text.
-- **Scope note:** this listing only covers dialogue sentence cores. It does NOT cover the
-  nested per-cut cutscene sound cores (`ds/sounds/wwise_cinematics_sound_resource/...`)
-  that `games.ds.cutscene_audio.subcut_core_index` needs — those aren't present in a
-  catalog run's `core_path` column, so they can't be reconstructed the same way. See
+  `engine.catalog.select_core_paths` selects) — pure paths, no dialogue text. The
+  remaining 96 lines end `/simpletext` under `localized/sentences/voices/<stem>/` —
+  exactly what `engine.speakers.SpeakerMap`'s `_DS_SIMPLETEXT_FILTER` selects (paths
+  containing `sentences/voices/` and ending `/simpletext`) — pure paths, no speaker-name
+  text; these were derived from the distinct `speaker_code` values of the same verified
+  catalog run (`localized/voices/<stem>` -> `localized/sentences/voices/<stem>/simpletext`),
+  not from any external tool. Both sets are inert to each other's consumer: the
+  `/simpletext` lines don't end `/sentences` (or start with a `DS_CORE_PREFIXES` prefix)
+  so `select_core_paths` ignores them, and neither set matches the
+  `ds/sounds/wwise_cinematics_sound_resource/...` shape `subcut_core_index` looks for.
+- **Scope note:** this listing only covers dialogue sentence cores and voice display-name
+  cores. It does NOT cover the nested per-cut cutscene sound cores
+  (`ds/sounds/wwise_cinematics_sound_resource/...`) that
+  `games.ds.cutscene_audio.subcut_core_index` needs — those aren't present in a catalog
+  run's `core_path` column, so they can't be reconstructed the same way. See
   `ds/cutscene_tracks.csv` below for how cutscene audio is bundled instead.
 - To regenerate against a new game patch: re-run `deciwaves ds catalog` with a full
   packfile listing from your own tooling, then take the sorted distinct `core_path`
-  values from the resulting `catalog.csv` and replace this file.
+  values from the resulting `catalog.csv`, plus one `localized/sentences/voices/<stem>/simpletext`
+  line per distinct `speaker_code` stem, and replace this file.
 
 ## ds/cutscene_tracks.csv
 
