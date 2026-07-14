@@ -34,7 +34,11 @@ HZD_FAMILY_PREFIXES: dict[str, str] = {
 # (e.g. "collectab" is a prefix of "collectables") and keep plain substring matching.
 HZD_ANCHORED_PREFIXES: frozenset[str] = frozenset({"mq", "sq", "ec", "dlc"})
 
-HZD_TRANSCRIPT = "docs/zero_dawn_gamescript.md"
+# Default narrative transcript for anchor_index building: disabled. The HZD gamescript
+# transcript is copyrighted game prose (BYO — see docs/BYO.md), not shipped in this
+# repo. "" means story_order.main falls back to episode/scene ordering; pass a real
+# path via --transcript (or story_order's own default) to enable anchoring.
+HZD_TRANSCRIPT = ""
 
 
 def build_profile(package_dir: str | None) -> GameProfile:

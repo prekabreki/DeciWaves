@@ -108,5 +108,5 @@ def test_build_profile_fields():
     p = build_profile(package_dir=None)
     assert p.name == "hzd"
     assert p.out_dir == "out/hzd"
-    assert p.transcript_path.endswith("zero_dawn_gamescript.md")
+    assert p.transcript_path == ""  # disabled by default; BYO transcript via --transcript
     assert p.pack_reader is None  # None when package_dir not given
