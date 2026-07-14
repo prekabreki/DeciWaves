@@ -9,7 +9,7 @@ import wave
 
 import pytest
 
-from games.fw import extract as fx
+from deciwaves.games.fw import extract as fx
 
 VGAUDIO = fx.VGAUDIO
 

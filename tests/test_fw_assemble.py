@@ -1,4 +1,4 @@
-from games.fw import assemble
+from deciwaves.games.fw import assemble
 
 
 def test_combines_in_order_with_continuous_index():

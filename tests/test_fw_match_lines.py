@@ -1,5 +1,5 @@
-from games.fw import match_lines
-from games.fw.gamescript import ScriptLine
+from deciwaves.games.fw import match_lines
+from deciwaves.games.fw.gamescript import ScriptLine
 
 
 def _script(*pairs):

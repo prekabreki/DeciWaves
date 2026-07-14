@@ -1,5 +1,5 @@
 import struct
-from games.hzd.clip_index import clip_ab
+from deciwaves.games.hzd.clip_index import clip_ab
 
 
 class _FakeEntry:

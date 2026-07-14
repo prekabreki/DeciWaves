@@ -1,6 +1,6 @@
 import hashlib
 from unittest.mock import MagicMock, patch
-from engine.sentence_core import parse_sentences, Line
+from deciwaves.engine.sentence_core import parse_sentences, Line
 
 PROVEN_EN = ("localized/sentences/ds_lines_terminal/lines_pr201/"
              "sentences_sentence_00a2c114-b35c-4f09-b6a3-f373e5946d74.wem.english")
@@ -36,9 +36,9 @@ def test_cutscene_parses(cutscene_core_bytes):
 
 def _make_core_with_sentence(language_list, wem_paths_list):
     """Build a minimal fake object graph for parse_sentences."""
-    from pydecima.resources.SentenceGroupResource import SentenceGroupResource
-    from pydecima.resources.LocalizedTextResource import LocalizedTextResource
-    from pydecima.resources.LocalizedSimpleSoundResource import LocalizedSimpleSoundResource
+    from deciwaves._vendor.pydecima.resources.SentenceGroupResource import SentenceGroupResource
+    from deciwaves._vendor.pydecima.resources.LocalizedTextResource import LocalizedTextResource
+    from deciwaves._vendor.pydecima.resources.LocalizedSimpleSoundResource import LocalizedSimpleSoundResource
 
     # Fake LocalizedTextResource
     fake_text_res = MagicMock(spec=LocalizedTextResource)
@@ -73,12 +73,12 @@ def _make_core_with_sentence(language_list, wem_paths_list):
 
 def _parse_with_fake_group(fake_group):
     """Call parse_sentences with a patched reader that injects fake_group."""
-    from pydecima.resources.SentenceGroupResource import SentenceGroupResource
+    from deciwaves._vendor.pydecima.resources.SentenceGroupResource import SentenceGroupResource
 
     def fake_read(stream, objs):
         objs["g"] = fake_group
 
-    with patch("engine.sentence_core.reader.read_objects_from_stream", side_effect=fake_read):
+    with patch("deciwaves.engine.sentence_core.reader.read_objects_from_stream", side_effect=fake_read):
         return parse_sentences(b"dummy")
 
 
@@ -102,7 +102,7 @@ def test_empty_wem_paths_yields_empty_wem():
 
 def test_null_sentence_ref_calls_on_line_error():
     """Important 2: when sref.follow returns None, on_line_error must be called."""
-    from pydecima.resources.SentenceGroupResource import SentenceGroupResource
+    from deciwaves._vendor.pydecima.resources.SentenceGroupResource import SentenceGroupResource
 
     fake_sref = MagicMock()
     fake_sref.follow = MagicMock(return_value=None)  # unresolvable ref
@@ -116,7 +116,7 @@ def test_null_sentence_ref_calls_on_line_error():
     def fake_read(stream, objs):
         objs["g"] = fake_group
 
-    with patch("engine.sentence_core.reader.read_objects_from_stream", side_effect=fake_read):
+    with patch("deciwaves.engine.sentence_core.reader.read_objects_from_stream", side_effect=fake_read):
         lines = parse_sentences(b"dummy", on_line_error=lambda i, e: errors.append((i, e)))
 
     assert lines == []  # no row fabricated

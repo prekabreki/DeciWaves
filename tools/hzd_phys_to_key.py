@@ -15,9 +15,8 @@ import os
 import sys
 from bisect import bisect_right
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-from engine.pack.fw_locators import FwLocators, Entry          # noqa: E402
-from engine.pack.dsar_archive import DsarArchive               # noqa: E402
+from deciwaves.engine.pack.fw_locators import FwLocators, Entry
+from deciwaves.engine.pack.dsar_archive import DsarArchive
 
 DEFAULT_PACKAGE = r"C:\Program Files (x86)\Steam\steamapps\common\Horizon - Zero Dawn Remastered\LocalCacheDX12\package"
 DEFAULT_ARCHIVE = "package.01.00.core.stream"

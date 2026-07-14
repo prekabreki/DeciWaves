@@ -7,11 +7,11 @@ import os
 
 import pytest
 
-from engine.pack.fw_streaming_graph import StreamingGraph
-from engine.pack.fw_stream import FwStreamStore
-from engine.pack.fw_rtti import TypeRegistry, type_hash
-from engine.pack.fw_object_reader import GroupReader, read_group_spans
-from engine.pack.fw_fast_extract import (
+from deciwaves.engine.pack.fw_streaming_graph import StreamingGraph
+from deciwaves.engine.pack.fw_stream import FwStreamStore
+from deciwaves.engine.pack.fw_rtti import TypeRegistry, type_hash
+from deciwaves.engine.pack.fw_object_reader import GroupReader, read_group_spans
+from deciwaves.engine.pack.fw_fast_extract import (
     iter_english_lines, english_file_indices, FastLine)
 
 TYPES_JSON = os.path.join("vendor", "odradek", "odradek-game-hfw",

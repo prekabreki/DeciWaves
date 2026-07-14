@@ -5,10 +5,10 @@ manifest row building — is install-independent and tested here. The graph/scan
 glue is exercised by the integration test in test_fw_object_reader.py (skips
 without the install).
 """
-from games.fw.subtitle_bind import (
+from deciwaves.games.fw.subtitle_bind import (
     clean_subtitle, assign_subtitles, build_subtitle_rows,
 )
-from games.fw.bind import MANIFEST_COLS
+from deciwaves.games.fw.bind import MANIFEST_COLS
 
 
 def test_clean_subtitle_strips_markup_and_newlines():

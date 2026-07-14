@@ -6,10 +6,10 @@ import struct
 
 import pytest
 
-from engine.pack.fw_streaming_graph import StreamingGraph
-from engine.pack.fw_stream import FwStreamStore
-from engine.pack.fw_rtti import TypeRegistry, type_hash
-from engine.pack.fw_object_reader import GroupReader, read_group_spans, _Cur
+from deciwaves.engine.pack.fw_streaming_graph import StreamingGraph
+from deciwaves.engine.pack.fw_stream import FwStreamStore
+from deciwaves.engine.pack.fw_rtti import TypeRegistry, type_hash
+from deciwaves.engine.pack.fw_object_reader import GroupReader, read_group_spans, _Cur
 
 TYPES_JSON = os.path.join("vendor", "odradek", "odradek-game-hfw",
                           "src", "main", "resources", "types.json")

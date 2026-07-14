@@ -1,5 +1,5 @@
 # tests/test_transcript_anchor.py
-from engine import transcript_anchor as ta
+from deciwaves.engine import transcript_anchor as ta
 
 
 def test_normalize_folds_quotes_case_punctuation():

@@ -4,9 +4,9 @@ import struct
 import lz4.block
 import pytest
 from pathlib import Path
-from engine.pack.base import PackReader
-from engine.pack.fw_package import FwPackage
-from engine.pack.bin_archive import file_hash
+from deciwaves.engine.pack.base import PackReader
+from deciwaves.engine.pack.fw_package import FwPackage
+from deciwaves.engine.pack.bin_archive import file_hash
 
 HZD_PACKAGE = Path(r"C:\Program Files (x86)\Steam\steamapps\common\Horizon - Zero Dawn Remastered\LocalCacheDX12\package")
 

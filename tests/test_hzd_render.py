@@ -1,4 +1,4 @@
-from games.hzd.render import mq_rank, build_spine
+from deciwaves.games.hzd.render import mq_rank, build_spine
 
 
 def test_mq_rank_parses_variants():

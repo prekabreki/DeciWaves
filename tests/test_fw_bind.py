@@ -1,6 +1,6 @@
-from games.fw import bind
-from games.fw.gamescript import ScriptLine
-from games.fw.match_lines import LineBind
+from deciwaves.games.fw import bind
+from deciwaves.games.fw.gamescript import ScriptLine
+from deciwaves.games.fw.match_lines import LineBind
 
 
 def _script():

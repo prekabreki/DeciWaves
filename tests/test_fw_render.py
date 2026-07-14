@@ -1,4 +1,4 @@
-from games.fw import render
+from deciwaves.games.fw import render
 
 
 def _row(line_id, gidx, quest, tier="1", speaker="Aloy", subtitle="x", wav=None):

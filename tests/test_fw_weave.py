@@ -1,4 +1,4 @@
-from games.fw import weave
+from deciwaves.games.fw import weave
 
 
 def _m(line_id, gidx, speaker, subtitle, tier="1"):

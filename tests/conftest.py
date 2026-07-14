@@ -4,8 +4,6 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO / "src"))
-sys.path.insert(0, str(REPO / "vendor" / "pydecima"))
 
 FIXTURE_PR201 = REPO / "out" / "lines_pr201.core"
 FIXTURE_CUTSCENE = REPO / "out" / "sq_cs04_s01650.core"
@@ -26,7 +24,7 @@ FW_STREAMING_GRAPH = FW_PACKAGE_DIR / "streaming_graph.core"
 
 @pytest.fixture(scope="session", autouse=True)
 def _ds_mode():
-    import pydecima.reader as reader
+    import deciwaves._vendor.pydecima.reader as reader
     reader.set_globals(_decima_version="DSPC")
 
 

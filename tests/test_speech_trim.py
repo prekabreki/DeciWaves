@@ -1,4 +1,4 @@
-from engine.speech_trim import keep_spans, format_spans, parse_spans
+from deciwaves.engine.speech_trim import keep_spans, format_spans, parse_spans
 
 
 def test_keep_spans_pads_and_clamps_to_track_bounds():

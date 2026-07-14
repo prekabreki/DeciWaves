@@ -10,8 +10,8 @@ Verifies that:
 import inspect
 import pytest
 
-from engine.pack.base import PackReader
-from engine.pack.bin_index import PackIndex
+from deciwaves.engine.pack.base import PackReader
+from deciwaves.engine.pack.bin_index import PackIndex
 
 
 # ---------------------------------------------------------------------------

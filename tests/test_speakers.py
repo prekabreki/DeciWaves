@@ -3,12 +3,9 @@
 from unittest.mock import MagicMock, patch
 import json
 import pytest
-import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO / "src"))
-sys.path.insert(0, str(REPO / "vendor" / "pydecima"))
 
 
 def _make_fake_idx(core_map: dict):
@@ -37,32 +34,32 @@ class TestNameFor:
     """name_for() extracts the vr-stem from a full voice path and looks it up."""
 
     def test_full_path_resolved(self):
-        from engine.speakers import SpeakerMap
+        from deciwaves.engine.speakers import SpeakerMap
         smap = SpeakerMap.__new__(SpeakerMap)
         smap._map = {"vr0010_sam": "Sam", "vr0040_frg": "Fragile"}
         assert smap.name_for("localized/voices/vr0010_sam") == "Sam"
 
     def test_stem_only_resolved(self):
-        from engine.speakers import SpeakerMap
+        from deciwaves.engine.speakers import SpeakerMap
         smap = SpeakerMap.__new__(SpeakerMap)
         smap._map = {"vr0010_sam": "Sam"}
         assert smap.name_for("vr0010_sam") == "Sam"
 
     def test_unknown_returns_empty_string(self):
-        from engine.speakers import SpeakerMap
+        from deciwaves.engine.speakers import SpeakerMap
         smap = SpeakerMap.__new__(SpeakerMap)
         smap._map = {}
         assert smap.name_for("localized/voices/vr9999_nobody") == ""
 
     def test_empty_string_returns_empty_string(self):
-        from engine.speakers import SpeakerMap
+        from deciwaves.engine.speakers import SpeakerMap
         smap = SpeakerMap.__new__(SpeakerMap)
         smap._map = {"vr0010_sam": "Sam"}
         assert smap.name_for("") == ""
 
     def test_name_for_trailing_slash(self):
         """name_for strips a trailing slash before extracting the stem."""
-        from engine.speakers import SpeakerMap
+        from deciwaves.engine.speakers import SpeakerMap
         smap = SpeakerMap.__new__(SpeakerMap)
         smap._map = {"vr0010_sam": "Sam"}
         # Both forms must resolve to the same name.
@@ -76,11 +73,11 @@ class TestBuildMap:
 
     def _run_build(self, file_list_lines, fake_idx, fake_ltr_by_path):
         """Patch away the Decima reader and call _build_map."""
-        import pydecima.reader as reader
-        from engine.speakers import SpeakerMap
+        import deciwaves._vendor.pydecima.reader as reader
+        from deciwaves.engine.speakers import SpeakerMap
 
         def fake_read_objects(stream, objs):
-            from pydecima.resources.LocalizedTextResource import LocalizedTextResource
+            from deciwaves._vendor.pydecima.resources.LocalizedTextResource import LocalizedTextResource
             data = stream.read()
             # Look up which path this data came from
             for vp, b in fake_ltr_by_path.items():
@@ -109,8 +106,8 @@ class TestBuildMap:
 
     def test_parse_error_skipped(self):
         """If read_objects_from_stream raises, the entry is skipped gracefully."""
-        import pydecima.reader as reader
-        from engine.speakers import SpeakerMap
+        import deciwaves._vendor.pydecima.reader as reader
+        from deciwaves.engine.speakers import SpeakerMap
 
         vp = "localized/sentences/voices/vr0010_sam/simpletext"
         fake_idx = _make_fake_idx({vp: b"garbage"})
@@ -121,8 +118,8 @@ class TestBuildMap:
 
     def test_no_ltr_in_core_skipped(self):
         """If the core parses fine but contains no LocalizedTextResource, entry is skipped."""
-        import pydecima.reader as reader
-        from engine.speakers import SpeakerMap
+        import deciwaves._vendor.pydecima.reader as reader
+        from deciwaves.engine.speakers import SpeakerMap
 
         vp = "localized/sentences/voices/vr0010_sam/simpletext"
         fake_idx = _make_fake_idx({vp: b"data"})
@@ -136,9 +133,9 @@ class TestBuildMap:
 
     def test_empty_language_list_skipped(self):
         """Empty language list in LTR → skip, no crash."""
-        import pydecima.reader as reader
-        from pydecima.resources.LocalizedTextResource import LocalizedTextResource
-        from engine.speakers import SpeakerMap
+        import deciwaves._vendor.pydecima.reader as reader
+        from deciwaves._vendor.pydecima.resources.LocalizedTextResource import LocalizedTextResource
+        from deciwaves.engine.speakers import SpeakerMap
 
         vp = "localized/sentences/voices/vr0010_sam/simpletext"
         fake_idx = _make_fake_idx({vp: b"data"})
@@ -167,15 +164,15 @@ class TestCaching:
 
     def test_saves_and_loads_cache(self, tmp_path):
         """When cache_path is given, map is written and reloaded on next construction."""
-        import pydecima.reader as reader
-        from engine.speakers import SpeakerMap
+        import deciwaves._vendor.pydecima.reader as reader
+        from deciwaves.engine.speakers import SpeakerMap
 
         vp = "localized/sentences/voices/vr0010_sam/simpletext"
         b = _fake_ltr_bytes("Sam")
         fake_idx = _make_fake_idx({vp: b})
         cache_file = str(tmp_path / "speakers.json")
 
-        from pydecima.resources.LocalizedTextResource import LocalizedTextResource
+        from deciwaves._vendor.pydecima.resources.LocalizedTextResource import LocalizedTextResource
 
         def fake_read(stream, objs):
             data = stream.read()
@@ -203,9 +200,9 @@ class TestSimpleTextFilter:
     # Helper: build a SpeakerMap without cache, patching reader so that any
     # path that reaches _build_map yields a fixed name derived from its stem.
     def _make_smap(self, file_list, fake_idx, simpletext_filter=None):
-        import pydecima.reader as reader
-        from engine.speakers import SpeakerMap
-        from pydecima.resources.LocalizedTextResource import LocalizedTextResource
+        import deciwaves._vendor.pydecima.reader as reader
+        from deciwaves.engine.speakers import SpeakerMap
+        from deciwaves._vendor.pydecima.resources.LocalizedTextResource import LocalizedTextResource
 
         def fake_read_objects(stream, objs):
             data = stream.read()

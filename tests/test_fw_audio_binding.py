@@ -18,10 +18,10 @@ import wave
 
 import pytest
 
-from engine.pack.fw_streaming_graph import StreamingGraph
-from engine.pack.fw_stream import FwStreamStore
-from engine.pack.dsar_archive import DsarArchive
-from engine.pack.bin_archive import murmurhash3_x64_128
+from deciwaves.engine.pack.fw_streaming_graph import StreamingGraph
+from deciwaves.engine.pack.fw_stream import FwStreamStore
+from deciwaves.engine.pack.dsar_archive import DsarArchive
+from deciwaves.engine.pack.bin_archive import murmurhash3_x64_128
 
 VGAUDIO = os.path.join("vendor", "vgaudio", "VGAudioCli.exe")
 

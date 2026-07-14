@@ -1,5 +1,5 @@
 # tests/test_build_catalog.py
-from engine.catalog import (select_core_paths, classify, done_core_paths,
+from deciwaves.engine.catalog import (select_core_paths, classify, done_core_paths,
                             processed_core_paths, CSV_COLUMNS)
 import csv
 
@@ -25,7 +25,7 @@ _EXPECTED_PATHS = [
 
 def test_select_core_paths_uses_profile_prefixes():
     """select_core_paths driven by DS profile.core_prefixes produces identical results."""
-    from games.ds.profile import build_profile
+    from deciwaves.games.ds.profile import build_profile
     profile = build_profile(data_dir=None, oodle=None)
     result = select_core_paths(_SAMPLE_FILE_LIST, profile.core_prefixes)
     assert result == _EXPECTED_PATHS
@@ -33,7 +33,7 @@ def test_select_core_paths_uses_profile_prefixes():
 
 def test_classify_uses_profile_prefixes():
     """classify driven by DS profile.core_prefixes produces identical results."""
-    from games.ds.profile import build_profile
+    from deciwaves.games.ds.profile import build_profile
     profile = build_profile(data_dir=None, oodle=None)
     assert classify(
         "localized/sentences/ds_lines_cutscene/sq_cs04_s01650/sentences",

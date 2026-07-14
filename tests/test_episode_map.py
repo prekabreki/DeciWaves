@@ -1,5 +1,5 @@
 # tests/test_episode_map.py
-from games.ds import episode_map as em
+from deciwaves.games.ds import episode_map as em
 
 
 def test_cs_group_extracts_group():

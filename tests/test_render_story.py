@@ -5,8 +5,8 @@ import wave
 
 import pytest
 
-from engine import render as rs
-from engine.story_order import Segment
+from deciwaves.engine import render as rs
+from deciwaves.engine.story_order import Segment
 
 
 def _seg(is_side, line_id, scene="sq_cs00_s00100", category="cutscene"):

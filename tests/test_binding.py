@@ -1,4 +1,4 @@
-from games.hzd.binding import build_buckets, structural_binds, asr_worklist
+from deciwaves.games.hzd.binding import build_buckets, structural_binds, asr_worklist
 
 LINES = [{"line_id": "L1", "a_bytes": 100, "b_samples": 530, "subtitle_en": "Hi"},
          {"line_id": "L2", "a_bytes": 200, "b_samples": 1060, "subtitle_en": "A"},

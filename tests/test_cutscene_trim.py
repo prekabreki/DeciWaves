@@ -1,4 +1,4 @@
-from games.ds import cutscene_trim as ct
+from deciwaves.games.ds import cutscene_trim as ct
 
 
 def _rows():

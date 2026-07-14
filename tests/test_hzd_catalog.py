@@ -1,6 +1,6 @@
 """HZD identification pipeline: classification + profile (pure, no install needed)."""
-from games.hzd.catalog import classify_hzd, select_sentence_cores
-from games.hzd.profile import build_profile
+from deciwaves.games.hzd.catalog import classify_hzd, select_sentence_cores
+from deciwaves.games.hzd.profile import build_profile
 
 
 # --- classify_hzd: (category, scene) from a sentence-core virtual path ---

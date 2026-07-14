@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deciwaves"
+version = "0.1.0"
+description = "Extract speaker- and subtitle-tagged voice audio from Decima-engine games into story-ordered MP3 reels"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "prekabreki", email = "prekabreki@users.noreply.github.com" }]
+dependencies = ["lz4>=4.0", "numpy>=1.24", "rapidfuzz>=3.0"]
+
+[project.optional-dependencies]
+asr = ["whisperx>=3.1,<4"]
+
+[project.scripts]
+deciwaves = "deciwaves.cli.main:main"
+
+[project.urls]
+Homepage = "https://github.com/prekabreki/DeciWaves"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"deciwaves.data" = ["**/*.csv", "**/*.txt", "**/*.md"]
+"deciwaves._vendor.pydecima" = ["LICENSE"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"

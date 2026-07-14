@@ -8,9 +8,9 @@ Rules (source of truth: .memories/phase-d-line-selection.md):
   (e) Cutscenes are NOT passed to filter_and_dedup — story_order handles them separately.
   (f) Dropped duplicates are recorded by appending to dupes_sink.
 
-These rules are extracted verbatim from engine.story_order.build_playlist.
+These rules are extracted verbatim from deciwaves.engine.story_order.build_playlist.
 """
-from engine.selection import filter_and_dedup, PLACEHOLDER_SUBTITLE
+from deciwaves.engine.selection import filter_and_dedup, PLACEHOLDER_SUBTITLE
 
 
 def _row(**kw):

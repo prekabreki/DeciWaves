@@ -11,10 +11,10 @@ Both parsers used to abort the whole core on a layout mismatch:
 import io
 import struct
 
-import pydecima.reader as reader
-from pydecima.resources.LocalizedTextResource import LocalizedTextResource
-from pydecima.resources.SentenceGroupResource import SentenceGroupResource
-from pydecima.enums.ETextLanguages import ETextLanguages
+import deciwaves._vendor.pydecima.reader as reader
+from deciwaves._vendor.pydecima.resources.LocalizedTextResource import LocalizedTextResource
+from deciwaves._vendor.pydecima.resources.SentenceGroupResource import SentenceGroupResource
+from deciwaves._vendor.pydecima.enums.ETextLanguages import ETextLanguages
 
 LTR_HASH = 0x31BE502435317445
 SGR_HASH = 0xC144982A3EE1E95D

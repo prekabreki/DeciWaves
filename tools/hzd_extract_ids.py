@@ -20,12 +20,9 @@ from __future__ import annotations
 import argparse
 import csv
 import os
-import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-
-from games.hzd.catalog import select_sentence_cores            # noqa: E402
-from games.hzd.sentence_fw import parse_sentence_ids           # noqa: E402
+from deciwaves.games.hzd.catalog import select_sentence_cores
+from deciwaves.games.hzd.sentence_fw import parse_sentence_ids
 
 DEFAULT_PACKAGE = (
     r"C:\Program Files (x86)\Steam\steamapps\common"
@@ -44,8 +41,8 @@ def main(argv=None) -> int:
                     help="0 = whole pack; >0 caps records scanned during harvest")
     args = ap.parse_args(argv)
 
-    from games.hzd.profile import build_profile
-    from games.hzd.inventory import harvest_sentence_cores
+    from deciwaves.games.hzd.profile import build_profile
+    from deciwaves.games.hzd.inventory import harvest_sentence_cores
     profile = build_profile(args.package)
     fw = profile.pack_reader
 

@@ -1,6 +1,6 @@
 import struct
 import pytest
-from engine.pack.fw_locators import FwLocators, Locator, Entry
+from deciwaves.engine.pack.fw_locators import FwLocators, Locator, Entry
 
 
 def _build_locators(packfiles):

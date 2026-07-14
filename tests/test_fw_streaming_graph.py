@@ -1,6 +1,6 @@
 """StreamingGraphResource parser — verified byte-exact against the retail
 Forbidden West install. Skips when the install is absent."""
-from engine.pack.fw_streaming_graph import StreamingGraph, STREAMING_GRAPH_RESOURCE
+from deciwaves.engine.pack.fw_streaming_graph import StreamingGraph, STREAMING_GRAPH_RESOURCE
 
 
 def test_parses_size_exact_and_known_tables(fw_streaming_graph_bytes):

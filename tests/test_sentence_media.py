@@ -1,7 +1,7 @@
 import struct
 import pytest
-from games.hzd.wem_metadata import coverage_report
-from games.hzd.sentence_fw import (
+from deciwaves.games.hzd.wem_metadata import coverage_report
+from deciwaves.games.hzd.sentence_fw import (
     parse_sentence_media,
     parse_sentence_ids,
     LineMedia,

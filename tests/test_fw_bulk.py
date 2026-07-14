@@ -1,4 +1,4 @@
-from games.fw import bulk
+from deciwaves.games.fw import bulk
 
 
 def _clip(line_id, group_id, lssr, wav=None):

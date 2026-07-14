@@ -4,7 +4,7 @@ Mechanism documented in .memories/cutscene-audio-per-scene-voice-track.md.
 """
 import csv
 
-from games.ds import cutscene_audio as ca
+from deciwaves.games.ds import cutscene_audio as ca
 from conftest import DATA_DIR, OODLE_DLL
 
 
@@ -181,7 +181,7 @@ PROVEN_STREAM = (
 
 
 def test_resolve_proven_cutscene_scene_against_install(require_install):
-    from engine.pack.bin_index import PackIndex
+    from deciwaves.engine.pack.bin_index import PackIndex
 
     idx = PackIndex(str(DATA_DIR), str(OODLE_DLL))
     read_core, path_exists = ca.packindex_accessors(idx)

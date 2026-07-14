@@ -5,7 +5,7 @@ import wave
 
 import pytest
 
-from engine import audio_clip as ac
+from deciwaves.engine import audio_clip as ac
 from conftest import require_install, DATA_DIR, OODLE_DLL  # noqa: F401
 
 needs_ffmpeg = pytest.mark.skipif(
@@ -54,7 +54,7 @@ def test_wav_duration_seconds(tmp_path):
 
 
 def test_clip_wav_decodes_one_real_line(require_install, tmp_path):
-    from engine.pack.bin_index import PackIndex
+    from deciwaves.engine.pack.bin_index import PackIndex
     idx = PackIndex(str(DATA_DIR), str(OODLE_DLL))
     stream = ("localized/sentences/ds_lines_terminal/lines_pr201/"
               "sentences_sentence_d86c8bae-6aa0-4e37-b3c5-04ddd8d447f8"

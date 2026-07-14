@@ -7,8 +7,8 @@ script line.
 """
 from collections import namedtuple
 
-from games.fw.subtitle_match import match_subtitles, build_rows
-from games.fw.bind import MANIFEST_COLS
+from deciwaves.games.fw.subtitle_match import match_subtitles, build_rows
+from deciwaves.games.fw.bind import MANIFEST_COLS
 
 SL = namedtuple("SL", "index speaker text quest")
 

@@ -2,7 +2,7 @@ import struct
 import lz4.block
 import pytest
 from pathlib import Path
-from engine.pack.dsar_archive import DsarArchive
+from deciwaves.engine.pack.dsar_archive import DsarArchive
 
 
 def _write_dsar(tmp_path, chunks):

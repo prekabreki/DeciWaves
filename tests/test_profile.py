@@ -5,23 +5,20 @@ After implementing engine/profile.py → all tests pass (GREEN).
 """
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
 REPO = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO / "src"))
-sys.path.insert(0, str(REPO / "vendor" / "pydecima"))
 
-from engine.profile import GameProfile  # noqa: E402
-from games.ds.profile import DS_CORE_PREFIXES  # noqa: E402
+from deciwaves.engine.profile import GameProfile  # noqa: E402
+from deciwaves.games.ds.profile import DS_CORE_PREFIXES  # noqa: E402
 
 
 # ── helpers ────────────────────────────────────────────────────────────────
 
 def _ds_prefixes() -> dict[str, str]:
-    """Returns the authoritative DS prefix map from games.ds.profile."""
+    """Returns the authoritative DS prefix map from deciwaves.games.ds.profile."""
     return dict(DS_CORE_PREFIXES)
 
 

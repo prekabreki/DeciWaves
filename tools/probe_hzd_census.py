@@ -52,12 +52,7 @@ def main() -> None:
     if not os.path.isdir(PACKAGE_DIR):
         sys.exit(f"ERROR: HZDR package dir not found: {PACKAGE_DIR}")
 
-    # Add project src to path so engine.pack imports work from tools/
-    src_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
-    if src_dir not in sys.path:
-        sys.path.insert(0, src_dir)
-
-    from engine.pack.fw_package import FwPackage
+    from deciwaves.engine.pack.fw_package import FwPackage
 
     print(f"Opening FwPackage at: {PACKAGE_DIR}", flush=True)
     fw = FwPackage(PACKAGE_DIR)

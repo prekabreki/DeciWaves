@@ -1,4 +1,4 @@
-from games.hzd.match import normalize, match_clip, assign_bucket
+from deciwaves.games.hzd.match import normalize, match_clip, assign_bucket
 
 C = [{"line_id": "L1", "subtitle_en": "I'll find a way to stop it."},
      {"line_id": "L2", "subtitle_en": "We should head north now."}]

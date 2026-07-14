@@ -1,7 +1,7 @@
 import csv
 from pathlib import Path
 
-from games.fw import asr_run
+from deciwaves.games.fw import asr_run
 
 
 class FakeTranscript:

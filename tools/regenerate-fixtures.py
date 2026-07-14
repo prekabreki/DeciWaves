@@ -10,11 +10,8 @@ Override the install location with --data-dir / --oodle if non-default.
 """
 import argparse
 import os
-import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(REPO, "src"))
-sys.path.insert(0, os.path.join(REPO, "vendor", "pydecima"))
 
 _INSTALL = r"C:\Program Files (x86)\Steam\steamapps\common\DEATH STRANDING DIRECTORS CUT"
 
@@ -35,9 +32,9 @@ HZD_FIXTURES = {
 
 
 def _regen_ds(data_dir: str, oodle: str) -> None:
-    import pydecima.reader as reader
+    import deciwaves._vendor.pydecima.reader as reader
     reader.set_globals(_decima_version="DSPC")
-    from engine.pack.bin_index import PackIndex
+    from deciwaves.engine.pack.bin_index import PackIndex
 
     idx = PackIndex(data_dir, oodle)
     for vpath, out in FIXTURES.items():
@@ -52,7 +49,7 @@ def _regen_hzd(package_dir: str) -> None:
     if not os.path.isdir(package_dir):
         print(f"skipping HZD fixtures: package dir absent ({package_dir})")
         return
-    from engine.pack.fw_package import FwPackage
+    from deciwaves.engine.pack.fw_package import FwPackage
 
     fw = FwPackage(package_dir)
     for vpath, out in HZD_FIXTURES.items():

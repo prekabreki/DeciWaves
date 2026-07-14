@@ -1,4 +1,4 @@
-from games.fw import dlc
+from deciwaves.games.fw import dlc
 
 
 def test_dlc_rows_use_asr_text_and_order_by_group_then_lssr():

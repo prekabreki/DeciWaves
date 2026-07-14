@@ -9,8 +9,8 @@ EXPECT_PREFIX_SHA below for the oracle hash (no verbatim subtitle text here).
 """
 import hashlib
 
-from engine.sentence_core import Line
-from games.hzd.sentence_fw import parse_sentences_fw, parse_sentence_ids
+from deciwaves.engine.sentence_core import Line
+from deciwaves.games.hzd.sentence_fw import parse_sentences_fw, parse_sentence_ids
 
 # sha256 of the expected subtitle prefix — oracle value without shipping the text
 EXPECT_PREFIX_LEN = 46

@@ -33,6 +33,7 @@ __pycache__/
 .venv/
 .venv-asr/
 venv/
+*.egg-info/
 
 # #24 ASR derived/intermediate artifacts + review scratch (regenerable)
 /out/hzd/wem-metadata.csv

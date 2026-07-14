@@ -1,6 +1,6 @@
 import io
-import pydecima.reader as reader
-from pydecima.resources.LocalizedSimpleSoundResource import LocalizedSimpleSoundResource
+import deciwaves._vendor.pydecima.reader as reader
+from deciwaves._vendor.pydecima.resources.LocalizedSimpleSoundResource import LocalizedSimpleSoundResource
 
 PROVEN_EN = ("localized/sentences/ds_lines_terminal/lines_pr201/"
              "sentences_sentence_00a2c114-b35c-4f09-b6a3-f373e5946d74.wem.english")

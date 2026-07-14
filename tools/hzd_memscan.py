@@ -44,8 +44,6 @@ import sys
 from collections import Counter
 from dataclasses import dataclass
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-
 # --- oracle constants (see docs/runtime-binding-plan.md), kept for reference/tests ---
 ORACLE_GUID_HEX = "13f9532a11e94b6fbe26665e27bf4c3e"  # raw 16-byte on-disk order
 ORACLE_KEY = 0x3E0F9D4305030200                       # u64 stream key
@@ -71,7 +69,7 @@ EXIT_NOT_RESIDENT = 2
 def load_key_set(package_dir: str, archive: str) -> dict[int, tuple[int, int]]:
     """Map stream key (u64) -> (offset, length) for every locator entry in
     `archive`. The `hash` of a .core.stream entry IS the stream key."""
-    from engine.pack.fw_locators import FwLocators
+    from deciwaves.engine.pack.fw_locators import FwLocators
     loc = FwLocators(os.path.join(package_dir, "PackFileLocators.bin"))
     return {e.hash: (e.offset, e.length) for e in loc.entries(archive)}
 

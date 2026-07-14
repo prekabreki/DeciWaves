@@ -1,5 +1,5 @@
 import struct
-from games.hzd.atrac9 import fact_sample_count, trim_riff
+from deciwaves.games.hzd.atrac9 import fact_sample_count, trim_riff
 
 
 def _riff_with_fact(sample_count):
