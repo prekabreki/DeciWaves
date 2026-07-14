@@ -6,6 +6,7 @@ import os, shutil, struct, subprocess, tempfile
 # as games.fw.extract.VGAUDIO (one VGAudio install serves both games).
 VGAUDIO = (os.environ.get("DECIWAVES_VGAUDIO")
            or shutil.which("VGAudioCli") or "VGAudioCli")
+# resolved at import time — the CLI applies config env before importing stage modules
 
 
 class Atrac9Error(Exception):

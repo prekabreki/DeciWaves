@@ -40,6 +40,7 @@ from deciwaves.engine.pack.fw_fast_extract import iter_english_lines
 # for the same pattern; Task 6's CLI prepends a tools dir to PATH.
 VGAUDIO = (os.environ.get("DECIWAVES_VGAUDIO")
            or shutil.which("VGAudioCli") or "VGAudioCli")
+# resolved at import time — the CLI applies config env before importing stage modules
 
 MANIFEST_COLS = ["line_id", "group_id", "lssr_index", "file_index", "offset", "clip_bytes", "wav"]
 

@@ -19,6 +19,7 @@ import wave
 # is the caller's job (see docs/BYO.md); Task 6's CLI prepends a tools dir to PATH.
 VGMSTREAM = (os.environ.get("DECIWAVES_VGMSTREAM")
              or shutil.which("vgmstream-cli") or "vgmstream-cli")
+# resolved at import time — the CLI applies config env before importing stage modules
 
 
 class ClipError(Exception):
