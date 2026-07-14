@@ -1,18 +1,16 @@
 """Anchor a dialogue scene to its position in the in-order game transcript.
 
-docs/death_stranding_gamescript.md is a narrative-ordered transcript ("Speaker: text"
-lines, [] scene breaks). It matches ~93% of distinctive cutscene subtitles, so a scene's
+A narrative-ordered transcript ("Speaker: text" lines, [] scene breaks) is BYO --
+copyrighted game-script prose, not shipped in this repo (see docs/BYO.md). Against
+the DS gamescript it matches ~93% of distinctive cutscene subtitles, so a scene's
 median matched position is a ground-truth narrative anchor (see the Phase D design doc).
 """
 from __future__ import annotations
 
-import os
 import re
 import statistics
 import unicodedata
 
-_REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-TRANSCRIPT = os.path.join(_REPO, "docs", "death_stranding_gamescript.md")
 MIN_LEN = 20
 _SPEAKER_RE = re.compile(r"^[A-Z][\w .'-]{0,20}:\s*(.+)$")
 _QUOTES = (("'", "'"), ("'", "'"), ("“", '"'), ("”", '"'))
@@ -27,7 +25,7 @@ def normalize(s: str) -> str:
     return re.sub(r"\s+", " ", s).strip()
 
 
-def build_index(path: str = TRANSCRIPT) -> dict[str, int]:
+def build_index(path: str) -> dict[str, int]:
     index: dict[str, int] = {}
     n = 0
     with open(path, encoding="utf-8") as f:

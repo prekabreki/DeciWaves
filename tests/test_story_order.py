@@ -1,3 +1,5 @@
+import csv
+
 from deciwaves.engine import story_order as so
 
 
@@ -120,6 +122,29 @@ def test_npc_sorts_before_radio_within_episode():
     segs, _ = so.build_playlist(rows, crows, {})
     sides = [s.category for s in segs if s.is_side == 1]
     assert sides.index("npc") < sides.index("common")
+
+
+def test_build_playlist_without_transcript_anchoring(tmp_path):
+    # same synthetic catalog/cutscene fixtures as the existing happy-path tests,
+    # but transcript disabled: ordering falls back to episode/scene order and no crash
+    cat = tmp_path / "catalog.csv"
+    with open(cat, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=["line_id", "core_path", "line_index", "category",
+                                          "scene", "speaker_code", "speaker_name",
+                                          "subtitle_en", "wem_path_en", "language"])
+        w.writeheader()
+        w.writerow(_row())
+
+    tracks = tmp_path / "cutscene_tracks.csv"
+    with open(tracks, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=["scene", "status", "track_index", "voice_track_stream"])
+        w.writeheader()
+        w.writerow(_crow("sq_cs00_s00100", "a/b_voice_track.english.core.stream"))
+
+    out = tmp_path / "playlist.csv"
+    rc = so.main(["--catalog", str(cat), "--cutscene-tracks", str(tracks),
+                 "--out", str(out), "--transcript", ""])
+    assert rc == 0 and out.exists()
 
 
 def test_playlist_round_trip(tmp_path):

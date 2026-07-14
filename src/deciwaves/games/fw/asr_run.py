@@ -17,16 +17,30 @@ import csv
 import re
 from pathlib import Path
 
+from deciwaves import data
+
 TRANSCRIPT_COLS = ["line_id", "transcript", "speech_ratio"]
 
-# The roster's primer is the first fenced block after the initial_prompt heading.
-_PROMPT_RE = re.compile(r"initial_prompt.*?\n```\n(.*?)\n```", re.S | re.I)
+# Packaged roster's primer: a fenced block tagged ```initial_prompt.
+_PROMPT_RE = re.compile(r"```initial_prompt\s*\n(.*?)\n```", re.S)
+# Legacy fallback: the first bare fenced block after an "initial_prompt" heading
+# (pre-Task-4 roster convention; kept so hand-authored rosters in that shape still work).
+_PROMPT_RE_LEGACY = re.compile(r"initial_prompt.*?\n```\n(.*?)\n```", re.S | re.I)
 
 
-def load_initial_prompt(roster_md: str | Path) -> str:
-    """Extract the WhisperX `initial_prompt` proper-noun block from the #33 roster."""
+def load_initial_prompt(roster_md: str | Path | None) -> str | None:
+    """Extract the WhisperX `initial_prompt` proper-noun block from a roster doc.
+
+    ``None`` resolves to the packaged default roster (`data.packaged("fw/character_names.md")`).
+    ``""`` disables priming entirely (returns ``None``) -- e.g. for games/rosters not yet built.
+    An explicit non-empty path that lacks the fenced block still raises ``ValueError``.
+    """
+    if roster_md == "":
+        return None
+    if roster_md is None:
+        roster_md = data.packaged("fw/character_names.md")
     text = Path(roster_md).read_text(encoding="utf-8")
-    m = _PROMPT_RE.search(text)
+    m = _PROMPT_RE.search(text) or _PROMPT_RE_LEGACY.search(text)
     if not m:
         raise ValueError(f"no initial_prompt code block in {roster_md}")
     return " ".join(m.group(1).split())
@@ -95,7 +109,9 @@ def main(argv=None):
     ap.add_argument("--audio-root", default="out/fw",
                     help="dir the clip-index 'wav' paths are relative to")
     ap.add_argument("--out", default="out/fw/transcripts.csv")
-    ap.add_argument("--roster", default="docs/fw_character_names.md")
+    ap.add_argument("--roster", default=None,
+                    help="WhisperX initial_prompt roster doc; default = packaged "
+                         "fw/character_names.md; '' disables priming")
     ap.add_argument("--model", default="large-v3-turbo")
     ap.add_argument("--batch-size", type=int, default=16)
     ap.add_argument("--language", default="en",
@@ -109,7 +125,7 @@ def main(argv=None):
                         file_index=a.file_index or None, limit=a.limit)
     prompt = load_initial_prompt(a.roster)
     model = asr.load_model(a.model, initial_prompt=prompt)
-    print(f"clips={len(rows)} model={a.model} prompt_chars={len(prompt)}")
+    print(f"clips={len(rows)} model={a.model} prompt_chars={len(prompt) if prompt else 0}")
 
     lang = a.language or None
     n_ok, n_err = run(

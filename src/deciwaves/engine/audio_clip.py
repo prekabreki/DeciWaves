@@ -9,12 +9,16 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import shutil
 import struct
 import subprocess
 import wave
 
-_REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-VGMSTREAM = os.path.join(_REPO, "vendor", "vgmstream", "vgmstream-cli.exe")
+# Resolution order: explicit env override -> PATH -> bare name (fails loudly at
+# call time if truly absent). No more repo-relative vendor/ default -- tool setup
+# is the caller's job (see docs/BYO.md); Task 6's CLI prepends a tools dir to PATH.
+VGMSTREAM = (os.environ.get("DECIWAVES_VGMSTREAM")
+             or shutil.which("vgmstream-cli") or "vgmstream-cli")
 
 
 class ClipError(Exception):

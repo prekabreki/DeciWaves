@@ -17,6 +17,17 @@ def _write_clip_index(rows, path):
         w.writerows(rows)
 
 
+def test_roster_default_resolves_to_packaged(monkeypatch):
+    from deciwaves.games.fw import asr_run
+    prompt = asr_run.load_initial_prompt(None)          # None = packaged default
+    assert "Aloy" in prompt
+
+
+def test_roster_empty_disables_prompt():
+    from deciwaves.games.fw import asr_run
+    assert asr_run.load_initial_prompt("") is None
+
+
 def test_load_initial_prompt_extracts_roster_block(tmp_path):
     md = tmp_path / "roster.md"
     md.write_text(

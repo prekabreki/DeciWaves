@@ -6,7 +6,7 @@ Regenerate: re-run the extractor in `tools/` against the gamescript (this file w
 
 ## WhisperX initial_prompt (proper nouns)
 
-```
+```initial_prompt
 Aloy, Varl, Zo, Erend, Alva, GAIA, Kotallo, Tilda van der Meer, Beta, Sylens, Talanah, Dekka, Morlund, Hekarro, Ceo, Lawan, Synthetic Voice, Bohai, Amadis, Petra, Ulvund, Javad the Willing, Abadund, Silga, Kue, Natikka, Marshal Fashav, HADES, Lokasha, Arokkeh, Penttoh, Stemmur, Avad, Ivvira, Regalla, Kavvoh, Studious Vuadis, HEPHAESTUS, Ritakka, Delah, Larend, Erik, Porguf, Vanasha, Wekatta, Karhn, Milduf, Thurlis, Nozar, Untalla, Ragurt, Kivva, Joruf, Belna, Tolland Cleanbroker, Keruf, Gerard, Uthid, Hakund, Kitakka, Hataktto, Tekotteh, Travis Tate, Blameless Marad, Ivinna, Jekkah, Littay, Telga, Boomer, Savohar, Rokko, Amuf, Odurg, Salma, Vetteh, Zokkah, Kentokk, Kenalla, Aldur, Mian, Luf, Corend, Erayyo, Lirokkeh, Nirik, Itamen, Volma, Fendur, Elisabet Sobeck, Milu, Lel, Fane, Gerrah, Verbena, Isabel, Nasadi, Minda, Lunda, Ziverra, Nakko, Eileen Sasaki, Nakalla, Osvald Dalgaard, MINERVA, Rukka, Jorund, Terakka, Litakka, Tekatteh, Vetten, Aquino, Quen Soldier 2, Yivekka
 ```
 

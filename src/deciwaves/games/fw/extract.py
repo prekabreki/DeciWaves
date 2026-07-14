@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import csv
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -35,8 +36,10 @@ from deciwaves.engine.pack.fw_streaming_graph import StreamingGraph
 from deciwaves.engine.pack.fw_stream import FwStreamStore
 from deciwaves.engine.pack.fw_fast_extract import iter_english_lines
 
-_REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-VGAUDIO = os.path.join(_REPO, "vendor", "vgaudio", "VGAudioCli.exe")
+# Resolution order: explicit env override -> PATH -> bare name. See audio_clip.VGMSTREAM
+# for the same pattern; Task 6's CLI prepends a tools dir to PATH.
+VGAUDIO = (os.environ.get("DECIWAVES_VGAUDIO")
+           or shutil.which("VGAudioCli") or "VGAudioCli")
 
 MANIFEST_COLS = ["line_id", "group_id", "lssr_index", "file_index", "offset", "clip_bytes", "wav"]
 

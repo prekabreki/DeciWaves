@@ -1,19 +1,13 @@
 # Third-party toolchain — downloaded by setup, not vendored into history
 /vendor/
 
-# Extraction output — large binary audio and scratch, keep out of git (see CLAUDE.md)
-/out/*.wav
-/out/*.wem
-/out/*.mp3
-/out/*.stream
-/out/*.at9
-/out/*.bk2
-/out/*.core
-/out/speakers.json
-/out/catalog-errors.log
-/out/catalog-processed.txt
-/out/data-file-list.txt
+# Extraction output — local run artifacts (audio, manifests, scratch), keep out of git
+# (see CLAUDE.md). The two former out/ deliverable CSVs (cutscene-keepspans.csv,
+# cutscene_tracks.csv) now ship as packaged data under src/deciwaves/data/ (Task 4).
+/out/
 *.wav
+*.wem
+*.mp3
 *.at9
 *.bk2
 
@@ -35,46 +29,10 @@ __pycache__/
 venv/
 *.egg-info/
 
-# #24 ASR derived/intermediate artifacts + review scratch (regenerable)
-/out/hzd/wem-metadata.csv
-/out/hzd/clip-index.csv
-/out/hzd/asr-manifest-smoke.csv
-/out/hzd/asr-manifest-structural.csv
-/out/hzd/precision-review/
-
-# Phase D render artifacts (audio + caches stay out of git)
-out/wav-cache/
-out/audio/
-out/playlist.csv
-out/render-errors.log
-out/render-dupes.csv
-out/main-story-render.log
-# #52 cutscene speech-trim: keepspans CSV IS committed (deliverable manifest, like
-# catalog.csv); its logs are transient scratch.
-out/cutscene-trim.log
-out/cutscene-trim-errors.log
-*.wem
-*.wav
-*.mp3
-
 # Runtime-binding autodump artifacts (multi-GB dumps + scan outputs stay out of git)
 hzd_dumps/
 *.dmp
 hzd_bindings.csv
-out/hzd/line_ids-errors.log
-
-# HZD render build artifacts (regenerable; manifest is the committed deliverable)
-/out/hzd/audio/
-/out/hzd/listen/
-/out/hzd/render-errors.log
-
-# FW extraction scratch + proofs (audio ignored globally; these stay out too)
-/out/fw/
-
-# Per-game catalog scratch (logs + processed sidecars; mirror the root-out/ rules)
-out/**/catalog-build.log
-out/**/catalog-errors.log
-out/**/catalog-processed.txt
 
 # MCP / tooling scratch dirs
 /.playwright-mcp/

@@ -11,9 +11,14 @@ purposes only (e.g. in tests) — pack_reader will be None in that case.
 from __future__ import annotations
 
 from deciwaves.engine.profile import GameProfile
-from deciwaves.engine import transcript_anchor as ta
 from deciwaves.games.ds import episode_map as _em
 from deciwaves.games.ds import cutscene_audio as _ca
+
+# Default narrative transcript for anchor_index building: disabled. The DS gamescript
+# transcript is copyrighted game prose (BYO — see docs/BYO.md), not shipped in this
+# repo. "" means story_order.main falls back to episode/scene ordering; pass a real
+# path via --transcript (or story_order's own default) to enable anchoring.
+DS_TRANSCRIPT = ""
 
 # Authoritative DS prefix map (Phase 2 Task 2.3).
 # engine.catalog aliases this as CORE_PREFIXES for backward compatibility.
@@ -53,7 +58,7 @@ def build_profile(data_dir: str | None, oodle: str | None) -> GameProfile:
         speaker_simpletext_filter=lambda p: (
             "sentences/voices/" in p and p.strip().endswith("/simpletext")
         ),
-        transcript_path=ta.TRANSCRIPT,
+        transcript_path=DS_TRANSCRIPT,
         out_dir="out/ds",
         # episode_map: wired — the module exposes cs_group, fallback_group,
         # scene_number which story_order consumes directly by import; passing

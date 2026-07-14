@@ -11,6 +11,7 @@ Invoke as a module (package form):
 from __future__ import annotations
 
 import csv
+import os
 import statistics
 from collections import defaultdict
 from dataclasses import dataclass, asdict
@@ -202,7 +203,9 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="Build out/playlist.csv (Phase D order)")
     ap.add_argument("--catalog", default="out/catalog.csv")
     ap.add_argument("--cutscene-tracks", default="out/cutscene_tracks.csv")
-    ap.add_argument("--transcript", default=ta.TRANSCRIPT)
+    ap.add_argument("--transcript", default="",
+                    help="narrative transcript for anchoring (BYO — see docs/BYO.md); "
+                         "'' disables anchoring and falls back to episode/scene order")
     ap.add_argument("--out", default="out/playlist.csv")
     ap.add_argument("--dupes", default="out/render-dupes.csv")
     args = ap.parse_args(argv)
@@ -211,7 +214,16 @@ def main(argv=None):
         catalog_rows = list(csv.DictReader(f))
     with open(args.cutscene_tracks, newline="", encoding="utf-8") as f:
         cutscene_rows = list(csv.DictReader(f))
-    anchor_index = ta.build_index(args.transcript)
+
+    if args.transcript and os.path.isfile(args.transcript):
+        anchor_index = ta.build_index(args.transcript)
+    else:
+        if args.transcript:
+            print(f"transcript not found: {args.transcript} -- "
+                  f"anchoring disabled (see docs/BYO.md)")
+        else:
+            print("transcript anchoring disabled (no transcript provided — see docs/BYO.md)")
+        anchor_index = {}
 
     segs, dropped = build_playlist(catalog_rows, cutscene_rows, anchor_index)
     write_playlist(segs, args.out)

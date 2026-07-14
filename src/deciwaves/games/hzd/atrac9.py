@@ -1,9 +1,11 @@
 """ATRAC9 RIFF helpers for HZDR clips: cheap sample-count read + VGAudio decode."""
 from __future__ import annotations
-import os, struct, subprocess, tempfile
+import os, shutil, struct, subprocess, tempfile
 
-_REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-VGAUDIO = os.path.join(_REPO, "vendor", "vgaudio", "VGAudioCli.exe")
+# Resolution order: explicit env override -> PATH -> bare name. Same pattern/env var
+# as games.fw.extract.VGAUDIO (one VGAudio install serves both games).
+VGAUDIO = (os.environ.get("DECIWAVES_VGAUDIO")
+           or shutil.which("VGAudioCli") or "VGAudioCli")
 
 
 class Atrac9Error(Exception):

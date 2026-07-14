@@ -14,7 +14,7 @@ Usage::
         decima_version="DSPC",
         core_prefixes=CORE_PREFIXES,
         speaker_simpletext_filter=lambda p: "sentences/voices/" in p and p.endswith("/simpletext"),
-        transcript_path="docs/death_stranding_gamescript.md",
+        transcript_path="",  # BYO narrative transcript path (see docs/BYO.md); "" disables anchoring
         out_dir="out/ds",
     )
 """
@@ -49,9 +49,11 @@ class GameProfile:
         simpletext cores used by ``engine.speakers.SpeakerMap``.  Mirrors the
         inline filter ``"sentences/voices/" in p and p.strip().endswith("/simpletext")``.
     transcript_path
-        Absolute or repo-relative path to the narrative transcript used by
+        Absolute or repo-relative path to a narrative transcript used by
         ``engine.transcript_anchor.build_index`` to anchor scenes in story
-        order.  DS default: ``"docs/death_stranding_gamescript.md"``.
+        order.  Copyrighted game-script prose is BYO (see ``docs/BYO.md``) and
+        not shipped in this repo; ``""`` (the DS default) disables anchoring
+        and falls back to episode/scene order.
     out_dir
         Root output directory for derived files (catalog, playlist, speakers
         cache, etc.).  DS default: ``"out/ds"``.
