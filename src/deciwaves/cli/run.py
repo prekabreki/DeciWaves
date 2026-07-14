@@ -6,7 +6,10 @@ and the workspace-relative path/dir that marks it done. The loop is a plain
 for-loop -- no plugin machinery, no stage discovery magic.
 
 Per-game chains (see task-9 brief):
-    ds:  catalog -> cutscenes -> order -> render
+    ds:  catalog -> order -> render (cutscene voice tracks come from the packaged,
+         pre-resolved ds/cutscene_tracks.csv -- the `cutscenes` stage is NOT part of
+         the default chain; it remains available standalone via `deciwaves ds
+         cutscenes` for users who want to regenerate it against their own install)
     hzd: catalog -> clip-index -> wem-metadata -> bind[GPU] -> render
     fw:  extract -> asr[GPU] -> subtitle-bind -- (BYO gamescript gate) --
          match -> full-reel -> render
@@ -86,12 +89,17 @@ def _ds_catalog_argv(ctx: dict) -> list:
     return argv + ["--file-list", str(file_list)]
 
 
-def _ds_cutscenes_argv(ctx: dict) -> list:
-    return ["--data-dir", ctx["data_dir"], "--oodle", ctx["oodle"]]
-
-
 def _ds_order_argv(ctx: dict) -> list:
-    return []
+    try:
+        cutscene_tracks = data.packaged("ds/cutscene_tracks.csv")
+    except FileNotFoundError as exc:
+        raise StageConfigError(
+            "ds/cutscene_tracks.csv isn't bundled in this build yet (predates the "
+            "packaged cutscene tracks) -- run `deciwaves ds cutscenes` yourself and "
+            "pass --cutscene-tracks explicitly to `deciwaves ds order`, or rebuild "
+            "once it's bundled."
+        ) from exc
+    return ["--cutscene-tracks", str(cutscene_tracks)]
 
 
 def _ds_render_argv(ctx: dict) -> list:
@@ -121,9 +129,12 @@ def _run_ds(cfg: dict, extra_argv: list) -> int:
         return _missing_config("ds", "DS install (ds_install)", "--data-dir/--oodle")
 
     ctx = {"data_dir": data_dir, "oodle": oodle}
+    # No "cutscenes" stage here: the default chain uses the bundled, pre-resolved
+    # ds/cutscene_tracks.csv (see _ds_order_argv) instead of regenerating it against
+    # the user's install. `deciwaves ds cutscenes` remains available standalone for
+    # anyone who wants to regenerate it (e.g. against a patched install).
     chain = [
         Stage("catalog", STAGES["ds"]["catalog"][0], _ds_catalog_argv, "out/catalog.csv"),
-        Stage("cutscenes", STAGES["ds"]["cutscenes"][0], _ds_cutscenes_argv, "out/cutscene_tracks.csv"),
         Stage("order", STAGES["ds"]["order"][0], _ds_order_argv, "out/playlist.csv"),
         Stage("render", STAGES["ds"]["render"][0], _ds_render_argv, "out/audio"),
     ]
