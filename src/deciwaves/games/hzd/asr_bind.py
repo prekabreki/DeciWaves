@@ -1,6 +1,9 @@
 """MVP orchestration for ASR content-binding: decode -> transcribe -> match -> manifest."""
 from __future__ import annotations
-import argparse, csv, os, tempfile
+import argparse
+import csv
+import os
+import tempfile
 from deciwaves.engine.pack.fw_package import FwPackage
 from deciwaves.games.hzd import asr, match
 from deciwaves.games.hzd.atrac9 import decode_wem_to_wav

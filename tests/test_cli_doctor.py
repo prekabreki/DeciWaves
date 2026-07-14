@@ -2,10 +2,7 @@
 resolution, matching engine/audio_clip.py / games/fw/extract.py /
 games/hzd/atrac9.py) plus the run_doctor() wiring and exit-code contract.
 """
-import json
-import os
 
-import pytest
 
 from deciwaves.cli import config
 from deciwaves.cli import doctor

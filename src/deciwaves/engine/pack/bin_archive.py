@@ -12,7 +12,6 @@ from __future__ import annotations
 import struct
 import hashlib
 import ctypes
-import os
 from dataclasses import dataclass
 
 MASK64 = 0xFFFFFFFFFFFFFFFF

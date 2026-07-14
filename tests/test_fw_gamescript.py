@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from deciwaves.games.fw.gamescript import ScriptLine, parse, parse_file
+from deciwaves.games.fw.gamescript import parse, parse_file
 
 REPO = Path(__file__).resolve().parents[1]
 GAMESCRIPT = REPO / "docs" / "forbidden_west_gamescript.md"

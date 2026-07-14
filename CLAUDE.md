@@ -29,7 +29,7 @@ a one-pager per game).
 ## Build & test
 
 ```bash
-pip install -e .              # base install: parsing, archives, catalog, render
+pip install -e ".[test]"      # base install + pytest (parsing, archives, catalog, render)
 pip install -e ".[asr]"       # + optional GPU ASR extra (WhisperX; needs a CUDA-matched torch)
 pytest -q
 ```

@@ -59,7 +59,7 @@ def test_wav_duration_seconds(tmp_path):
 
 
 @needs_vgmstream
-def test_clip_wav_decodes_one_real_line(require_install, tmp_path):
+def test_clip_wav_decodes_one_real_line(require_install, tmp_path):  # noqa: F811
     from deciwaves.engine.pack.bin_index import PackIndex
     idx = PackIndex(str(DATA_DIR), str(OODLE_DLL))
     stream = ("localized/sentences/ds_lines_terminal/lines_pr201/"

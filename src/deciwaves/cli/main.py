@@ -1,5 +1,8 @@
 """DeciWaves — voice-audio extraction for Decima-engine games you own."""
-import argparse, importlib, os, sys
+import argparse
+import importlib
+import os
+import sys
 from pathlib import Path
 
 from deciwaves import __version__

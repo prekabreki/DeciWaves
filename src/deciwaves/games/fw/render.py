@@ -21,7 +21,7 @@ import subprocess
 
 from deciwaves.engine.render import (
     LINE_GAP, SCENE_GAP, SR, _ffmpeg_concat, budget_seconds, format_ts,
-    normalize_wav, pack_episodes, silence_wav,
+    pack_episodes, silence_wav,
 )
 
 BOUND_TIERS = {"1", "2"}

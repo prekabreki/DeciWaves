@@ -1,6 +1,6 @@
 # tests/test_pack_index.py
 from deciwaves.engine.pack.bin_index import PackIndex
-from conftest import DATA_DIR, OODLE_DLL, FIXTURE_PR201
+from conftest import DATA_DIR, OODLE_DLL
 
 PR201 = "localized/sentences/ds_lines_terminal/lines_pr201/sentences"
 

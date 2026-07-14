@@ -13,6 +13,7 @@ authors = [{ name = "prekabreki", email = "prekabreki@users.noreply.github.com" 
 dependencies = ["lz4>=4.0", "numpy>=1.24", "rapidfuzz>=3.0"]
 
 [project.optional-dependencies]
+test = ["pytest"]
 asr = ["whisperx>=3.1,<4"]
 
 [project.scripts]
@@ -34,3 +35,21 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 120
 target-version = "py312"
+extend-exclude = ["src/deciwaves/_vendor"]
+
+[tool.ruff.lint]
+# Narrowly-scoped ignores for rules that fight this codebase's existing style
+# (verified during Task 13 CI setup: each ignore below covers a pattern used
+# repeatedly and deliberately, not a one-off; fixing them would mean mass
+# rewriting working code rather than a mechanical lint fix).
+ignore = [
+    "E702",  # multiple statements on one line (;) -- used deliberately for
+             # dense algorithmic code (e.g. MurmurHash in pack/bin_archive.py)
+             # and terse test fakes; spans 14 files, not a one-off.
+    "E731",  # lambda assigned to a name -- idiomatic here for small
+             # predicates/test fakes (engine/speakers.py filter, test doubles
+             # in test_cutscene_trim.py / test_speakers.py).
+    "E741",  # ambiguous variable name (e.g. `l`) -- short loop vars in list
+             # comprehensions across src/games/hzd and multiple test files;
+             # renaming is a real edit, not a mechanical lint fix.
+]

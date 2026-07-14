@@ -1,6 +1,10 @@
 """ATRAC9 RIFF helpers for HZDR clips: cheap sample-count read + VGAudio decode."""
 from __future__ import annotations
-import os, shutil, struct, subprocess, tempfile
+import os
+import shutil
+import struct
+import subprocess
+import tempfile
 
 # Resolution order: explicit env override -> PATH -> bare name. Same pattern/env var
 # as games.fw.extract.VGAUDIO (one VGAudio install serves both games).

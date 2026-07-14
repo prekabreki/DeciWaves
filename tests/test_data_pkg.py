@@ -1,5 +1,4 @@
 import csv
-from pathlib import Path
 import pytest
 from deciwaves import data
 

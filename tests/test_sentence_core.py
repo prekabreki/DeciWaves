@@ -73,7 +73,6 @@ def _make_core_with_sentence(language_list, wem_paths_list):
 
 def _parse_with_fake_group(fake_group):
     """Call parse_sentences with a patched reader that injects fake_group."""
-    from deciwaves._vendor.pydecima.resources.SentenceGroupResource import SentenceGroupResource
 
     def fake_read(stream, objs):
         objs["g"] = fake_group
