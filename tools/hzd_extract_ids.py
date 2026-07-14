@@ -18,7 +18,6 @@ Invoke as a module (src/ must be on PYTHONPATH)::
 """
 from __future__ import annotations
 import argparse
-import sys
 import csv
 import os
 
@@ -85,4 +84,4 @@ def main(argv=None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main())  # noqa: F821

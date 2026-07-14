@@ -7,9 +7,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
-      # pytest is not a declared project dependency (it's a test-runner tool, not
-      # something deciwaves needs at import time) -- install it explicitly alongside
-      # ruff so `python -m pytest` below actually has something to run.
-      - run: pip install -e . pytest ruff
+      - run: pip install -e ".[test]" ruff
       - run: ruff check src tests tools
       - run: python -m pytest -q
