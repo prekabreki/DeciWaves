@@ -95,7 +95,14 @@ def _ds_order_argv(ctx: dict) -> list:
 
 
 def _ds_render_argv(ctx: dict) -> list:
-    keepspans = data.packaged("ds/cutscene-keepspans.csv")
+    try:
+        keepspans = data.packaged("ds/cutscene-keepspans.csv")
+    except FileNotFoundError as exc:
+        raise StageConfigError(
+            "ds/cutscene-keepspans.csv isn't bundled in this build yet -- pass "
+            "--speech-trim explicitly to `deciwaves ds render`, or rebuild once "
+            "it's bundled."
+        ) from exc
     return ["--data-dir", ctx["data_dir"], "--oodle", ctx["oodle"],
             "--main-story", "--speech-trim", str(keepspans), "--bitrate", "96"]
 

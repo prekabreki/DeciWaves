@@ -140,6 +140,31 @@ def test_ds_catalog_missing_packaged_file_list_is_soft_failure(tmp_path, monkeyp
     assert "--file-list" in out
 
 
+def test_ds_render_missing_packaged_keepspans_is_soft_failure(tmp_path, monkeypatch, capsys):
+    # Monkeypatch packaged() to raise FileNotFoundError for cutscene-keepspans.csv
+    monkeypatch.chdir(tmp_path)
+    mods = _mods("ds")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _ds_outputs(mods)))
+
+    def _packaged_side_effect(rel):
+        if "cutscene-keepspans" in rel:
+            raise FileNotFoundError(rel)
+        return Path(f"/pkg/{rel}")
+
+    monkeypatch.setattr(run_mod.data, "packaged", _packaged_side_effect)
+
+    rc = run_mod.run_game("ds", {"ds_install": "X"}, [])
+    assert rc == 1
+    # render main never invoked -- failed at stage config (before dispatch)
+    # But earlier stages (catalog, cutscenes, order) should have run
+    assert mods["render"] not in [m for m, _ in calls]
+
+    out = capsys.readouterr().out
+    assert "cutscene-keepspans" in out
+    assert "--speech-trim" in out
+
+
 # ---------------------------------------------------------------------------
 # hzd
 # ---------------------------------------------------------------------------
