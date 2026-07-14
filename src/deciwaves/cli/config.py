@@ -1,5 +1,6 @@
 """Persisted config: where setup put the tools and where the games live."""
-import json, os
+import json
+import os
 from pathlib import Path
 
 KEYS = ("tools_dir", "ds_install", "hzd_package", "fw_package", "oodle_dll")

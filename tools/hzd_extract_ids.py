@@ -18,6 +18,7 @@ Invoke as a module (src/ must be on PYTHONPATH)::
 """
 from __future__ import annotations
 import argparse
+import sys
 import csv
 import os
 

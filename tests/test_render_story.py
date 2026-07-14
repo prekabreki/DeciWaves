@@ -1,5 +1,4 @@
 import shutil
-import struct
 import subprocess
 import wave
 

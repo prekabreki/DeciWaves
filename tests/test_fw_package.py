@@ -1,5 +1,4 @@
 # tests/test_fw_package.py
-import os
 import struct
 import lz4.block
 import pytest

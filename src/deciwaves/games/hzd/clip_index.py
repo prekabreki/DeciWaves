@@ -1,6 +1,8 @@
 """Cheap (A,B) per package.01 clip: A=locator length, B=ATRAC9 fact sample-count."""
 from __future__ import annotations
-import argparse, csv, os
+import argparse
+import csv
+import os
 from deciwaves.engine.pack.fw_package import FwPackage
 from deciwaves.games.hzd.atrac9 import fact_sample_count
 

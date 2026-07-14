@@ -2,7 +2,6 @@
 """TDD tests for SpeakerMap."""
 from unittest.mock import MagicMock, patch
 import json
-import pytest
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]

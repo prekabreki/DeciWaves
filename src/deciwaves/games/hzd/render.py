@@ -17,7 +17,6 @@ import argparse
 import csv
 import os
 import re
-import tempfile
 from dataclasses import dataclass
 
 from deciwaves.engine.render import (

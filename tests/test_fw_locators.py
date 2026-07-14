@@ -1,4 +1,6 @@
 import struct
+from pathlib import Path
+
 import pytest
 from deciwaves.engine.pack.fw_locators import FwLocators, Locator, Entry
 
@@ -54,8 +56,6 @@ def test_ordered_entries_preserve_file_order_and_duplicates():
         Entry("b.core.stream", 0xCC, 64, 40),
     ]
 
-
-from pathlib import Path
 
 HZD_PACKAGE = Path(r"C:\Program Files (x86)\Steam\steamapps\common\Horizon - Zero Dawn Remastered\LocalCacheDX12\package")
 

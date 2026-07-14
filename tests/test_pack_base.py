@@ -8,7 +8,6 @@ Verifies that:
   we check the class object, not a stand-in).
 """
 import inspect
-import pytest
 
 from deciwaves.engine.pack.base import PackReader
 from deciwaves.engine.pack.bin_index import PackIndex

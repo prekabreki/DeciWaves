@@ -13,7 +13,8 @@ class _StubModel:
 
 
 def test_asr_bind_imports_without_whisperx():
-    import importlib, deciwaves.games.hzd.asr_bind
+    import importlib
+    import deciwaves.games.hzd.asr_bind
     importlib.reload(deciwaves.games.hzd.asr_bind)  # whisperx is not installed in the venv
 
 
