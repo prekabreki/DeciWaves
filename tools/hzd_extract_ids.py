@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import csv
 import os
+import sys
 
 from deciwaves.games.hzd.catalog import select_sentence_cores
 from deciwaves.games.hzd.sentence_fw import parse_sentence_ids
@@ -84,4 +85,4 @@ def main(argv=None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())  # noqa: F821
+    sys.exit(main())
