@@ -8,3 +8,5 @@ Forbidden West — and assemble it into story-ordered MP3 reels.
 
 Not affiliated with Guerrilla Games, Kojima Productions, or Sony Interactive
 Entertainment. Full README coming with v0.1.0.
+
+Contributor guide: docs/architecture.md
