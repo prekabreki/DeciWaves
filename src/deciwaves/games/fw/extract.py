@@ -19,7 +19,7 @@ Speaker / subtitle / story order are added downstream (ASR vs
 RIFF/ATRAC9 (unlike HZD's Wwise ``.wem``), so decode is a direct VGAudio call
 with no trim. That codec decoder is intentionally duplicated rather than imported
 from ``games.hzd`` to keep games decoupled; it could be promoted to
-``engine`` later (issue #10).
+``engine`` later.
 """
 from __future__ import annotations
 

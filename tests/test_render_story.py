@@ -59,7 +59,7 @@ def test_concat_of_mixed_channel_clips_preserves_duration(tmp_path):
 
 
 def test_budget_seconds_stays_under_290_buffer():
-    # #30: the naive ideal budget packs files that encode to ~293 MB (over the
+    # The naive ideal budget packs files that encode to ~293 MB (over the
     # 290 MB buffer). The overhead-adjusted budget must keep real output <= 290 MB.
     secs = rs.budget_seconds()
     real_bytes = secs * 16000 * (1 + rs.MP3_OVERHEAD)

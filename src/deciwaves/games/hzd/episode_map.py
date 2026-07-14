@@ -1,4 +1,4 @@
-"""HZD side-quest / DLC unlock points for near-chronological ordering (#20).
+"""HZD side-quest / DLC unlock points for near-chronological ordering.
 
 Maps each non-main-quest top-level scene prefix to the story rank (main-quest beat)
 it unlocks after, so `games.hzd.render.build_spine(..., episode_map=HZD_EPISODE_MAP)`
@@ -10,7 +10,7 @@ N.5 plays after main quest N. Within a questline, order is the embedded sequence
 to UNMAPPED_RANK in render.py (sorted last, never dropped).
 
 Authored from HZD quest progression + docs/zero_dawn_gamescript.md. Confidence is
-"logical near-chronological", not frame-exact (see #20). Notable judgment calls:
+"logical near-chronological", not frame-exact. Notable judgment calls:
   * Open-world systems (bandit camps, cauldrons, hunting grounds, collectibles, shops,
     Nora-valley errands) -> 6.5 (unlock when Aloy leaves the Embrace after mq06).
   * Meridian / Sundom side quests (tca*, tcb*, tcc*, tcd*, tnb*, tnc*) -> 8.5 (after mq08).

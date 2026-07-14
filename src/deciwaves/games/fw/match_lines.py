@@ -1,4 +1,4 @@
-"""FW matcher (#34 step 3): bind each gamescript line to its clip.
+"""FW matcher (gamescript-matching stage): bind each gamescript line to its clip.
 
 Direction matters. The gamescript (~6,860 lines) is the STORY SPINE; for each
 script line we find the clip that voices it (script -> clip), NOT the reverse.

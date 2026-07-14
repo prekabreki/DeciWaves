@@ -1,6 +1,6 @@
 # Forbidden West character names (ASR priming roster)
 
-Auto-derived from `docs/forbidden_west_gamescript.md` speaker labels (`^Name:`, count >= 3). Feeds the WhisperX `initial_prompt`/`hotwords` for the FW ASR-binding stage to cut name mistranscriptions at the source (e.g. ALOY heard as "Eli", GAIA/HADES/HEPHAESTUS garbled). See issue for #1.
+Auto-derived from `docs/forbidden_west_gamescript.md` speaker labels (`^Name:`, count >= 3). Feeds the WhisperX `initial_prompt`/`hotwords` for the FW ASR-binding stage to cut name mistranscriptions at the source (e.g. ALOY heard as "Eli", GAIA/HADES/HEPHAESTUS garbled).
 
 Regenerate: re-run the extractor in `tools/` against the gamescript (this file was generated ad hoc 2026-06-27). Review before use — a few generic role labels (Tenakth Soldier, Quen Guard, …) are kept for order/context but excluded from the hotword prompt below.
 

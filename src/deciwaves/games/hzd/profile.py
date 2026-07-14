@@ -30,7 +30,7 @@ HZD_FAMILY_PREFIXES: dict[str, str] = {
 
 # Short quest codes are always followed by an ID (a digit or "_"): "mq01_", "sq_", "dlc1_".
 # They must anchor on that boundary, else "ec"/"sq"/"mq" swallow unrelated words like
-# "eclipse"/"square"/"mqueen" (#43). The remaining keys are deliberate word-stems
+# "eclipse"/"square"/"mqueen". The remaining keys are deliberate word-stems
 # (e.g. "collectab" is a prefix of "collectables") and keep plain substring matching.
 HZD_ANCHORED_PREFIXES: frozenset[str] = frozenset({"mq", "sq", "ec", "dlc"})
 

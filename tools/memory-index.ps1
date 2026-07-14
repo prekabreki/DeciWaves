@@ -2,11 +2,12 @@
 # The pre-commit hook runs this so the index can never be committed stale; safe to
 # run by hand any time.
 #
-# Every read/write in this script pins -Encoding utf8 (Get-Content AND Set-Content).
 # Windows PowerShell 5.1's default encoding is the system codepage, not UTF-8; reading
-# UTF-8 files (em dashes, curly quotes, etc.) without pinning it mangles them into
-# mojibake ("â€”" for "—") the moment they're re-serialized into README.md. Pin both
-# ends or the corruption comes back.
+# UTF-8 files (em dashes, curly quotes, etc.) without pinning -Encoding utf8 on
+# Get-Content mangles them into mojibake ("â€”" for "—") the moment they're
+# re-serialized into README.md. The write side uses [System.IO.File]::WriteAllText
+# with an explicit no-BOM UTF8Encoding instead of Set-Content -Encoding utf8, since
+# PowerShell 5.1's "utf8" Set-Content always emits a BOM.
 [CmdletBinding()]
 param(
     [string]$MemoriesDir
@@ -63,5 +64,6 @@ if ($files.Count -eq 0) {
 }
 
 $readmePath = Join-Path $MemoriesDir 'README.md'
-$lines -join "`n" | Set-Content -LiteralPath $readmePath -Encoding utf8
+$noBomUtf8 = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllText($readmePath, (($lines -join "`n") + "`n"), $noBomUtf8)
 Write-Host ("memory-index: {0} entr{1} -> {2}" -f $files.Count, $(if ($files.Count -eq 1) { 'y' } else { 'ies' }), $readmePath)

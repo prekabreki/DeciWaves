@@ -1,7 +1,8 @@
 """Phase D ordering: catalog.csv + cutscene_tracks.csv + transcript -> ordered playlist.
 
 Pure/deterministic. Applies the Phase D scope filter, subtitle requirement, and within-scene
-dedup (.memories/phase-d-line-selection.md). Narrative order is transcript-anchored where the
+dedup (portable rules extracted to deciwaves.engine.selection; see docs/architecture.md for how
+selection fits the pipeline). Narrative order is transcript-anchored where the
 transcript covers a scene; episode_map heuristics place the rest. Cutscene audio comes from
 whole-scene track rows, not per-line.
 

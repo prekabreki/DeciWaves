@@ -1,4 +1,4 @@
-"""Full 16.7h subtitled-reel assembler (#37) — FW's HZD-scale deliverable.
+"""Full 16.7h subtitled-reel assembler — FW's HZD-scale deliverable.
 
 Ships EVERY exact-subtitled line (subtitle_bind output), ordered by the best
 signal available, rather than the precision-bounded ~6h woven story:
@@ -15,7 +15,7 @@ Matched lines keep their gamescript speaker + quest + tier; every other line
 keeps its exact in-game subtitle (tier "S", no speaker). This is the honest
 HZD-parity-scale reel: ~16.7h, exact labels, near-chronological where the script
 reaches and scene-clustered elsewhere. (Per-line speaker for the unmatched
-majority needs SentenceResource ref resolution — #38.)
+majority needs SentenceResource ref resolution.)
 """
 
 from __future__ import annotations
@@ -102,7 +102,7 @@ def _load_csv(path):
 
 
 def main(argv=None):  # pragma: no cover - integration glue
-    ap = argparse.ArgumentParser(description="FW full 16.7h subtitled reel assembler (#37)")
+    ap = argparse.ArgumentParser(description="FW full 16.7h subtitled reel assembler")
     ap.add_argument("--subtitles", default="out/fw/subtitle-manifest-full.csv")
     ap.add_argument("--anchors", default="out/fw/story-manifest.csv")
     ap.add_argument("--clip-index", default="out/fw/clip-index.csv")

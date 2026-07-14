@@ -41,7 +41,7 @@ def test_classify_unknown_family_is_other():
     ) == ("other", "zzz_mystery/scene")
 
 
-# --- #43: short quest codes (mq/sq/ec/dlc) must anchor on a word boundary so they
+# --- short quest codes (mq/sq/ec/dlc) must anchor on a word boundary so they
 #          don't swallow unrelated segments that merely start with those two/three letters ---
 
 def test_classify_eclipse_not_errand():

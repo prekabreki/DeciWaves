@@ -1,4 +1,4 @@
-"""FW labeled-manifest writer (#34 step 4): transcripts -> matched manifest.
+"""FW labeled-manifest writer (match-binding stage): transcripts -> matched manifest.
 
 Joins the matcher output (`LineBind`) with the clip-index (for each clip's WAV
 path) and the gamescript (for the quest header) into the labeled manifest that
@@ -45,7 +45,7 @@ def _load_csv(path):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="FW match transcripts -> labeled manifest (#34 step 4)")
+    ap = argparse.ArgumentParser(description="FW match transcripts -> labeled manifest")
     ap.add_argument("--transcripts", default="out/fw/transcripts.csv")
     ap.add_argument("--clip-index", default="out/fw/clip-index.csv")
     ap.add_argument("--gamescript", default="docs/forbidden_west_gamescript.md")

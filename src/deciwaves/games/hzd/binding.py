@@ -1,4 +1,4 @@
-"""(A,B) join: structural binds + ASR worklist for ambiguous buckets (#24)."""
+"""(A,B) join: structural binds + ASR worklist for ambiguous buckets."""
 from __future__ import annotations
 from collections import defaultdict
 

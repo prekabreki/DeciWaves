@@ -1,4 +1,4 @@
-"""WhisperX transcription wrapper for HZDR clips (#24). Heavy GPU deps — see requirements-asr.txt."""
+"""WhisperX transcription wrapper for HZDR clips (ASR content-binding pass). Heavy GPU deps — see requirements-asr.txt."""
 from __future__ import annotations
 from dataclasses import dataclass
 
@@ -26,7 +26,7 @@ def _prefer_copy_over_symlink():
 
 def load_model(name="large-v3", device="cuda", compute_type="float16", initial_prompt=None):
     """Load a WhisperX model. ``initial_prompt`` primes decoding with domain proper
-    nouns (FW #33 character roster) to cut name mistranscriptions; passed through
+    nouns (FW character roster) to cut name mistranscriptions; passed through
     faster-whisper's ASR options. None leaves whisperx defaults untouched."""
     _prefer_copy_over_symlink()                       # before whisperx pulls models
     import whisperx                                   # lazy: keep base import light
@@ -61,7 +61,7 @@ def transcribe_segments(wav_path, model, batch_size=16, language="en"):
     """Return the raw WhisperX segment dicts ({"start","end","text",...}) for a
     clip. Unlike ``transcribe`` (which keeps only aggregate speech_ratio), this
     preserves per-segment timing — needed to build keep-spans for cutscene trim
-    (#52). ``language`` defaults to "en" (cutscene VO); None = auto-detect."""
+    (the cutscene speech-region trim). ``language`` defaults to "en" (cutscene VO); None = auto-detect."""
     kw = {"language": language} if language else {}
     result = model.transcribe(_load_audio(wav_path), batch_size=batch_size, **kw)
     return result.get("segments", [])

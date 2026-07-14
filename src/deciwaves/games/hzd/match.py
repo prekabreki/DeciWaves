@@ -1,4 +1,4 @@
-"""Transcript -> candidate-subtitle matching with tiered confidence (#24)."""
+"""Transcript -> candidate-subtitle matching with tiered confidence."""
 from __future__ import annotations
 import re
 from dataclasses import dataclass
@@ -69,7 +69,7 @@ def assign_bucket(lines, clip_rows, transcripts, strong=90.0, margin=8.0):
     # signal first, remainder by exclusion) as tier "E" (inferred, lower confidence).
     #
     # This "by exclusion" inference is only sound when the bucket is whole: with fewer clips
-    # than lines (e.g. a clip was capped/dropped upstream, #41) a surviving mangled clip would
+    # than lines (e.g. a clip was capped/dropped upstream) a surviving mangled clip would
     # be force-bound to a line whose real clip is simply absent -- a fabricated bind. When the
     # bucket is partial, skip elimination and leave the survivors unbound (tier "3").
     if len(clip_rows) < len(lines):

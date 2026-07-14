@@ -1,4 +1,4 @@
-"""Tests for the full 16.7h subtitled-reel assembler (#37).
+"""Tests for the full 16.7h subtitled-reel assembler.
 
 Ships EVERY exact-subtitled line, ordered by the best signal available: anchored
 groups (those containing matched story lines) sit at their gamescript story

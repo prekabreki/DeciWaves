@@ -1,4 +1,4 @@
-"""MVP orchestration for ASR content-binding (#24): decode -> transcribe -> match -> manifest."""
+"""MVP orchestration for ASR content-binding: decode -> transcribe -> match -> manifest."""
 from __future__ import annotations
 import argparse, csv, os, tempfile
 from deciwaves.engine.pack.fw_package import FwPackage
@@ -57,7 +57,7 @@ def main(argv=None):
         relevant.append(grp)
     # Cap at BUCKET granularity, never mid-bucket: assign_bucket resolves a bucket as a whole,
     # so a cap that split a bucket would starve it of clips and (formerly) fabricate binds by
-    # exclusion (#41). Include whole buckets until the cap is reached (may slightly overshoot).
+    # exclusion. Include whole buckets until the cap is reached (may slightly overshoot).
     want = []
     for grp in relevant:
         if a.sample_cap and len(want) >= a.sample_cap:

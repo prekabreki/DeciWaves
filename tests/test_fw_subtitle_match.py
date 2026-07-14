@@ -1,4 +1,4 @@
-"""Tests for the exact-subtitle -> gamescript matcher (#37 story reel).
+"""Tests for the exact-subtitle -> gamescript matcher (story-reel stage).
 
 Matches each gamescript line to the clip whose EXACT in-game subtitle voices it.
 The label is the exact subtitle; speaker / quest / chronological order come from

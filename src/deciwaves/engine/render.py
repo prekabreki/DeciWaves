@@ -18,7 +18,7 @@ BUDGET_SECONDS = 290_000_000 * 8 / 128_000  # = 18125.0 (ideal 128 kbps, no over
 
 # Real MP3s carry ~1.1% over the ideal CBR stream (frame headers + bit
 # reservoir), so packing to BUDGET_SECONDS lands files at ~293 MB -- over the
-# 290 MB buffer (#30). Callers pass budget_seconds() to target a real size.
+# 290 MB buffer. Callers pass budget_seconds() to target a real size.
 MP3_OVERHEAD = 0.011
 
 LINE_GAP = 0.4
@@ -82,7 +82,7 @@ def main_story_only(segs, non_story_cs_groups=frozenset()):
 
 
 def load_keepspans(path):
-    """Map stream_path -> (spans, dropped) from a cutscene-keepspans.csv (#52).
+    """Map stream_path -> (spans, dropped) from a cutscene-keepspans.csv.
     Missing file -> {} (feature simply inactive). `spans` parsed via
     engine.speech_trim.parse_spans; `dropped` is the '1'/'0' flag."""
     import csv as _csv
@@ -179,7 +179,7 @@ def main(argv=None):
                     help="render only the narrative spine (cutscene + mission, "
                          "is_side==0); writes phase_d_main_NN instead of phase_d_NN")
     ap.add_argument("--speech-trim", default="",
-                    help="path to cutscene-keepspans.csv (#52): trim cutscene tracks "
+                    help="path to cutscene-keepspans.csv: trim cutscene tracks "
                          "to spoken regions; drop pure-grunt tracks. Empty = disabled")
     ap.add_argument("--bitrate", type=int, default=DEFAULT_BITRATE_KBPS,
                     help="MP3 CBR bitrate in kbps (drives both encode and the "
@@ -221,7 +221,7 @@ def main(argv=None):
                 continue
             try:
                 wav, dur = audio_clip.clip_wav(idx, s.stream_path, args.cache)
-                if entry:                             # keep-span trim (cutscene, #52)
+                if entry:                             # keep-span trim (cutscene)
                     wav, dur = audio_clip.apply_keep_spans(
                         wav, entry[0], os.path.join(args.cache, "kept"))
                 elif args.min_silence > 0:            # unchanged silencedetect path

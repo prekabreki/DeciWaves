@@ -1,4 +1,4 @@
-"""Stage 1 of DS cutscene speech-region trim (#52): transcribe each resolved
+"""Stage 1 of DS cutscene speech-region trim: transcribe each resolved
 cutscene whole-scene track, derive keep-spans, and write out/cutscene-keepspans.csv.
 
 Runs in the GPU .venv-asr (WhisperX). Resumable (skips streams already in the
@@ -67,7 +67,7 @@ def _append_rows(out_path, results):
 
 def main(argv=None):
     import argparse
-    ap = argparse.ArgumentParser(description="DS cutscene speech-region keep-spans (#52)")
+    ap = argparse.ArgumentParser(description="DS cutscene speech-region keep-spans")
     ap.add_argument("--data-dir", required=True)
     ap.add_argument("--oodle", required=True)
     ap.add_argument("--tracks", default="out/cutscene_tracks.csv")

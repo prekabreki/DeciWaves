@@ -1,6 +1,6 @@
 """Parse HZD Remastered's PackFileLocators.bin: path-hash -> (archive, offset, length).
 
-Layout (little-endian), confirmed in .memories/hzd-resource-format-notes.md:
+Layout (little-endian), confirmed against the retail install; see .memories/hzd-pack-format.md:
     u32 NumPackfiles
     per packfile: u32 NameLength; char Name[NameLength]; u32 NumFiles;
                   NumFiles x { u64 path_hash; u32 offset; u32 length }

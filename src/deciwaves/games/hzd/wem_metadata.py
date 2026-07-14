@@ -1,4 +1,4 @@
-"""Emit per-line (A,B) media metadata and report story-line coverage (#24 gate)."""
+"""Emit per-line (A,B) media metadata and report story-line coverage (the ASR-gate check)."""
 from __future__ import annotations
 import argparse
 import csv
@@ -35,7 +35,7 @@ def coverage_report(metadata_csv: str, catalog_csv: str) -> dict:
         for r in csv.DictReader(f):
             # Defensive .get (mirrors the metadata-side reads above): an older/partial/
             # hand-edited catalog missing these columns degrades to "not story" rather
-            # than crashing the #24 acceptance gate with a KeyError.
+            # than crashing the ASR acceptance gate with a KeyError.
             if r.get("category") == "ambient" or not (r.get("subtitle_en") or "").strip():
                 continue
             story += 1

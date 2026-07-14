@@ -1,10 +1,10 @@
-"""FW ASR pass (#34 step 2): transcribe every extracted clip into a match-key
+"""FW ASR pass (transcript stage): transcribe every extracted clip into a match-key
 transcript cache.
 
 Resumable (skips `line_id`s already cached) and fail-soft (per-clip errors are
 logged, never abort the run; a failed clip is simply absent and retried next
 run). Rows are appended and flushed incrementally so a crash keeps progress.
-The WhisperX model is primed with the #33 character-name roster (`initial_prompt`)
+The WhisperX model is primed with the FW character-name roster (`initial_prompt`)
 to cut name mistranscriptions — see `load_initial_prompt`.
 
 The transcription itself is injected (`transcribe_fn`) so the orchestration is
@@ -104,7 +104,7 @@ def main(argv=None):
 
     from deciwaves.games.hzd import asr
 
-    ap = argparse.ArgumentParser(description="FW ASR transcript pass (#34 step 2)")
+    ap = argparse.ArgumentParser(description="FW ASR transcript pass")
     ap.add_argument("--clip-index", default="out/fw/clip-index.csv")
     ap.add_argument("--audio-root", default="out/fw",
                     help="dir the clip-index 'wav' paths are relative to")
