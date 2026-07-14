@@ -10,6 +10,7 @@ import os
 import sys
 
 import deciwaves._vendor.pydecima.reader as _pydecima_reader
+from deciwaves import data
 from deciwaves.engine.sentence_core import parse_sentences
 from deciwaves.engine.speakers import SpeakerMap
 
@@ -88,7 +89,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--data-dir", required=True)
     ap.add_argument("--oodle", required=True)
-    ap.add_argument("--file-list", default="out/data-file-list.txt")
+    ap.add_argument("--file-list", default=None,
+                    help="DS virtual-path listing; default = packaged ds/data-file-list.txt")
     ap.add_argument("--out", default="out/catalog.csv")
     ap.add_argument("--errors", default="out/catalog-errors.log")
     ap.add_argument("--processed", default="out/catalog-processed.txt")
@@ -99,7 +101,8 @@ def main(argv=None):
 
     _pydecima_reader.set_globals(_decima_version=profile.decima_version)
 
-    file_list_lines = open(args.file_list, encoding="utf-8").read().splitlines()
+    file_list_path = args.file_list if args.file_list is not None else data.packaged("ds/data-file-list.txt")
+    file_list_lines = open(file_list_path, encoding="utf-8").read().splitlines()
     paths = select_core_paths(file_list_lines, profile.core_prefixes)
     # Resume = union of (cores that produced CSV rows) and (cores recorded as processed).
     # The sidecar covers zero-row and hard-failed cores that the CSV cannot represent.

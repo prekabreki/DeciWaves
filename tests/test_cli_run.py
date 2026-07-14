@@ -57,7 +57,6 @@ def _restore_cwd():
 def _ds_outputs(mods):
     return {
         mods["catalog"]: "out/catalog.csv",
-        mods["cutscenes"]: "out/cutscene_tracks.csv",
         mods["order"]: "out/playlist.csv",
         mods["render"]: "out/audio",
     }
@@ -75,7 +74,9 @@ def test_ds_chain_order_and_injection(tmp_path, monkeypatch):
     assert rc == 0
 
     called = [m for m, _ in calls]
-    assert called == [mods["catalog"], mods["cutscenes"], mods["order"], mods["render"]]
+    # "cutscenes" is NOT part of the default chain -- the order stage is fed the
+    # bundled, pre-resolved cutscene tracks instead of regenerating them.
+    assert called == [mods["catalog"], mods["order"], mods["render"]]
 
     expected_data_dir = os.path.join(cfg["ds_install"], "data")
     expected_oodle = os.path.join(cfg["ds_install"], "oo2core_7_win64.dll")
@@ -85,11 +86,10 @@ def test_ds_chain_order_and_injection(tmp_path, monkeypatch):
     assert _after(catalog_argv, "--oodle") == expected_oodle
     assert _after(catalog_argv, "--file-list") == str(Path("/pkg/ds/data-file-list.txt"))
 
-    cutscenes_argv = calls[1][1]
-    assert _after(cutscenes_argv, "--data-dir") == expected_data_dir
-    assert _after(cutscenes_argv, "--oodle") == expected_oodle
+    order_argv = calls[1][1]
+    assert _after(order_argv, "--cutscene-tracks") == str(Path("/pkg/ds/cutscene_tracks.csv"))
 
-    render_argv = calls[3][1]
+    render_argv = calls[2][1]
     assert _after(render_argv, "--data-dir") == expected_data_dir
     assert _after(render_argv, "--oodle") == expected_oodle
     assert "--main-story" in render_argv
@@ -112,7 +112,7 @@ def test_ds_resume_skips_existing_stage(tmp_path, monkeypatch, capsys):
 
     called = [m for m, _ in calls]
     assert mods["catalog"] not in called
-    assert called == [mods["cutscenes"], mods["order"], mods["render"]]
+    assert called == [mods["order"], mods["render"]]
 
     out = capsys.readouterr().out
     assert "skip catalog (out/catalog.csv exists — delete it to re-run)" in out
@@ -126,10 +126,18 @@ def test_ds_missing_config_errors(tmp_path, monkeypatch, capsys):
 
 
 def test_ds_catalog_missing_packaged_file_list_is_soft_failure(tmp_path, monkeypatch, capsys):
-    # Real data.packaged() -- ds/data-file-list.txt genuinely isn't bundled yet in this repo.
+    # ds/data-file-list.txt is bundled in this repo now (Task 5); simulate an older
+    # build that predates it by monkeypatching packaged() to raise for it specifically.
     monkeypatch.chdir(tmp_path)
     calls = []
     monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, {}))
+
+    def _packaged_side_effect(rel):
+        if "data-file-list" in rel:
+            raise FileNotFoundError(rel)
+        return Path(f"/pkg/{rel}")
+
+    monkeypatch.setattr(run_mod.data, "packaged", _packaged_side_effect)
 
     rc = run_mod.run_game("ds", {"ds_install": "X"}, [])
     assert rc == 1
@@ -138,6 +146,31 @@ def test_ds_catalog_missing_packaged_file_list_is_soft_failure(tmp_path, monkeyp
     out = capsys.readouterr().out
     assert "data-file-list" in out
     assert "--file-list" in out
+
+
+def test_ds_order_missing_packaged_cutscene_tracks_is_soft_failure(tmp_path, monkeypatch, capsys):
+    # Simulate an older build that predates the bundled ds/cutscene_tracks.csv.
+    monkeypatch.chdir(tmp_path)
+    mods = _mods("ds")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _ds_outputs(mods)))
+
+    def _packaged_side_effect(rel):
+        if "cutscene_tracks" in rel:
+            raise FileNotFoundError(rel)
+        return Path(f"/pkg/{rel}")
+
+    monkeypatch.setattr(run_mod.data, "packaged", _packaged_side_effect)
+
+    rc = run_mod.run_game("ds", {"ds_install": "X"}, [])
+    assert rc == 1
+    # order/render mains never invoked -- failed at stage config (before dispatch)
+    # But catalog should have run first.
+    assert [m for m, _ in calls] == [mods["catalog"]]
+
+    out = capsys.readouterr().out
+    assert "cutscene_tracks" in out
+    assert "--cutscene-tracks" in out
 
 
 def test_ds_render_missing_packaged_keepspans_is_soft_failure(tmp_path, monkeypatch, capsys):
@@ -157,7 +190,7 @@ def test_ds_render_missing_packaged_keepspans_is_soft_failure(tmp_path, monkeypa
     rc = run_mod.run_game("ds", {"ds_install": "X"}, [])
     assert rc == 1
     # render main never invoked -- failed at stage config (before dispatch)
-    # But earlier stages (catalog, cutscenes, order) should have run
+    # But earlier stages (catalog, order) should have run
     assert mods["render"] not in [m for m, _ in calls]
 
     out = capsys.readouterr().out
