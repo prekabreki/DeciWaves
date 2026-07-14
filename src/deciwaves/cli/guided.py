@@ -64,21 +64,27 @@ def _print_banner(found: dict) -> None:
     print(f"DeciWaves {__version__} -- found: " + "  ".join(parts))
 
 
-def _prompt_game(found: dict) -> str:
+def _prompt_game(found: dict) -> str | None:
     print("Which game do you want to extract?")
     for i, (key, label, _abbrev, gpu_note) in enumerate(_GAMES, start=1):
         suffix = "" if found[key] else "  [not configured]"
         print(f"  {i}) {label} ({gpu_note}){suffix}")
 
     while True:
-        raw = input("> ").strip()
+        try:
+            raw = input("> ").strip()
+        except EOFError:
+            return None
         if raw in ("1", "2", "3"):
             return _GAMES[int(raw) - 1][0]
         print("Please enter 1, 2, or 3.")
 
 
-def _prompt_workspace(default_ws: str) -> str:
-    raw = input(f"Workspace [{default_ws}]: ").strip()
+def _prompt_workspace(default_ws: str) -> str | None:
+    try:
+        raw = input(f"Workspace [{default_ws}]: ").strip()
+    except EOFError:
+        return None
     return raw or default_ws
 
 
@@ -92,6 +98,9 @@ def run_guided(cfg: dict) -> int:
     _print_banner(found)
 
     game = _prompt_game(found)
+    if game is None:
+        print(_usage_message())
+        return 2
     if not found[game]:
         label = next(label for key, label, _abbrev, _gpu in _GAMES if key == game)
         print(f"{label} isn't set up yet -- run `deciwaves setup` first.")
@@ -99,6 +108,9 @@ def run_guided(cfg: dict) -> int:
 
     default_ws = str(Path.cwd())
     workspace = _prompt_workspace(default_ws)
+    if workspace is None:
+        print(_usage_message())
+        return 2
 
     ws = Path(workspace).resolve()
     ws.mkdir(parents=True, exist_ok=True)

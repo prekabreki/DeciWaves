@@ -47,6 +47,24 @@ def test_non_tty_never_calls_input_and_prints_usage(monkeypatch, capsys):
     assert "deciwaves" in out.lower()
 
 
+def test_eoferror_in_game_selection_prints_usage(monkeypatch, capsys):
+    """Regression test: EOFError from input() (e.g., deciwaves < NUL on Windows)
+    must be caught and handled like non-TTY, not propagate as a traceback.
+    """
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+
+    def _raise_eof(prompt=""):
+        raise EOFError("EOF when reading a line")
+
+    monkeypatch.setattr("builtins.input", _raise_eof)
+
+    rc = guided.run_guided({})
+    assert rc == 2  # same exit code as non-TTY case
+    out = capsys.readouterr().out
+    assert "deciwaves" in out.lower()
+    assert "no subcommand" in out.lower()
+
+
 def test_selects_game_and_dispatches_with_default_workspace(monkeypatch, tmp_path):
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.chdir(tmp_path)
