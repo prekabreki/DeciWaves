@@ -1,4 +1,5 @@
 import math
+import os
 import shutil
 import struct
 import wave
@@ -11,6 +12,10 @@ from conftest import require_install, DATA_DIR, OODLE_DLL  # noqa: F401
 needs_ffmpeg = pytest.mark.skipif(
     shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None,
     reason="ffmpeg/ffprobe not installed")
+
+needs_vgmstream = pytest.mark.skipif(
+    not (os.environ.get("DECIWAVES_VGMSTREAM") or shutil.which("vgmstream-cli")),
+    reason="vgmstream-cli not found")
 
 
 def _synth(path, segments, sr=48000):
@@ -53,6 +58,7 @@ def test_wav_duration_seconds(tmp_path):
     assert abs(ac.wav_duration_seconds(str(p)) - 1.0) < 1e-6
 
 
+@needs_vgmstream
 def test_clip_wav_decodes_one_real_line(require_install, tmp_path):
     from deciwaves.engine.pack.bin_index import PackIndex
     idx = PackIndex(str(DATA_DIR), str(OODLE_DLL))
