@@ -29,6 +29,10 @@ __pycache__/
 venv/
 *.egg-info/
 
+# Build artifacts (python -m build output: sdist + wheel)
+/dist/
+/build/
+
 # Runtime-binding autodump artifacts (multi-GB dumps + scan outputs stay out of git)
 hzd_dumps/
 *.dmp
