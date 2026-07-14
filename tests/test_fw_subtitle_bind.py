@@ -1,4 +1,4 @@
-"""Unit tests for the FW subtitle fast-path binder (#37).
+"""Unit tests for the FW subtitle fast-path binder.
 
 The pure logic — markup cleaning, within-group ASR<->subtitle assignment, and
 manifest row building — is install-independent and tested here. The graph/scan

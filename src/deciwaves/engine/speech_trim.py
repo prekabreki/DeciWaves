@@ -1,4 +1,4 @@
-"""Pure speech-region keep-span logic for cutscene trim (#52). No ffmpeg/whisperx.
+"""Pure speech-region keep-span logic for cutscene trim. No ffmpeg/whisperx.
 
 Given WhisperX speech segments for a cutscene whole-scene track, produce the
 padded/merged intervals to KEEP (dropping grunt-after-grunt / dead-air between

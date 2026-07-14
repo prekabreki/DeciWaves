@@ -41,7 +41,7 @@ def test_classify_unknown_family_is_other():
     ) == ("other", "zzz_mystery/scene")
 
 
-# --- #43: short quest codes (mq/sq/ec/dlc) must anchor on a word boundary so they
+# --- short quest codes (mq/sq/ec/dlc) must anchor on a word boundary so they
 #          don't swallow unrelated segments that merely start with those two/three letters ---
 
 def test_classify_eclipse_not_errand():
@@ -108,5 +108,5 @@ def test_build_profile_fields():
     p = build_profile(package_dir=None)
     assert p.name == "hzd"
     assert p.out_dir == "out/hzd"
-    assert p.transcript_path.endswith("zero_dawn_gamescript.md")
+    assert p.transcript_path == ""  # disabled by default; BYO transcript via --transcript
     assert p.pack_reader is None  # None when package_dir not given

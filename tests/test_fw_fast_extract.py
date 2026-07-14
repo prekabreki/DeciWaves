@@ -1,4 +1,4 @@
-"""Fast-path English-audio resolver (#32): arithmetic locator pairing for
+"""Fast-path English-audio resolver: arithmetic locator pairing for
 "arithmetically clean" groups (locator_count == 12*lssr_count), sidestepping the
 object walk. Validated against the walk-based GroupReader oracle and against the
 exact retail line count. Skips when the FW install / odradek types.json is absent.

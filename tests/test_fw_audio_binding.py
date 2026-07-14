@@ -1,6 +1,6 @@
 """Milestone-1 proof: a Forbidden West dialogue line resolves end-to-end to its
 English audio via ``streaming_graph.core`` alone — the binding HZD Remastered
-could not do (no streaming graph; see .memories/fw-ships-streaming-graph.md).
+could not do (no streaming graph; see .memories/fw-streaming-graph.md).
 
 The rigorous tie is a double cross-check against the resource's own inline
 fields, read from the group's serialized span:

@@ -1,4 +1,4 @@
-"""Exact-subtitle -> gamescript matcher (#37 story reel).
+"""Exact-subtitle -> gamescript matcher (story-reel stage).
 
 The subtitle fast-path (`subtitle_bind`) gives every voiced line its EXACT
 in-game English subtitle, but mixed in with barks/ambient/variant lines. The
@@ -137,7 +137,7 @@ def main(argv=None):  # pragma: no cover - integration glue
     from deciwaves.games.fw.gamescript import parse_file
 
     ap = argparse.ArgumentParser(
-        description="FW exact-subtitle -> gamescript story matcher (#37)")
+        description="FW exact-subtitle -> gamescript story matcher")
     ap.add_argument("--manifest", default="out/fw/subtitle-manifest-full.csv",
                     help="subtitle_bind output (exact in-game subtitles)")
     ap.add_argument("--gamescript", default="docs/forbidden_west_gamescript.md")

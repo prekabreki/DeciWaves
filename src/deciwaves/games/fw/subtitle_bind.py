@@ -1,11 +1,11 @@
-"""FW subtitle fast-path binder (#37): label clips with their EXACT in-game
+"""FW subtitle fast-path binder: label clips with their EXACT in-game
 English subtitle instead of an ASR<->web-script paraphrase.
 
 Every arith-clean dialogue group carries a ``LocalizedTextResource`` per line
 (English = index 0). Those subtitles match the audio near-verbatim, BUT their
 on-disk order is decoupled from the audio (LSSR) order — so we cannot take the
-k-th subtitle as the k-th clip's label (spike #37; see
-``.memories/fw-subtitle-fastpath-spike.md``). Instead we recover the pairing
+k-th subtitle as the k-th clip's label (see
+``.memories/fw-subtitle-binding.md``). Instead we recover the pairing
 WITHIN each group by a greedy ASR<->subtitle assignment: a tiny, high-precision
 local match (mean ~96%), not the lossy global match against the 6,860-line web
 gamescript. The label is the game's exact text; ASR only disambiguates which
@@ -14,7 +14,7 @@ clip each subtitle belongs to.
 This gives an exact subtitle per clip for the ~10k cleanly-subtitled lines and
 auto-culls barks (which carry no subtitle). It does NOT give speaker — that is a
 follow-on (match the exact subtitle to the gamescript, or resolve
-``SentenceResource`` refs via the link table, #38).
+``SentenceResource`` refs via the link table).
 
 Output uses the same manifest schema as ``bind.py`` so ``render.py`` consumes it
 unchanged (tier ``"S"``).
@@ -119,11 +119,11 @@ def scan_arith_clean_groups(graph, reader, store, transcripts_by_id,
                             en_indices=None, max_objects=None, limit=None):
     """Yield ``{group_id, clips, subtitles}`` for every arith-clean EN group the
     reader can scan. ``transcripts_by_id``: line_id -> transcript str. Fail-soft:
-    a group whose scan raises (rare unhandled MsgReadBinary type, #38) is skipped.
+    a group whose scan raises (rare unhandled MsgReadBinary type) is skipped.
 
     ``limit`` stops after that many groups are yielded (review/sample runs);
     ``max_objects`` skips groups bigger than N objects (the pure-Python walk is
-    slow on the giant bark banks — perf blocker #38).
+    slow on the giant bark banks and is the throughput bottleneck there).
     """
     from deciwaves.engine.pack.fw_rtti import type_hash
     from deciwaves.engine.pack.fw_object_reader import read_group_spans
@@ -176,7 +176,7 @@ def _load_csv(path):
 
 
 def main(argv=None):  # pragma: no cover - integration glue
-    ap = argparse.ArgumentParser(description="FW subtitle fast-path manifest (#37)")
+    ap = argparse.ArgumentParser(description="FW subtitle fast-path manifest")
     ap.add_argument("--package-dir", required=True,
                     help="FW LocalCacheWinGame/package dir")
     ap.add_argument("--types-json",

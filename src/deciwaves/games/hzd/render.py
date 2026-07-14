@@ -1,4 +1,4 @@
-"""HZD #20 render: asr-manifest.csv -> ordered main-quest MP3 reel (<=290 MB files).
+"""HZD render: asr-manifest.csv -> ordered main-quest MP3 reel (<=290 MB files).
 
 Main-quest spine only: bound story lines whose scene is a main quest (`mq##`), ordered
 by quest number then in-scene line_index. Quests sort cleanly into canonical story order
@@ -28,7 +28,7 @@ from deciwaves.engine.pack.fw_package import FwPackage
 from deciwaves.games.hzd.atrac9 import decode_wem_to_wav, Atrac9Error
 
 ARCHIVE = "package.01.00.core.stream"
-BOUND_TIERS = {"S", "1", "2", "E"}   # E = recovered by bucket elimination (#24 mis-bind fix)
+BOUND_TIERS = {"S", "1", "2", "E"}   # E = recovered by bucket elimination (mis-bind fix)
 
 
 @dataclass

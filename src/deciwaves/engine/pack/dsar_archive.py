@@ -3,7 +3,7 @@
 DSAR is the Decima Forbidden-West streaming archive: a 32-byte header, a table of
 32-byte chunk descriptors, then LZ4-block-compressed chunk data. A logical (uncompressed)
 offset is mapped to the chunk whose uncompressed range covers it; chunks are decompressed
-and sliced. Format confirmed in .memories/hzd-resource-format-notes.md. Little-endian.
+and sliced. Format confirmed against the retail install; see .memories/hzd-pack-format.md. Little-endian.
 """
 from __future__ import annotations
 import struct

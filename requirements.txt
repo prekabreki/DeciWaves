@@ -5,9 +5,9 @@
 # vendor/ (gitignored, fetched by setup) and installed editable, then patched for DS:DC:
 #     pip install -e ./vendor/pydecima
 #     git apply patches/pydecima-dspc.patch        # if not already applied to the vendor copy
-# See .memories/toolchain-setup.md. Packaging this as a pinned/submodule dep so a fresh
+# Packaging this as a pinned/submodule dep so a fresh
 # `pip install -r requirements.txt` yields an importable DS engine is tracked as a follow-up.
 #
 lz4>=4.0    # DSAR chunk decompression for HZD Remastered (engine/pack/dsar_archive.py)
 numpy>=1.24 # fast key-set scan over multi-GB memory dumps (tools/hzd_memscan.py; pure-Python fallback exists)
-rapidfuzz>=3.0   # fuzzy text matching for ASR content-binding (#24)
+rapidfuzz>=3.0   # fuzzy text matching for the ASR content-binding pass

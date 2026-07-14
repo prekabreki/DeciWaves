@@ -1,4 +1,4 @@
-"""FW comprehensive bulk reel (#34 hybrid): ASR-label ALL base clips.
+"""FW comprehensive bulk reel (hybrid ASR-labeling mode): ASR-label ALL base clips.
 
 The gamescript only cleanly labels ~1-2.5h (see match_lines); the rest of FW's
 ~37h of voice has no script home. The hybrid deliverable pairs the precise story
@@ -52,7 +52,7 @@ def _load_csv(path):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="FW comprehensive ASR-labeled bulk manifest (#34 hybrid)")
+    ap = argparse.ArgumentParser(description="FW comprehensive ASR-labeled bulk manifest (hybrid mode)")
     ap.add_argument("--clip-index", default="out/fw/clip-index.csv")
     ap.add_argument("--transcripts", default="out/fw/transcripts.csv")
     ap.add_argument("--exclude-manifest", default="out/fw/asr-manifest.csv",

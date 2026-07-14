@@ -77,7 +77,7 @@ def done_core_paths(csv_path):
 def processed_core_paths(processed_path):
     """Cores that reached a terminal outcome (rows, zero-rows, OR hard-failure). Unlike the CSV,
     this also records cores that parsed to zero rows or failed -- which leave no CSV row and
-    would otherwise silently re-run every invocation (issue #3)."""
+    would otherwise silently re-run every invocation)."""
     if not os.path.isfile(processed_path):
         return set()
     with open(processed_path, "r", encoding="utf-8") as f:

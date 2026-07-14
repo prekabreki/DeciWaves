@@ -2,13 +2,14 @@
 
 HZDR's PackFileLocators.bin exposes only path-*hashes*, not path strings, so we cannot
 enumerate sentence cores by name directly. But `.core` bodies embed readable
-length-prefixed virtual-path strings (see .memories/hzd-sentence-resource-format.md), so
-we recover the paths by scanning core bodies for `localized/sentences/...` substrings.
+length-prefixed virtual-path strings (an FW-engine-era resource trait), so we recover the
+paths by scanning core bodies for `localized/sentences/...` substrings. See
+docs/architecture.md for how this fits the HZD extraction pipeline.
 
 Coverage caveat: this finds every sentence-core path that is embedded as a string in some
 core (sentence cores are referenced by higher-level cores). A core addressed *only* by
 hash, with its path string nowhere embedded, would be missed -- the best achievable without
-an external path-list (odradek cannot open HZDR; see .memories/hzd-audio-resolution-odradek.md).
+an external path-list (odradek, the community HFW/DS2 RE tool, has no HZD Remastered support).
 """
 from __future__ import annotations
 import re

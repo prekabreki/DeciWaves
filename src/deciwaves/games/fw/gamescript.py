@@ -3,7 +3,7 @@
 The gamescript is HTML-scraped prose: one `Speaker: text` line per spoken
 line, `[stage directions]` in brackets, ALL-CAPS quest/section headers, and
 preamble cruft at the top. This yields ordered `(index, speaker, text)` records
-that serve triple duty downstream (#34): speaker + subtitle + story position for
+that serve triple duty downstream: speaker + subtitle + story position for
 each ASR-matched clip.
 """
 

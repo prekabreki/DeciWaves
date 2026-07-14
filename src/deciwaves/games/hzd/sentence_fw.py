@@ -2,7 +2,7 @@
 voice-line rows.
 
 HZD diverges from DS in two ways that rule out the pydecima DS path
-(see .memories/hzd-sentence-resource-format.md):
+(see .memories/hzd-structural-binding.md):
 
 * Sentence cores are **flat** — a list of SentenceResource/Sound/Text objects with
   **no SentenceGroupResource** (the group lives in a separate higher-level core).

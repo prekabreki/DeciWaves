@@ -85,7 +85,7 @@ def test_processed_core_paths(tmp_path):
 
 
 def test_resume_covers_zero_row_and_failed_cores(tmp_path):
-    # Issue #3: a core that parsed to zero rows (or hard-failed) writes no CSV row, so the
+    # A core that parsed to zero rows (or hard-failed) writes no CSV row, so the
     # CSV alone re-runs it forever. The sidecar records it; the union marks it done.
     csv_path = tmp_path / "catalog.csv"
     with open(csv_path, "w", newline="", encoding="utf-8") as f:

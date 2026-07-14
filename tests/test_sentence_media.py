@@ -148,7 +148,7 @@ def test_coverage_report_counts(tmp_path):
 
 def test_coverage_report_tolerates_catalog_missing_columns(tmp_path):
     """A partial/older/hand-edited catalog missing the category or subtitle_en column
-    must degrade to 'not story' rather than crashing the #24 gate with a KeyError."""
+    must degrade to 'not story' rather than crashing the ASR-gate check with a KeyError."""
     meta = tmp_path / "wem-metadata.csv"
     meta.write_text("line_id,a_bytes,b_samples\nL1,100,530\n")
     cat = tmp_path / "catalog.csv"

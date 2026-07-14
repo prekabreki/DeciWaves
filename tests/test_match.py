@@ -101,7 +101,7 @@ def test_assign_bucket_no_double_assignment():
 def test_assign_bucket_partial_bucket_skips_elimination():
     """Partial bucket (a clip was capped/dropped upstream): with fewer clips than lines the
     'remaining clips ARE the remaining lines' assumption is false. Elimination must NOT
-    force-bind a surviving clip to a line whose real clip is absent (#41). The mangled
+    force-bind a surviving clip to a line whose real clip is absent. The mangled
     survivor is left unbound rather than fabricating a confident-looking bind."""
     lines = [{"line_id": "L1", "subtitle_en": "open the gate"},
              {"line_id": "L2", "subtitle_en": "close the door slowly"}]
@@ -112,7 +112,7 @@ def test_assign_bucket_partial_bucket_skips_elimination():
 
 def test_assign_bucket_partial_bucket_still_binds_confident():
     """The partial-bucket guard suppresses only by-exclusion pairing, not genuine matches:
-    a strong unique match is still bound even when clips < lines (#41)."""
+    a strong unique match is still bound even when clips < lines."""
     lines = [{"line_id": "L1", "subtitle_en": "open the gate"},
              {"line_id": "L2", "subtitle_en": "close the door slowly"}]
     transcripts = {"c1": "open the gate"}     # strong, unique match to L1

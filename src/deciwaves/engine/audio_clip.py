@@ -2,7 +2,7 @@
 
 Universal trim: a Decima `.core.stream` carries trailing bytes past the declared RIFF size;
 vgmstream rejects it until trimmed to u32(data[4:8]) + 8
-(.memories/cutscene-audio-per-scene-voice-track.md).
+(see .memories/ds-cutscene-audio.md).
 """
 from __future__ import annotations
 
@@ -65,7 +65,7 @@ def trim_long_silences(src, cache_dir, min_silence=10.0, threshold_db=-30.0, kee
     """
     # Cache key folds the trim params: a different min_silence/threshold_db/keep is a
     # different result, so changing them must miss the cache instead of returning the stale
-    # trim (and its wrong duration) from a prior run (#42). Check BEFORE the ffmpeg
+    # trim (and its wrong duration) from a prior run. Check BEFORE the ffmpeg
     # silencedetect pass so a cache hit costs nothing to decode.
     os.makedirs(cache_dir, exist_ok=True)
     stem, ext = os.path.splitext(os.path.basename(src))
@@ -113,9 +113,9 @@ def _atrim_concat(src, keeps, dst):
 
 def apply_keep_spans(src, spans, cache_dir):
     """Trim `src` to the union of `spans` ([(start, end), ...] seconds), the
-    speech-region keep-spans from cutscene trim (#52). Returns (path, duration).
+    speech-region keep-spans from cutscene trim. Returns (path, duration).
     Cache key folds the spans so a different span set misses the cache instead of
-    returning a stale trim (#42 contract). Empty `spans` is a caller bug (dropped
+    returning a stale trim. Empty `spans` is a caller bug (dropped
     tracks are skipped upstream) -> ClipError."""
     if not spans:
         raise ClipError(f"apply_keep_spans called with no spans for {src}")

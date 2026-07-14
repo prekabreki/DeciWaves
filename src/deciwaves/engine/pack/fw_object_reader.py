@@ -192,7 +192,7 @@ class GroupReader:
         """Reject an implausible container count: every item consumes at least
         one byte, so a count larger than the bytes remaining in the span means
         the walk has desynced. Raise (caught fail-soft) rather than loop billions
-        of times on a misread u32 (see #38 / the g61935 hang)."""
+        of times on a misread u32 (seen as the g61935 hang)."""
         if count > cur.end - cur.p:
             raise ValueError(f"implausible container count {count} "
                              f"(> {cur.end - cur.p} bytes left) -> walk desync")

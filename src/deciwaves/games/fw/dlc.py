@@ -1,4 +1,4 @@
-"""FW Burning Shores DLC reel (#34): label DLC clips from ASR text only.
+"""FW Burning Shores DLC reel: label DLC clips from ASR text only.
 
 No gamescript covers the DLC (it predates Burning Shores, and no transcript exists
 online), so DLC clips can't be matched/attributed. Instead we ship them as a
@@ -65,7 +65,7 @@ def _load_csv(path):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="FW DLC ASR-labeled manifest (#34)")
+    ap = argparse.ArgumentParser(description="FW DLC ASR-labeled manifest")
     ap.add_argument("--clip-index", default="out/fw/clip-index.csv")
     ap.add_argument("--transcripts", default="out/fw/transcripts.csv")
     ap.add_argument("--out", default="out/fw/dlc-manifest.csv")

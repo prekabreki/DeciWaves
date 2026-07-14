@@ -1,0 +1,17 @@
+#!/bin/sh
+# Keep .memories/README.md in sync with memory frontmatter.
+# Fires only when this commit touches .memories/ (excluding the generated index), so
+# unrelated commits stay fast. Regenerates the index and stages it.
+changed=$(git diff --cached --name-only -- .memories/ ':(exclude).memories/README.md')
+if [ -n "$changed" ]; then
+  repo_root=$(git rev-parse --show-toplevel)
+  if command -v powershell >/dev/null 2>&1; then
+    powershell -NoProfile -ExecutionPolicy Bypass -File "$repo_root/tools/memory-index.ps1" || exit 1
+  elif command -v pwsh >/dev/null 2>&1; then
+    pwsh -NoProfile -File "$repo_root/tools/memory-index.ps1" || exit 1
+  else
+    echo "pre-commit: PowerShell not found; skipping .memories index refresh." >&2
+    exit 0
+  fi
+  git add "$repo_root/.memories/README.md"
+fi

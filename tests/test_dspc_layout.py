@@ -1,5 +1,5 @@
 """Regression tests for the DS:DC (DSPC) LocalizedTextResource + SentenceGroupResource
-byte layouts (issue #2). Synthetic objects only -- no game data, fully deterministic.
+byte layouts. Synthetic objects only -- no game data, fully deterministic.
 
 Both parsers used to abort the whole core on a layout mismatch:
   * LocalizedTextResource read a fixed 25 strings with a fixed 3 trailing bytes each, which

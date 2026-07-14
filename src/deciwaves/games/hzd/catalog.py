@@ -51,7 +51,7 @@ def classify_hzd(core_path: str, family_prefixes: dict | None = None) -> tuple[s
         if not first.startswith(pref):
             continue
         # Short quest codes (mq/sq/ec/dlc) must anchor on a word boundary: the char after
-        # the code must not be a letter, else "eclipse"/"square"/"mqueen" get swallowed (#43).
+        # the code must not be a letter, else "eclipse"/"square"/"mqueen" get swallowed.
         # Word-stem prefixes (collectab/aigenerated/shops) keep plain substring matching.
         if pref in HZD_ANCHORED_PREFIXES:
             rest = first[len(pref):]

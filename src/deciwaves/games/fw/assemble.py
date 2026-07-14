@@ -1,4 +1,4 @@
-"""Assemble the continuous FW deliverable (#34): woven story + DLC epilogue.
+"""Assemble the continuous FW deliverable: woven story + DLC epilogue.
 
 Concatenates manifests in the given order into one stream, re-ranking
 `gamescript_index` continuously so a single render produces "one long MP3" — the

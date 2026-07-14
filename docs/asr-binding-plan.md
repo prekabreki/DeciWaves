@@ -1,8 +1,8 @@
-# ASR binding plan: name the clips by content (issue #24)
+# ASR binding plan: name the clips by content
 
 **Status:** proposed (2026-06-26). An **offline, content-based** alternative to cracking the
-structural `hi32` line→stream binding (`.memories/hzd-audio-gate.md`; runtime route #22/#15,
-`docs/runtime-binding-plan.md`). Instead of recovering *which slot* a clip sits in, we recover
+structural `hi32` line→stream binding (see `docs/runtime-binding-plan.md`). Instead of recovering
+*which slot* a clip sits in, we recover
 *what a clip says* and match that to a subtitle we already have.
 
 ## What this issue is, precisely
@@ -11,12 +11,12 @@ Two linkings get a labeled, chronological reel; they use different inputs and li
 issues:
 
 1. **Identity — WAV → which catalog line it is** (speaker + subtitle + scene). This is the hard
-   part — the binding `hi32` would have given us structurally. **This is all #24 does.**
+   part — the binding `hi32` would have given us structurally. **This is all this pass does.**
 2. **Order — catalog line → chronological position.** Inherited from the matched line's scene
    code + gamescript (`docs/zero_dawn_gamescript.md`); **not** re-derived from audio. **That is
-   #20** (manifest → ordered, silence-trimmed, rendered MP3 reel).
+   the ordering + render stage** (manifest → ordered, silence-trimmed, rendered MP3 reel).
 
-So #24 succeeds iff the **identity** match is good. Its deliverable is an **augmented manifest**
+So this pass succeeds iff the **identity** match is good. Its deliverable is an **augmented manifest**
 (`clip → line_id (+ speaker, subtitle, scene) + confidence tier`), not the MP3s.
 
 ## Why it's credible
@@ -27,7 +27,7 @@ So #24 succeeds iff the **identity** match is good. Its deliverable is an **augm
   that collide by text ("Yes." / "Over here!") are the generic low-value ones.
 - Non-speech clips (grunts, effort VO, the baby-cooing oracle) fail to match and drop out —
   which is correct.
-- **Complementary to #15/#22:** if `hi32` is later cracked, ASR matches are a free cross-check,
+- **Complementary to the runtime-binding route:** if `hi32` is later cracked, ASR matches are a free cross-check,
   and vice-versa.
 
 ## The spine: hybrid `(A,B)` prefilter + ASR text-match
@@ -41,7 +41,7 @@ Each catalog line's SENTENCE resource exposes:
 - **A** = exact encoded ATRAC9 byte-length (== the locator `length`).
 - **B** = exact decoded sample-count (== vgmstream `SampleCount`).
 
-Both were confirmed 1-in-millions against the oracle stream (`.memories/hzd-audio-gate.md`).
+Both were confirmed 1-in-millions against the oracle stream (see `.memories/hzd-structural-binding.md`).
 Every *extracted clip* also has an observed `(A, B)`. So a clip and a line either match on
 `(A, B)` to the byte/sample, or they don't. This is a **join key**, not a "skip short clips"
 threshold — nothing is dropped for being short.
@@ -72,7 +72,7 @@ Extraction needs **no binding** — `package.01.00.core.stream` has ~67,853 entr
 English slot), ≈ one clip per line. Clips are per-line (a long clip is one long line, not a scene
 with dead air), so there is no "long cutscene, bit of talking" case to gate around.
 
-## VAD / energy gate (in #24 — triage + confidence, NOT trimming)
+## VAD / energy gate (triage + confidence, NOT trimming)
 
 - WhisperX runs VAD internally, so it already ignores silence when transcribing — we do **not**
   need a dB gate to get a clean transcript, and a crude -40 dB cut could clip quiet speech onsets.
@@ -80,12 +80,12 @@ with dead air), so there is no "long cutscene, bit of talking" case to gate arou
   energy skip ASR entirely (real compute saved over 67k clips) and auto-bucket as non-speech.
 - The speech-to-total ratio rides along as a **confidence feature** (90%-speech match > 0.3s-blip
   match).
-- **Silence *trimming* for clean output is deferred to #20** (ffmpeg `silenceremove` + loudness
+- **Silence *trimming* for clean output is deferred to the render stage** (ffmpeg `silenceremove` + loudness
   normalization on the final MP3s).
 
 ## Compute / ASR engine
 
-- **WhisperX + `large-v3` on the local RTX 3060 12GB.** `large-v3` fp16 fits with headroom;
+- **WhisperX + `large-v3` on a 12GB-class consumer GPU.** `large-v3` fp16 fits with headroom;
   faster-whisper (CTranslate2) int8/float16 is lighter still and leaves room for batching.
   WhisperX adds batched inference + VAD (doubles as the triage gate) + word-level timestamps.
 - ~67k short clips ≈ an overnight run, not multi-day. CPU-only would be an order of magnitude
@@ -115,7 +115,7 @@ baby-cooing, no speech. Bootstrap a spoken anchor instead: extract a small batch
 
 **Exit gate:** coverage on the ~9,366 story-usable lines — what % land in Tier 1 — with precision
 estimated from a hand-checked sample of ~30–50 bound clips. High coverage ⇒ this may reach the
-deliverable faster than the runtime instrument (#22).
+deliverable faster than the runtime instrument.
 
 ## Sequencing (MVP before the overnight run)
 
@@ -124,7 +124,7 @@ deliverable faster than the runtime instrument (#22).
    rapidfuzz match → eyeball. Bootstrap + confirm a spoken oracle here.
 3. Tune thresholds against a hand-checked sample.
 4. Full overnight run over all ~67,853 package.01 clips → augmented manifest.
-5. Hand off the manifest to #20 for ordering + render.
+5. Hand off the manifest for ordering + render.
 
 ## Risks / open questions
 
@@ -136,4 +136,5 @@ deliverable faster than the runtime instrument (#22).
   low-confidence matches.
 - **Disk:** stream extract → ASR per clip to avoid tens of GB of WAV resident at once.
 
-Relates: #15 (the binding), #20 (order + render), #22 (runtime RE), #23 (positional order test).
+Relates to: the runtime line→stream binding, the ordering + render stage, the runtime
+reverse-engineering route, and the positional-order test.

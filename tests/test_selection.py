@@ -1,6 +1,7 @@
 """Tests for engine.selection.filter_and_dedup — the portable creative rules.
 
-Rules (source of truth: .memories/phase-d-line-selection.md):
+Rules (source of truth: deciwaves.engine.selection; see docs/architecture.md for how selection
+fits the pipeline):
   (a) Require non-empty subtitle_en (drop empty/whitespace-only/placeholder rows).
   (b) Require non-empty wem_path_en (prevents degenerate ".core.stream" with no audio).
   (c) Within-scene exact (speaker_name, subtitle_en) dedup — keep first, drop rest.

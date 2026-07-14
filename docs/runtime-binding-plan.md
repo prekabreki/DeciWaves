@@ -1,6 +1,6 @@
-# Runtime plan: recover the line → stream binding (issue #15 / #22)
+# Runtime plan: recover the line → stream binding
 
-**Status:** static routes exhausted (see `.memories/hzd-audio-gate.md`, Session 3). No on-disk
+**Status:** static routes exhausted (see the oracle and DirectStorage findings below). No on-disk
 table maps a resource to its stream key; HFW's resolver is positional over a `streaming_graph.core`
 that HZDR does not ship. The binding therefore exists only **in engine code / engine RAM at runtime**.
 No Denuvo, so instrumentation is clean.

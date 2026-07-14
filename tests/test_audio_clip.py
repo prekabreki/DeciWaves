@@ -100,7 +100,7 @@ def test_trim_no_silence_unchanged(tmp_path):
 
 @needs_ffmpeg
 def test_trim_param_change_not_stale_cached(tmp_path):
-    """Changing trim params must not return the previously-cached trim (#42). The cache key
+    """Changing trim params must not return the previously-cached trim. The cache key
     folds min_silence/threshold_db/keep, so re-running the same source with a larger `keep`
     re-trims to a longer clip instead of silently reusing the shorter cached result."""
     src = tmp_path / "gap.wav"

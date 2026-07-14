@@ -5,7 +5,7 @@ exactly 12 locators per ``LocalizedSimpleSoundResource`` (one per dubbed-audio
 language) -- the k-th LSSR's English clip is ``locators[locator_start + 12*k]``:
 English sits at offset 0 of each 12-locator block. Validated byte-exact on the
 retail install (54,435 lines; English is always block-offset 0 or absent --
-never elsewhere). See ``.memories/fw-batch-extractor-status.md``.
+never elsewhere). See ``.memories/fw-streaming-graph.md`` (the fast-path section).
 
 This needs **no object walk** -- pure arithmetic over the streaming graph's type
 table + locator table -- so it sidesteps both batch blockers (the slow pure-Python

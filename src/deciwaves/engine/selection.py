@@ -3,7 +3,8 @@
 Extracted verbatim from deciwaves.engine.story_order.build_playlist so that future
 game profiles (e.g. HZD) can reuse the same rules without duplicating logic.
 
-Source of truth for the rules: .memories/phase-d-line-selection.md
+These are the project's portable creative selection rules — see docs/architecture.md for how
+selection fits the shared catalog -> selection -> story_order -> render pipeline.
 
 Rules applied by filter_and_dedup:
   1. Require non-empty subtitle_en (drop empty / whitespace-only / placeholder rows).

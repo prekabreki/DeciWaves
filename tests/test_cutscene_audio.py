@@ -1,6 +1,6 @@
 """Tests for cutscene_audio: scene -> english Wwise voice-track stream paths.
 
-Mechanism documented in .memories/cutscene-audio-per-scene-voice-track.md.
+Mechanism documented in .memories/ds-cutscene-audio.md.
 """
 import csv
 

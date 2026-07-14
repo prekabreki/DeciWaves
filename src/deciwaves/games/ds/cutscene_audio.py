@@ -3,7 +3,7 @@
 Cutscene dialogue has null per-line sound refs; the audio is per-scene (sometimes
 per-character / per-camera-sub-cut) Wwise voice tracks under
 `ds/sounds/wwise_cinematics_sound_resource/`. See
-`.memories/cutscene-audio-per-scene-voice-track.md` for the full linkage.
+`.memories/ds-cutscene-audio.md` for the full linkage.
 """
 from __future__ import annotations
 

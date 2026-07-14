@@ -1,4 +1,4 @@
-"""FW story weave (#34 / #35): pull scene dialogue into the precise reel, skip barks.
+"""FW story weave: pull scene dialogue into the precise reel, skip barks.
 
 The precise matcher (bind.py) binds only lines that fuzzy-match the gamescript, so
 it drops short interjections and uncovered lines even inside scenes it DID find.
@@ -106,7 +106,7 @@ def _load_csv(path):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="FW story weave: scene dialogue, no barks (#34/#35)")
+    ap = argparse.ArgumentParser(description="FW story weave: scene dialogue, no barks")
     ap.add_argument("--manifest", default="out/fw/story-manifest.csv",
                     help="matched anchors (subtitle_match output)")
     ap.add_argument("--clip-index", default="out/fw/clip-index.csv")

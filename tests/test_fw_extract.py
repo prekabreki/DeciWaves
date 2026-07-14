@@ -1,4 +1,4 @@
-"""FW fast-path batch extractor (#32): resumable, fail-soft manifest + WAV decode.
+"""FW fast-path batch extractor: resumable, fail-soft manifest + WAV decode.
 
 The resume unit test needs no install. The extraction tests skip without the FW
 install (and the decode test also without VGAudio).

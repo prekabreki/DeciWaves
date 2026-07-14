@@ -1,7 +1,7 @@
-"""FW render (#34 step 5): labeled manifest -> story-ordered MP3 reel(s).
+"""FW render (final stage): labeled manifest -> story-ordered MP3 reel(s).
 
 Simpler than the HZD render: the clip WAVs already exist (`out/fw/audio/`, from
-#32), so there is NO decode step — order the bound lines by `gamescript_index`
+the fast-path extractor), so there is NO decode step — order the bound lines by `gamescript_index`
 (rough chronological; the gamescript already interleaves main/side/DLC), measure,
 pack to <=290 MB MP3s, and concat with gaps. Reuses the game-agnostic packing and
 ffmpeg concat from `engine.render`.
@@ -115,7 +115,7 @@ def _load_csv(path):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="Render FW story reel to MP3 (#34 step 5)")
+    ap = argparse.ArgumentParser(description="Render FW story reel to MP3")
     ap.add_argument("--manifest", default="out/fw/asr-manifest.csv")
     ap.add_argument("--audio-root", default="out/fw",
                     help="dir the manifest 'wav' paths are relative to")

@@ -9,7 +9,7 @@ storage ``SpanTable``, and the ``Groups`` that slice into all of them.
 Layout reverse-engineered from ShadelessFox/odradek
 (``odradek-game-hfw`` ``StreamingGraphImpl`` + generated ``types.json``) and
 verified byte-exact against the retail install. See
-``.memories/fw-ships-streaming-graph.md``.
+``.memories/fw-streaming-graph.md``.
 
 On-disk framing is a standard Decima ``.core`` object::
 
