@@ -55,7 +55,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="deciwaves", description=__doc__)
     ap.add_argument("--version", action="version", version=f"deciwaves {__version__}")
     ap.add_argument("--workspace", default=".", help="directory outputs are written under (default: current dir)")
-    sub = ap.add_subparsers(dest="cmd", required=True)
+    sub = ap.add_subparsers(dest="cmd", required=False)
     for name in ("setup", "doctor"):
         sub.add_parser(name, add_help=False)
     for game, stages in STAGES.items():
@@ -80,6 +80,8 @@ def main(argv=None) -> int:
     # engine/audio_clip.py, games/fw/extract.py, games/hzd/atrac9.py: their tool
     # path constants (VGMSTREAM/VGAUDIO) are resolved at import time from the env
     # this call sets up.
+    if args.cmd is None:
+        from deciwaves.cli.guided import run_guided; return run_guided(cfg)
     if args.cmd == "setup":
         from deciwaves.cli.setup import run_setup; return run_setup(rest)
     if args.cmd == "doctor":
