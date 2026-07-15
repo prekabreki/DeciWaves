@@ -58,9 +58,24 @@ def main(argv=None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=False)
     for name in ("setup", "doctor"):
         sub.add_parser(name, add_help=False)
+    game_parsers = {}
     for game, stages in STAGES.items():
         gp = sub.add_parser(game)
-        gp.add_argument("stage", choices=[*stages, "run"])
+        stage_names = (*stages, "run")
+        # nargs=REMAINDER so a stage name -- "run" especially -- plus ALL of its
+        # own following argv (including a "--help") is captured as one opaque
+        # block, instead of gp's own default -h/--help intercepting a "--help"
+        # meant for the stage's (or run's) own parser. Without this, argparse's
+        # subparsers hand gp the whole remaining token stream, gp's own --help
+        # matches "--help" wherever it falls in that stream, and fires before
+        # `args.stage` is ever inspected below -- see issue #8. A bare
+        # `deciwaves <game> --help` (no stage token first) is unaffected: gp's
+        # own --help still fires immediately in that case (nothing to consume
+        # ahead of it), so the generic stage-list help below still works.
+        gp.add_argument("stage", nargs=argparse.REMAINDER,
+                         metavar="{%s}" % ",".join(stage_names),
+                         help="stage to run, plus that stage's own arguments")
+        game_parsers[game] = gp
     try:
         args, rest = ap.parse_known_args(argv)
     except SystemExit as e:
@@ -87,13 +102,32 @@ def main(argv=None) -> int:
     if args.cmd == "doctor":
         from deciwaves.cli.doctor import run_doctor; return run_doctor(rest)
 
+    # args.stage is the REMAINDER list captured above: the stage name plus that
+    # stage's own argv. REMAINDER doesn't support argparse `choices` validation
+    # (it "converts all values, checking none" -- see argparse's _get_values),
+    # so validate the stage name ourselves, the same way gp's own choices error
+    # used to (unknown-stage exit code 2, see test_unknown_stage_errors).
+    stage_argv = args.stage
+    valid_stages = (*STAGES[args.cmd], "run")
+    if not stage_argv or stage_argv[0] not in valid_stages:
+        gp = game_parsers[args.cmd]
+        try:
+            if not stage_argv:
+                gp.error("the following arguments are required: stage")
+            else:
+                gp.error(f"argument stage: invalid choice: {stage_argv[0]!r} "
+                         f"(choose from {', '.join(repr(v) for v in valid_stages)})")
+        except SystemExit as e:
+            return e.code
+    stage, extra_argv = stage_argv[0], stage_argv[1:] + rest
+
     ws = Path(args.workspace).resolve()
     ws.mkdir(parents=True, exist_ok=True)
     os.chdir(ws)                      # stage modules default outputs to CWD-relative out/
-    if args.stage == "run":
-        from deciwaves.cli.run import run_game; return run_game(args.cmd, cfg, rest)
-    mod, _help = STAGES[args.cmd][args.stage]
-    return _import_stage(mod)(rest) or 0
+    if stage == "run":
+        from deciwaves.cli.run import run_game; return run_game(args.cmd, cfg, extra_argv)
+    mod, _help = STAGES[args.cmd][stage]
+    return _import_stage(mod)(extra_argv) or 0
 
 if __name__ == "__main__":
     raise SystemExit(main())
