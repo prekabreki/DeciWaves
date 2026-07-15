@@ -4,6 +4,7 @@ dsar.read -- see test_dsar_archive.py / dsar_archive.py) must be logged and skip
 abort the whole (hours-long, GPU) stage; successful transcripts are checkpointed to a sidecar
 as they are produced so a crashed/interrupted run can resume."""
 import csv
+import os
 
 import pytest
 
@@ -177,6 +178,157 @@ def test_sidecar_checkpoints_incrementally_and_survives_an_abort(tmp_path, monke
     sidecar_rows = list(csv.DictReader(open(tmp_path / "asr-transcripts.csv", encoding="utf-8")))
     assert {r["clip_row"] for r in sidecar_rows} == {"0", "1"}
     assert len(calls) == 3               # the 4th clip was never attempted
+
+
+def test_torn_final_row_in_sidecar_is_dropped_and_warned_and_retranscribed(tmp_path, monkeypatch, capsys):
+    """A sidecar whose last row was torn by a crash mid-write (last byte isn't a newline)
+    must have exactly that row dropped on load, a kept/dropped warning printed to stderr,
+    and (since the drop makes clip_row 2 look un-checkpointed) a resume re-transcribes it."""
+    catalog, wem_meta, clip_index = _write_fixture(tmp_path, n_clips=3)
+    sidecar = tmp_path / "asr-transcripts.csv"
+    # two intact rows + a torn final row (no trailing newline, truncated mid-value) --
+    # exactly the shape described in the review finding.
+    with open(sidecar, "w", newline="", encoding="utf-8") as f:
+        f.write("clip_row,transcript\r\n")
+        f.write("0,prior ok\r\n")
+        f.write("1,prior ok\r\n")
+        f.write("2,this is a partial tran")   # no trailing newline: torn
+
+    dsar = FakeDsar()
+    calls = []
+
+    def spy_transcribe(wav_path, model, **kw):
+        calls.append(wav_path)
+        return FakeTranscript("new")
+
+    _patch_asr_stack(monkeypatch, dsar, transcribe_fn=spy_transcribe)
+
+    # write the fresh sidecar to a different path so this test only exercises the
+    # reader's drop behavior, not the (separate, out-of-scope) question of appending
+    # onto a physically torn file.
+    argv = _argv(tmp_path, catalog, wem_meta, clip_index, transcripts=str(sidecar),
+                 transcripts_out=str(tmp_path / "asr-transcripts-new.csv"))
+    rc = asr_bind.main(argv)
+
+    assert rc == 0
+    assert dsar.calls == [3000]                 # only clip_row 2 (offset 3000) redone
+    assert len(calls) == 1
+    err = capsys.readouterr().err
+    assert "kept 2" in err and "dropped 1" in err
+    assert set(_manifest_clip_rows(tmp_path)) == {"0", "1", "2"}
+
+
+def test_intact_sidecar_drops_nothing_and_warns_nothing(tmp_path, monkeypatch, capsys):
+    """A properly-terminated sidecar (every row, including the last, ends in a newline)
+    must not drop any row nor print a torn-row warning."""
+    catalog, wem_meta, clip_index = _write_fixture(tmp_path, n_clips=3)
+    sidecar = tmp_path / "asr-transcripts.csv"
+    _write_csv(sidecar,
+               [{"clip_row": "0", "transcript": "prior ok"},
+                {"clip_row": "1", "transcript": "prior ok"},
+                {"clip_row": "2", "transcript": "prior ok"}],
+               asr_bind.TRANSCRIPTS_COLS)
+
+    dsar = FakeDsar()
+    calls = []
+
+    def spy_transcribe(wav_path, model, **kw):
+        calls.append(wav_path)
+        return FakeTranscript("new")
+
+    _patch_asr_stack(monkeypatch, dsar, transcribe_fn=spy_transcribe)
+
+    argv = _argv(tmp_path, catalog, wem_meta, clip_index, transcripts=str(sidecar),
+                 transcripts_out=str(tmp_path / "asr-transcripts-new.csv"))
+    rc = asr_bind.main(argv)
+
+    assert rc == 0
+    assert dsar.calls == []                     # nothing re-transcribed
+    assert len(calls) == 0
+    err = capsys.readouterr().err
+    assert "dropped" not in err
+    assert set(_manifest_clip_rows(tmp_path)) == {"0", "1", "2"}
+
+
+def test_fsync_called_per_successful_clip_checkpoint(tmp_path, monkeypatch):
+    """Each successful clip's checkpoint row must be fsync'd (not just flushed) so it
+    survives a crash immediately after -- assert call count, never simulate real power
+    loss."""
+    catalog, wem_meta, clip_index = _write_fixture(tmp_path, n_clips=3)
+    dsar = FakeDsar()
+    _patch_asr_stack(monkeypatch, dsar)
+
+    fsync_calls = []
+    real_fsync = os.fsync
+
+    def spy_fsync(fd):
+        fsync_calls.append(fd)
+        return real_fsync(fd)
+
+    monkeypatch.setattr(asr_bind.os, "fsync", spy_fsync)
+
+    rc = asr_bind.main(_argv(tmp_path, catalog, wem_meta, clip_index))
+
+    assert rc == 0
+    assert len(fsync_calls) == 3                # one fsync per successful clip
+
+
+def test_first_k_clips_all_failing_trips_breaker_and_aborts(tmp_path, monkeypatch, capsys):
+    """If the first BREAKER_K clips processed this run ALL fail with zero successes, it
+    looks like an environment problem (missing ffmpeg/decoder, bad ASR args), not
+    per-clip corruption -- abort the stage (rc 1) instead of burning the whole run
+    logging N identical failures, and stop transcribing immediately (don't keep going
+    past the Kth failed clip)."""
+    n_clips = asr_bind.BREAKER_K + 2   # more clips than the breaker threshold
+    catalog, wem_meta, clip_index = _write_fixture(tmp_path, n_clips=n_clips)
+    dsar = FakeDsar()
+    calls = []
+
+    def always_fail(wav_path, model, **kw):
+        calls.append(wav_path)
+        raise OSError("whisperx: ffmpeg not found")
+
+    _patch_asr_stack(monkeypatch, dsar, transcribe_fn=always_fail)
+
+    rc = asr_bind.main(_argv(tmp_path, catalog, wem_meta, clip_index))
+
+    assert rc == 1
+    assert len(calls) == asr_bind.BREAKER_K      # stopped right at the threshold
+    err = capsys.readouterr().err
+    assert "environment" in err.lower()
+    assert "asr-errors.log" in err
+    assert "deciwaves doctor" in err
+
+
+def test_one_failure_then_successes_keeps_existing_fail_soft_no_breaker(tmp_path, monkeypatch):
+    """A single early failure must not arm-then-trip the breaker, and once a success
+    happens the breaker must disarm for the rest of the run -- even if later failures
+    would otherwise reach BREAKER_K on their own. Existing per-clip fail-soft behavior
+    (log + continue) must be unchanged."""
+    # 1 fail, 1 success (disarms the breaker), then BREAKER_K more failures -- if the
+    # breaker were still armed (or re-armed) these would trip it; they must not.
+    n_clips = 2 + asr_bind.BREAKER_K
+    catalog, wem_meta, clip_index = _write_fixture(tmp_path, n_clips=n_clips)
+    dsar = FakeDsar()
+    calls = []
+
+    def flaky_then_ok(wav_path, model, **kw):
+        calls.append(wav_path)
+        idx = len(calls)
+        if idx == 1 or idx >= 3:
+            raise OSError("transient decode hiccup")
+        return FakeTranscript("ok")
+
+    _patch_asr_stack(monkeypatch, dsar, transcribe_fn=flaky_then_ok)
+
+    rc = asr_bind.main(_argv(tmp_path, catalog, wem_meta, clip_index))
+
+    assert rc == 0
+    assert len(calls) == n_clips                 # every clip attempted, none skipped early
+    sidecar_rows = list(csv.DictReader(open(tmp_path / "asr-transcripts.csv", encoding="utf-8")))
+    assert {r["clip_row"] for r in sidecar_rows} == {"1"}   # only the 2nd clip succeeded
+    err_text = (tmp_path / "asr-errors.log").read_text(encoding="utf-8")
+    assert err_text.count("transient decode hiccup") == n_clips - 1
 
 
 def test_resume_with_transcripts_sidecar_skips_already_done_clips(tmp_path, monkeypatch):

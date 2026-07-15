@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import os
+import sys
 import tempfile
 import wave
 from deciwaves.engine.pack.fw_package import FwPackage
@@ -18,10 +19,43 @@ MANIFEST_COLS = ["clip_row", "offset", "line_id", "speaker_name", "subtitle_en",
 # --transcripts.
 TRANSCRIPTS_COLS = ["clip_row", "transcript"]
 
+# Circuit breaker (Task 14b / issue #20 review): if the first BREAKER_K clips processed
+# in a run ALL fail with zero successes, that looks like a broken environment (missing
+# ffmpeg/decoder binary, a bad WhisperX arg, ...) rather than per-clip corruption -- keep
+# going would just burn the whole run logging N identical failures. Disarmed permanently
+# after the first success; failures after that keep the existing per-clip fail-soft.
+BREAKER_K = 5
+
 
 def _load_csv(path):
     with open(path, newline="", encoding="utf-8") as f:
         return list(csv.DictReader(f))
+
+
+def _load_transcripts_sidecar(path):
+    """Load a transcript sidecar's (or a prior manifest's) clip_row/transcript columns
+    for --transcripts reuse, dropping a torn final row.
+
+    The incremental checkpoint writer below appends + flushes + fsyncs one row per
+    clip, but a crash/power-loss can still land between writes and leave the file's
+    LAST row truncated (e.g. a row read back as
+    {"clip_row": "2", "transcript": "this is a partial tran"}). csv.DictReader parses
+    a truncated row without complaint, so a naive reload would treat a torn row as a
+    completed transcript. An intact row always ends in a newline (see the writer), so:
+    if the file's last byte is NOT a newline, the final row is torn and is dropped --
+    it is simply re-transcribed on resume, which is safe.
+    """
+    with open(path, "rb") as fb:
+        data = fb.read()
+    torn = bool(data) and not data.endswith(b"\n")
+    with open(path, newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    dropped = 1 if (torn and rows) else 0
+    if dropped:
+        rows.pop()
+        print(f"asr: sidecar {path}: kept {len(rows)} row(s), dropped {dropped} torn "
+              f"final row(s)", file=sys.stderr)
+    return rows
 
 
 def main(argv=None):
@@ -91,7 +125,7 @@ def main(argv=None):
     # skipped, only the remainder is (re)transcribed.
     transcripts = {}
     if a.transcripts:
-        for r in _load_csv(a.transcripts):
+        for r in _load_transcripts_sidecar(a.transcripts):
             if r["clip_row"] in want:
                 transcripts[r["clip_row"]] = r.get("transcript", "")
     n_skipped = len(transcripts)
@@ -110,6 +144,11 @@ def main(argv=None):
             os.makedirs(os.path.dirname(os.path.abspath(a.transcripts_out)), exist_ok=True)
             os.makedirs(os.path.dirname(os.path.abspath(a.errors)), exist_ok=True)
             sidecar_is_new = not os.path.exists(a.transcripts_out)
+            # Circuit breaker state (see BREAKER_K docstring): armed until the first
+            # success this run; while armed, n_failed IS the count of clips processed
+            # so far (all of them failures) since no success has occurred yet.
+            breaker_armed = True
+            breaker_tripped = False
             with open(a.transcripts_out, "a", newline="", encoding="utf-8") as tf, \
                  open(a.errors, "w", encoding="utf-8") as ferr:
                 tw = csv.DictWriter(tf, fieldnames=TRANSCRIPTS_COLS)
@@ -130,13 +169,29 @@ def main(argv=None):
                         # aborts -- see test_sidecar_checkpoints_incrementally_and_survives_an_abort.
                         ferr.write(f"{cr}\t{exc}\n"); ferr.flush()
                         n_failed += 1
+                        if breaker_armed and n_failed >= BREAKER_K:
+                            breaker_tripped = True
+                            break
                         continue
                     finally:
                         os.unlink(wav)
                     transcripts[cr] = text
                     n_transcribed += 1
+                    breaker_armed = False   # disarmed for the rest of the run
                     tw.writerow({"clip_row": cr, "transcript": text})
                     tf.flush()
+                    os.fsync(tf.fileno())
+
+            if breaker_tripped:
+                print(
+                    f"asr: ABORT - the first {BREAKER_K} clip(s) processed this run all "
+                    f"failed (0 succeeded); this looks like an environment problem "
+                    f"(missing/broken decoder or ASR binary, bad model args, etc.), not "
+                    f"per-clip corruption. See {a.errors} for details, then try "
+                    f"`deciwaves doctor`.",
+                    file=sys.stderr,
+                )
+                return 1
 
     print(f"asr: transcribed={n_transcribed} skipped={n_skipped} failed={n_failed}")
     if n_failed:
