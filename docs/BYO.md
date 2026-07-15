@@ -136,7 +136,8 @@ the game you own.
 
 HZD has the same category of input as the DS transcript above - a narrative transcript that
 could anchor cutscene/quest order to the real story - but it is not wired up to anything you can
-pass in yet. `deciwaves.games.hzd.profile.HZD_TRANSCRIPT` is hardcoded to `""` (disabled), and no
-HZD stage exposes a `--transcript` flag, so the pipeline always falls back to episode/scene order
-(see `deciwaves.games.hzd.render`). There is nothing to configure here today; this section exists
-so the intent is on record for whoever wires up HZD transcript anchoring later.
+pass in yet. Unlike DS, no HZD stage exposes a `--transcript` flag (transcripts are per-game BYO
+inputs consumed only through such stage flags, disabled by default), so the pipeline always falls
+back to episode/scene order (see `deciwaves.games.hzd.render`). There is nothing to configure here
+today; this section exists so the intent is on record for whoever wires up HZD transcript
+anchoring later.

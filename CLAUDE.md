@@ -82,8 +82,9 @@ installing, or invoke a stage module directly as `python -m deciwaves.<module>`.
 - **Bring your own game.** This repo ships code, never game content. It is read-only against
   any install it touches — it never repacks or modifies game files.
 - **No game prose in the repo.** Narrative transcripts/gamescripts are copyrighted game text
-  and are never checked in; they're an optional, user-supplied ("BYO") local input, wired
-  through a `transcript_path` that defaults to `""` (disabled) per game profile.
+  and are never checked in; they're an optional, user-supplied ("BYO") local input, passed
+  via per-stage CLI flags (`deciwaves ds order --transcript`, `deciwaves fw run --gamescript`)
+  that default to disabled.
 - **Extracted audio stays out of git.** WAV/`.wem`/`.at9`/`.bk2`/manifests derived from a real
   install are gitignored; only small packaged sample/reference data ships in `src/deciwaves/data/`.
 - **Treat format details as "likely," not "certain."** All three games' formats are partially
