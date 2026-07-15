@@ -214,11 +214,13 @@ def main(argv=None):
 
     decoded, ep_secs = {}, {}
     prev_scene_by_ep = {}
+    n_attempted = n_failed = 0
     with open(args.errors, "w", encoding="utf-8") as ferr:
         for s in segs:
             entry = keepspans.get(s.stream_path)
             if entry and entry[1]:                    # dropped pure-grunt track
                 continue
+            n_attempted += 1
             try:
                 wav, dur = audio_clip.clip_wav(idx, s.stream_path, args.cache)
                 if entry:                             # keep-span trim (cutscene)
@@ -230,6 +232,7 @@ def main(argv=None):
                         min_silence=args.min_silence, threshold_db=args.silence_db,
                         keep=args.silence_keep)
             except audio_clip.ClipError as e:
+                n_failed += 1
                 ferr.write(f"{s.line_id}\t{s.stream_path}\t{e}\n"); continue
             decoded[s.line_id] = (wav, dur)
             if s.episode in prev_scene_by_ep:
@@ -238,6 +241,16 @@ def main(argv=None):
                 gap = 0.0
             prev_scene_by_ep[s.episode] = s.scene
             ep_secs[s.episode] = ep_secs.get(s.episode, 0.0) + gap + dur
+
+    n_decoded = len(decoded)
+    print(f"render: decoded {n_decoded} clips, {n_failed} failed (see {args.errors})")
+    if n_decoded == 0 and n_attempted > 0:
+        print(f"render: ERROR - no audio could be decoded out of {n_attempted} "
+              f"segment(s) attempted. See {args.errors} for the per-clip failures. "
+              f"Try `deciwaves doctor` to check your decode tools, and see the "
+              f"README's Windows Store Python troubleshooting note if vgmstream-cli "
+              f"is dying with a DLL-not-found / exit-code error.")
+        return 1
 
     for fi, eps in enumerate(pack_episodes(list(ep_secs.items()),
                                            budget=budget_seconds(kbps=args.bitrate))):

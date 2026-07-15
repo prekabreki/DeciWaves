@@ -27,6 +27,19 @@ class ClipError(Exception):
     pass
 
 
+def _returncode_detail(returncode):
+    """Format a subprocess exit code for a ClipError message.
+
+    Hex is appended for codes >= 2**16 (Windows NTSTATUS-range values, e.g. a
+    crashed vgmstream-cli reporting 3221225781 / 0xC0000135 STATUS_DLL_NOT_FOUND)
+    so the failure is recognizable at a glance; smaller/ordinary exit codes are
+    left as plain decimal.
+    """
+    if returncode is not None and abs(returncode) >= 2 ** 16:
+        return f"exit code {returncode} (0x{returncode & 0xFFFFFFFF:08X})"
+    return f"exit code {returncode}"
+
+
 def trim_riff(data):
     if len(data) < 8 or data[:4] != b"RIFF":
         raise ClipError("not a RIFF stream")
@@ -154,5 +167,9 @@ def clip_wav(idx, stream_path, cache_dir, vgmstream=VGMSTREAM):
         if os.path.isfile(wem_path):
             os.remove(wem_path)
     if proc.returncode != 0 or not os.path.isfile(wav_path):
-        raise ClipError(f"vgmstream failed for {stream_path}: {proc.stderr.strip()}")
+        detail = _returncode_detail(proc.returncode)
+        stderr = (proc.stderr or "").strip()
+        if stderr:
+            detail = f"{detail}; stderr: {stderr}"
+        raise ClipError(f"vgmstream failed for {stream_path}: {detail}")
     return wav_path, wav_duration_seconds(wav_path)

@@ -136,6 +136,48 @@ def test_apply_keep_spans_empty_raises(tmp_path):
         ac.apply_keep_spans(str(tmp_path / "x.wav"), [], str(tmp_path / "kept"))
 
 
+class _FakeIdxRaw:
+    """idx.read() returning a minimal valid RIFF stream, so clip_wav gets far
+    enough to invoke the (mocked) vgmstream subprocess."""
+
+    def read(self, p):
+        payload = b"WAVE" + b"\x00" * 16
+        return b"RIFF" + struct.pack("<I", len(payload)) + payload
+
+
+class _FakeProc:
+    def __init__(self, returncode, stderr=""):
+        self.returncode = returncode
+        self.stderr = stderr
+
+
+def test_clip_wav_error_includes_exit_code_and_hex_for_ntstatus_range(tmp_path, monkeypatch):
+    # 0xC0000135 (STATUS_DLL_NOT_FOUND) is the real-world failure this guards:
+    # a Windows Store Python's virtualized child process can't find vgmstream's
+    # side-by-side DLLs, so vgmstream-cli dies with this NTSTATUS and empty stderr.
+    monkeypatch.setattr(ac.subprocess, "run",
+                        lambda *a, **k: _FakeProc(3221225781, stderr=""))
+    with pytest.raises(ac.ClipError) as exc:
+        ac.clip_wav(_FakeIdxRaw(), "some/stream.core.stream", str(tmp_path),
+                    vgmstream="vgmstream-cli")
+    msg = str(exc.value)
+    assert "exit code 3221225781" in msg
+    assert "0xC0000135" in msg
+    assert "stderr" not in msg  # empty stderr -> clause omitted entirely
+
+
+def test_clip_wav_error_includes_stderr_clause_when_present(tmp_path, monkeypatch):
+    monkeypatch.setattr(ac.subprocess, "run",
+                        lambda *a, **k: _FakeProc(1, stderr="missing sample rate"))
+    with pytest.raises(ac.ClipError) as exc:
+        ac.clip_wav(_FakeIdxRaw(), "some/stream.core.stream", str(tmp_path),
+                    vgmstream="vgmstream-cli")
+    msg = str(exc.value)
+    assert "exit code 1" in msg
+    assert "0x" not in msg  # below the NTSTATUS-range threshold -> plain decimal only
+    assert "stderr: missing sample rate" in msg
+
+
 def test_clip_wav_cleans_temp_wem_when_vgmstream_missing(tmp_path):
     import os
     class FakeIdx:
