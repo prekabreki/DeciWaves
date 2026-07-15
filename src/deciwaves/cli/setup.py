@@ -54,6 +54,7 @@ def _short_reason(exc: Exception) -> str:
     suitable for a summary table cell -- never a raw traceback."""
     msg = str(exc).strip() or type(exc).__name__
     msg = msg.splitlines()[0]
+    msg = msg.encode("ascii", "replace").decode("ascii")
     if len(msg) > 60:
         msg = msg[:57] + "..."
     return msg

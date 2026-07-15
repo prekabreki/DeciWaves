@@ -148,6 +148,29 @@ def test_download_failure_returns_nonzero_and_reports_failed_row_and_continues(t
     assert "Traceback (most recent call last)" not in out
 
 
+def test_config_still_written_correctly_when_one_tool_fails(tmp_path, monkeypatch):
+    # A partial-failure run (one tool's download blows up) must still persist
+    # the rest of the config -- tools_dir, ds_install, oodle_dll -- exactly as
+    # a fully-successful run would. The exit code reports the failure; the
+    # config write is unconditional.
+    ds = tmp_path / "DS"; ds.mkdir(); (ds / "oo2core_7_win64.dll").write_bytes(b"x"); (ds / "data").mkdir()
+
+    def _flaky(url, dest):
+        if url == s.VGAUDIO_URL:
+            raise TimeoutError("timed out")
+        _stub_download_ok(url, dest)
+
+    monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.setattr(s, "_download_and_unpack", _flaky)
+    rc = s.run_setup(["--ds-install", str(ds), "--tools-dir", str(tmp_path / "tools")])
+
+    assert rc == 1
+    cfg = json.loads((tmp_path / "cfg" / "config.json").read_text())
+    assert cfg["tools_dir"] == str(tmp_path / "tools")
+    assert cfg["ds_install"] == str(ds)
+    assert cfg["oodle_dll"].endswith("oo2core_7_win64.dll")
+
+
 def test_unpack_succeeds_but_exe_missing_returns_nonzero(tmp_path, monkeypatch, capsys):
     # _download_and_unpack "succeeds" (no exception) but never drops the exe --
     # simulates an upstream zip whose layout changed.

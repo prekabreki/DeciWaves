@@ -31,9 +31,10 @@ maintained going forward -- expect them to bit-rot.
   by `hzd_autodump.ps1`; needed because their ACLs can resist deletion from a normal,
   non-elevated session.
 
-Note: the comsvcs.dll MiniDump fallback above is a full-process-memory dump technique
-some antivirus heuristics flag. It is benign here -- same purpose as procdump, built into
-Windows -- and was only ever run against the author's own process.
+Note: the comsvcs.dll MiniDump fallback above is a full-process-memory dump technique some
+antivirus heuristics flag. It dumps the game's own running process -- the same purpose
+procdump serves, just via a technique built into Windows rather than a separate signed tool --
+and was only ever run here against the author's own process.
 
 `memory-index.ps1` and `regenerate-fixtures.py` also live here but are current,
 maintained tooling, not part of the historical cluster above.

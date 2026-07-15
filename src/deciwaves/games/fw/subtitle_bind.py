@@ -183,7 +183,7 @@ def types_json_error(path: str) -> str | None:
     if os.path.isfile(path):
         return None
     return (
-        f"subtitle-bind: --types-json not found at {path!r}. This must be a "
+        f"subtitle-bind: --types-json not found at {path}. This must be a "
         "Decima RTTI type map for Forbidden West, user-supplied (BYO -- this "
         "repo can't ship one). See docs/BYO.md for how to obtain it."
     )

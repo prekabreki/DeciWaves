@@ -45,9 +45,11 @@ def _load_transcripts_sidecar(path):
     if the file's last byte is NOT a newline, the final row is torn and is dropped --
     it is simply re-transcribed on resume, which is safe.
     """
-    with open(path, "rb") as fb:
-        data = fb.read()
-    torn = bool(data) and not data.endswith(b"\n")
+    torn = False
+    if os.path.getsize(path):
+        with open(path, "rb") as fb:
+            fb.seek(-1, os.SEEK_END)
+            torn = fb.read(1) != b"\n"
     with open(path, newline="", encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
     dropped = 1 if (torn and rows) else 0
@@ -60,8 +62,9 @@ def _load_transcripts_sidecar(path):
 
 def main(argv=None):
     ap = argparse.ArgumentParser()
-    ap.add_argument("--package", help="HZDR package dir (required unless --transcripts "
-                    "covers every clip)")
+    ap.add_argument("--package", help="HZDR package dir (required unless --transcripts is "
+                    "given; with --transcripts alone, clips missing from it are left "
+                    "unbound instead of transcribed)")
     ap.add_argument("--transcripts", help="reuse a transcript sidecar's clip_row/transcript "
                     "columns (skips WhisperX for clips already present there -- a prior "
                     "manifest works too, MANIFEST_COLS is a superset); combine with "

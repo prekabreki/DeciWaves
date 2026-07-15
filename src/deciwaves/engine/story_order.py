@@ -70,10 +70,11 @@ def order_cutscene_groups(group_anchors):
     independent of set-iteration order, hash seed, or insertion order."""
     def key(g):
         a = group_anchors.get(g)
+        hint = em.CS_ORDER_HINT.get(g)
         if a is not None:
             k = float(a)
-        elif g in em.CS_ORDER_HINT:
-            k = em.CS_ORDER_HINT[g]
+        elif hint is not None:
+            k = hint
         else:
             n = em.cs_number(g)
             k = float(n) if n is not None else _UNPARSEABLE_CS_KEY

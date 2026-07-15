@@ -148,7 +148,8 @@ def test_main_missing_explicit_types_json_fails_actionably(tmp_path, monkeypatch
 
     captured = capsys.readouterr()
     assert "--types-json" in captured.out
-    assert repr(str(explicit)) in captured.out
+    # plain path, not repr() -- repr() doubles backslashes on Windows (issue #14)
+    assert str(explicit) in captured.out
     assert "docs/BYO.md" in captured.out
     assert captured.err == ""  # no traceback
 

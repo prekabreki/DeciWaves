@@ -25,6 +25,7 @@ import argparse
 import importlib.util
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable
 
 from deciwaves import data
@@ -79,7 +80,7 @@ def _run_chain(game: str, chain: list[Stage], ctx: dict) -> int:
         if rc:
             return rc
         os.makedirs(os.path.dirname(marker), exist_ok=True)
-        open(marker, "w", encoding="utf-8").close()
+        Path(marker).touch()
     return 0
 
 
@@ -89,7 +90,7 @@ def _missing_config(game: str, hint: str, flag_hint: str) -> int:
     return 1
 
 
-def _parse_or_exit(ap: argparse.ArgumentParser, extra_argv: list):
+def _parse_or_exit(ap: argparse.ArgumentParser, extra_argv: list) -> argparse.Namespace | int:
     """Parse a per-game ``run`` parser's argv, mirroring cli.main.main()'s own
     "usage errors return 2" contract for its top-level parser: argparse raises
     SystemExit both for a clean exit (--help, code 0) and for a usage error

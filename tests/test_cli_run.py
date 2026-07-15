@@ -271,6 +271,20 @@ def test_ds_run_help_exits_0_without_running_any_stage(tmp_path, monkeypatch, ca
     assert "deciwaves ds run" in capsys.readouterr().out
 
 
+def test_ds_run_help_after_other_flags_still_exits_0_without_running_any_stage(tmp_path, monkeypatch, capsys):
+    """--help must win no matter where it falls in argv, same as any argparse CLI."""
+    monkeypatch.chdir(tmp_path)
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, {}))
+
+    with pytest.raises(SystemExit) as exc:
+        run_mod.run_game("ds", {"ds_install": "X"}, ["--data-dir", "OTHER", "--help"])
+
+    assert exc.value.code == 0
+    assert calls == []
+    assert "deciwaves ds run" in capsys.readouterr().out
+
+
 def test_ds_run_unknown_flag_exits_2_without_running_any_stage(tmp_path, monkeypatch, capsys):
     """A typo'd flag must be a usage error naming it (exit 2), not silently
     dropped into a live multi-hour pipeline. See #8."""
@@ -347,6 +361,20 @@ def test_hzd_run_help_exits_0_without_running_any_stage(tmp_path, monkeypatch, c
 
     with pytest.raises(SystemExit) as exc:
         run_mod.run_game("hzd", {"hzd_package": "PKG"}, ["--help"])
+
+    assert exc.value.code == 0
+    assert calls == []
+    assert "deciwaves hzd run" in capsys.readouterr().out
+
+
+def test_hzd_run_help_after_other_flags_still_exits_0_without_running_any_stage(tmp_path, monkeypatch, capsys):
+    """--help must win no matter where it falls in argv, same as any argparse CLI."""
+    monkeypatch.chdir(tmp_path)
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, {}))
+
+    with pytest.raises(SystemExit) as exc:
+        run_mod.run_game("hzd", {"hzd_package": "PKG"}, ["--package", "OTHER", "--help"])
 
     assert exc.value.code == 0
     assert calls == []

@@ -25,6 +25,26 @@ def _fake_ltr_bytes(name: str):
     return name.encode("ascii")  # content doesn't matter; reader is mocked
 
 
+def _run_build_with_language_list(vp, language_list):
+    """Build a SpeakerMap from a single fake resource whose LocalizedTextResource.language
+    is exactly `language_list` -- shared by TestEnglishSelectionGuard and
+    TestSiblingSlotRecovery, both of which drive the same fake-reader plumbing with
+    different language-list shapes."""
+    import deciwaves._vendor.pydecima.reader as reader
+    from deciwaves._vendor.pydecima.resources.LocalizedTextResource import LocalizedTextResource
+    from deciwaves.engine.speakers import SpeakerMap
+
+    fake_idx = _make_fake_idx({vp: b"data"})
+
+    def fake_read(stream, objs):
+        obj = MagicMock(spec=LocalizedTextResource)
+        obj.language = language_list
+        objs["obj0"] = obj
+
+    with patch.object(reader, "read_objects_from_stream", side_effect=fake_read):
+        return SpeakerMap._build_map(fake_idx, [vp])
+
+
 # ---------------------------------------------------------------------------
 # Unit tests
 # ---------------------------------------------------------------------------
@@ -168,27 +188,12 @@ class TestEnglishSelectionGuard:
     JAPANESE_ONLY = "サム"  # Katakana "Samu" -- stands in for a
     # resource whose English slot was empty and index 0 shifted to Japanese.
 
-    def _run_build_with_language_list(self, vp, language_list):
-        import deciwaves._vendor.pydecima.reader as reader
-        from deciwaves._vendor.pydecima.resources.LocalizedTextResource import LocalizedTextResource
-        from deciwaves.engine.speakers import SpeakerMap
-
-        fake_idx = _make_fake_idx({vp: b"data"})
-
-        def fake_read(stream, objs):
-            obj = MagicMock(spec=LocalizedTextResource)
-            obj.language = language_list
-            objs["obj0"] = obj
-
-        with patch.object(reader, "read_objects_from_stream", side_effect=fake_read):
-            return SpeakerMap._build_map(fake_idx, [vp])
-
     def test_full_language_list_index0_english_accepted(self):
         """A full, realistic language list with a plausibly-English string at
         index 0 is accepted exactly as before -- the happy path is untouched."""
         vp = "localized/sentences/voices/vr0010_sam/simpletext"
         language_list = ["Sam", "Sam (French)", self.JAPANESE_ONLY] + [""] * 18
-        result = self._run_build_with_language_list(vp, language_list)
+        result = _run_build_with_language_list(vp, language_list)
         assert result == {"vr0010_sam": "Sam"}
 
     def test_empty_english_shift_uses_stem_fallback_not_japanese(self):
@@ -196,7 +201,7 @@ class TestEnglishSelectionGuard:
         NOT surface the Japanese text -- must fall back to a stem-derived name."""
         vp = "localized/sentences/voices/vr0099_mystery_person/simpletext"
         language_list = [self.JAPANESE_ONLY] + [""] * 20
-        result = self._run_build_with_language_list(vp, language_list)
+        result = _run_build_with_language_list(vp, language_list)
         assert result == {"vr0099_mystery_person": "Mystery Person"}
         assert self.JAPANESE_ONLY not in result.values()
 
@@ -207,7 +212,7 @@ class TestEnglishSelectionGuard:
         test_empty_language_list_skipped."""
         vp = "localized/sentences/voices/vr0010_sam/simpletext"
         language_list = [""] * 21
-        result = self._run_build_with_language_list(vp, language_list)
+        result = _run_build_with_language_list(vp, language_list)
         assert result == {}
 
     def test_index0_english_accepted_ignores_different_sibling_names(self):
@@ -216,7 +221,7 @@ class TestEnglishSelectionGuard:
         plausible name."""
         vp = "localized/sentences/voices/vr0010_sam/simpletext"
         language_list = ["Sam", "NotSam", self.JAPANESE_ONLY] + [""] * 18
-        result = self._run_build_with_language_list(vp, language_list)
+        result = _run_build_with_language_list(vp, language_list)
         assert result == {"vr0010_sam": "Sam"}
 
 
@@ -229,27 +234,12 @@ class TestSiblingSlotRecovery:
 
     JAPANESE_ONLY = "サム"  # stands in for a shifted, non-English index 0.
 
-    def _run_build_with_language_list(self, vp, language_list):
-        import deciwaves._vendor.pydecima.reader as reader
-        from deciwaves._vendor.pydecima.resources.LocalizedTextResource import LocalizedTextResource
-        from deciwaves.engine.speakers import SpeakerMap
-
-        fake_idx = _make_fake_idx({vp: b"data"})
-
-        def fake_read(stream, objs):
-            obj = MagicMock(spec=LocalizedTextResource)
-            obj.language = language_list
-            objs["obj0"] = obj
-
-        with patch.object(reader, "read_objects_from_stream", side_effect=fake_read):
-            return SpeakerMap._build_map(fake_idx, [vp])
-
     def test_shift_case_uses_first_latin_sibling_slot(self):
         """Shift case (index 0 rejected): a later slot with a plausibly-
         English name ("Fragile") is used instead of the stem guess ("Frg")."""
         vp = "localized/sentences/voices/vr0040_frg/simpletext"
         language_list = [self.JAPANESE_ONLY, "Fragile"] + [""] * 19
-        result = self._run_build_with_language_list(vp, language_list)
+        result = _run_build_with_language_list(vp, language_list)
         assert result == {"vr0040_frg": "Fragile"}
 
     def test_shift_case_picks_first_qualifying_sibling_in_order(self):
@@ -257,7 +247,7 @@ class TestSiblingSlotRecovery:
         order) wins."""
         vp = "localized/sentences/voices/vr0040_frg/simpletext"
         language_list = [self.JAPANESE_ONLY, "", "Fragile", "AlsoFragile"] + [""] * 17
-        result = self._run_build_with_language_list(vp, language_list)
+        result = _run_build_with_language_list(vp, language_list)
         assert result == {"vr0040_frg": "Fragile"}
 
     def test_shift_case_all_siblings_non_latin_or_empty_falls_back_to_stem(self):
@@ -266,7 +256,7 @@ class TestSiblingSlotRecovery:
         stem-derived guess exactly as before this change."""
         vp = "localized/sentences/voices/vr0099_mystery_person/simpletext"
         language_list = [self.JAPANESE_ONLY, self.JAPANESE_ONLY, ""] + [""] * 18
-        result = self._run_build_with_language_list(vp, language_list)
+        result = _run_build_with_language_list(vp, language_list)
         assert result == {"vr0099_mystery_person": "Mystery Person"}
 
 

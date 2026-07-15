@@ -1,8 +1,14 @@
 """Speaker display-name resolution for DS:DC voice codes.
 
 Reads ``localized/sentences/voices/<stem>/simpletext`` cores (each contains a
-``LocalizedTextResource`` whose first language string is the English display
-name) and builds a ``{vr_stem: name}`` map cached to ``out/speakers.json``.
+``LocalizedTextResource``) and builds a ``{vr_stem: name}`` map cached to
+``out/speakers.json``. Index 0 is usually the English display name, but the
+vendored scanner skips empty language slots, so an empty English slot silently
+shifts index 0 onto the first non-empty language instead (issue #3). A guard
+rejects non-Latin text at index 0; when that happens, the remaining language
+slots are scanned in order for the first non-empty, plausibly-English sibling
+(character names are frequently identical Latin text across locales) before
+falling back to a stem-derived name.
 
 Usage::
 

@@ -39,6 +39,13 @@ STAGES = {
 def _import_stage(module_name):
     return importlib.import_module(module_name).main
 
+def _stage_choices(game: str) -> tuple:
+    """A game's stage names plus the synthetic `run` stage (STAGES doesn't list
+    it -- it's handled separately below, dispatching to cli.run instead of a
+    STAGES module). Used both for the REMAINDER metavar and for validating
+    args.stage, so the two stay in sync."""
+    return (*STAGES[game], "run")
+
 def _apply_config_env():
     cfg = config.load()
     if cfg.get("tools_dir") and os.path.isdir(cfg["tools_dir"]):
@@ -61,7 +68,7 @@ def main(argv=None) -> int:
     game_parsers = {}
     for game, stages in STAGES.items():
         gp = sub.add_parser(game)
-        stage_names = (*stages, "run")
+        stage_names = _stage_choices(game)
         # nargs=REMAINDER so a stage name -- "run" especially -- plus ALL of its
         # own following argv (including a "--help") is captured as one opaque
         # block, instead of gp's own default -h/--help intercepting a "--help"
@@ -108,7 +115,7 @@ def main(argv=None) -> int:
     # so validate the stage name ourselves, the same way gp's own choices error
     # used to (unknown-stage exit code 2, see test_unknown_stage_errors).
     stage_argv = args.stage
-    valid_stages = (*STAGES[args.cmd], "run")
+    valid_stages = _stage_choices(args.cmd)
     if not stage_argv or stage_argv[0] not in valid_stages:
         gp = game_parsers[args.cmd]
         try:
