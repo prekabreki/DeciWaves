@@ -16,8 +16,8 @@ auto-culls barks (which carry no subtitle). It does NOT give speaker — that is
 follow-on (match the exact subtitle to the gamescript, or resolve
 ``SentenceResource`` refs via the link table).
 
-Output uses the same manifest schema as ``bind.py`` so ``render.py`` consumes it
-unchanged (tier ``"S"``).
+Output uses the same manifest schema as ``manifest.MANIFEST_COLS`` so
+``render.py`` consumes it unchanged (tier ``"S"``).
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ import csv
 import os
 import re
 
-from deciwaves.games.fw.bind import MANIFEST_COLS
+from deciwaves.games.fw.manifest import MANIFEST_COLS
 from deciwaves.games.hzd.match import normalize
 
 # Subtitle timing/markup tokens like ``<time0.17>``; also strip newline breaks.

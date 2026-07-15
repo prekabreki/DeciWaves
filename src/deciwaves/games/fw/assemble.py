@@ -11,7 +11,7 @@ from __future__ import annotations
 import argparse
 import csv
 
-from deciwaves.games.fw.bind import MANIFEST_COLS
+from deciwaves.games.fw.manifest import MANIFEST_COLS
 
 
 def combine(manifests):

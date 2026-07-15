@@ -26,7 +26,7 @@ import os
 import re
 import statistics
 
-from deciwaves.games.fw.bind import MANIFEST_COLS
+from deciwaves.games.fw.manifest import MANIFEST_COLS
 
 _LINE_RE = re.compile(r"g(\d+)_(\d+)")
 

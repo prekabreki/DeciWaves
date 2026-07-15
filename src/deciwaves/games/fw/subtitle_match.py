@@ -12,13 +12,14 @@ does three things at once:
      quest + sidequests interleaved), so the script index orders the reel.
 
 Crucially we match the EXACT in-game subtitle (not lossy ASR) against the script,
-so binds are far more precise/numerous than the ASR matcher (`match_lines`). The
-label we keep is the exact subtitle (authoritative on-screen text); the script
-supplies only speaker + quest + order.
+so binds are far more precise/numerous than the superseded ASR-transcript matcher
+this replaced. The label we keep is the exact subtitle (authoritative on-screen
+text); the script supplies only speaker + quest + order.
 
-Same direction + greedy discipline as `match_lines`: script -> clip, each clip
-used once (collapses re-recorded variants of one beat to a single clip). DLC has
-no gamescript -> handled separately (its exact subtitles, group order).
+Same direction + greedy discipline as that superseded matcher: script -> clip,
+each clip used once (collapses re-recorded variants of one beat to a single
+clip). DLC has no gamescript -> handled separately (its exact subtitles, group
+order).
 """
 
 from __future__ import annotations
@@ -29,7 +30,7 @@ from dataclasses import dataclass
 import numpy as np
 from rapidfuzz import fuzz, process
 
-from deciwaves.games.fw.bind import MANIFEST_COLS
+from deciwaves.games.fw.manifest import MANIFEST_COLS
 from deciwaves.games.hzd.match import normalize
 
 # A gamescript "line" is a speaker's whole turn — often several sentences — but
