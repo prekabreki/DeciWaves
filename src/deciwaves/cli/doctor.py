@@ -108,6 +108,10 @@ def check_cuda() -> tuple[bool, str]:
         return True, "[--] CUDA: torch installed but no GPU visible (informational)"
     except ImportError:
         return True, "[--] CUDA: torch not installed (informational; see ASR extra)"
+    except Exception as exc:  # torch can fail to import for env reasons (locked DLLs,
+        # broken install); doctor's contract is to report, never traceback.
+        reason = str(exc).splitlines()[0][:80]
+        return True, f"[--] CUDA: torch import failed ({reason}) (informational)"
 
 
 def check_config_file() -> tuple[bool, str]:
