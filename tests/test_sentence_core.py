@@ -99,6 +99,37 @@ def test_empty_wem_paths_yields_empty_wem():
     assert lines[0].subtitle_en == "Hello world"
 
 
+def test_shifted_japanese_subtitle_yields_empty_string():
+    """Issue #3: same t.language[0] pattern as speakers.py. When the English
+    slot was empty, the vendored scanner shifts index 0 onto the first
+    non-empty language (here, Japanese). subtitle_en must come back empty,
+    not the wrong-language text -- and on_line_error must NOT fire (this is
+    not a parse error, it's a language-selection guard; fail-soft behavior
+    for actual errors is unaffected)."""
+    japanese_only = "サム"  # Katakana "Samu" -- stands in for a shifted slot
+    fake_group, _, _ = _make_core_with_sentence(
+        language_list=[japanese_only] + [""] * 20, wem_paths_list=["a.wem.english"])
+    errors = []
+    with patch("deciwaves.engine.sentence_core.reader.read_objects_from_stream",
+               side_effect=lambda stream, objs: objs.update(g=fake_group)):
+        lines = parse_sentences(b"dummy", on_line_error=lambda i, e: errors.append((i, e)))
+    assert len(lines) == 1
+    assert lines[0].subtitle_en == ""
+    assert lines[0].wem_path_en == "a.wem.english"
+    assert errors == []
+
+
+def test_normal_english_subtitle_with_full_language_list_unchanged():
+    """Happy path unaffected: a full, realistic language list with plausibly-
+    English text at index 0 still yields that text unchanged."""
+    fake_group, _, _ = _make_core_with_sentence(
+        language_list=["Hello, Sam.", "Bonjour, Sam.", "サム"] + [""] * 18,
+        wem_paths_list=["a.wem.english"])
+    lines = _parse_with_fake_group(fake_group)
+    assert len(lines) == 1
+    assert lines[0].subtitle_en == "Hello, Sam."
+
+
 def test_null_sentence_ref_calls_on_line_error():
     """Important 2: when sref.follow returns None, on_line_error must be called."""
     from deciwaves._vendor.pydecima.resources.SentenceGroupResource import SentenceGroupResource

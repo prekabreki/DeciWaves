@@ -158,13 +158,90 @@ class TestBuildMap:
         assert result == {"vr0010_sam": "Sam", "vr0040_frg": "Fragile"}
 
 
+class TestEnglishSelectionGuard:
+    """Issue #3: the vendored DSPC scanner skips EMPTY language slots and
+    pads only at the end of the list, so when a resource's English slot is
+    empty, index 0 silently lands on the first non-empty language (usually
+    Japanese) instead. ``_build_map`` must reject non-Latin text at index 0
+    and fall back to a stem-derived name rather than surface it."""
+
+    JAPANESE_ONLY = "サム"  # Katakana "Samu" -- stands in for a
+    # resource whose English slot was empty and index 0 shifted to Japanese.
+
+    def _run_build_with_language_list(self, vp, language_list):
+        import deciwaves._vendor.pydecima.reader as reader
+        from deciwaves._vendor.pydecima.resources.LocalizedTextResource import LocalizedTextResource
+        from deciwaves.engine.speakers import SpeakerMap
+
+        fake_idx = _make_fake_idx({vp: b"data"})
+
+        def fake_read(stream, objs):
+            obj = MagicMock(spec=LocalizedTextResource)
+            obj.language = language_list
+            objs["obj0"] = obj
+
+        with patch.object(reader, "read_objects_from_stream", side_effect=fake_read):
+            return SpeakerMap._build_map(fake_idx, [vp])
+
+    def test_full_language_list_index0_english_accepted(self):
+        """A full, realistic language list with a plausibly-English string at
+        index 0 is accepted exactly as before -- the happy path is untouched."""
+        vp = "localized/sentences/voices/vr0010_sam/simpletext"
+        language_list = ["Sam", "Sam (French)", self.JAPANESE_ONLY] + [""] * 18
+        result = self._run_build_with_language_list(vp, language_list)
+        assert result == {"vr0010_sam": "Sam"}
+
+    def test_empty_english_shift_uses_stem_fallback_not_japanese(self):
+        """The bug: English slot was empty, so index 0 is Japanese text. Must
+        NOT surface the Japanese text -- must fall back to a stem-derived name."""
+        vp = "localized/sentences/voices/vr0099_mystery_person/simpletext"
+        language_list = [self.JAPANESE_ONLY] + [""] * 20
+        result = self._run_build_with_language_list(vp, language_list)
+        assert result == {"vr0099_mystery_person": "Mystery Person"}
+        assert self.JAPANESE_ONLY not in result.values()
+
+    def test_all_empty_string_slots_existing_fallback_unchanged(self):
+        """A non-empty language list where every slot is an empty string is
+        the pre-existing "no text at all" case: leave it unmapped (name_for()
+        falls back to ""), same as the empty-list case already covered by
+        test_empty_language_list_skipped."""
+        vp = "localized/sentences/voices/vr0010_sam/simpletext"
+        language_list = [""] * 21
+        result = self._run_build_with_language_list(vp, language_list)
+        assert result == {}
+
+
+class TestNameFromStem:
+    """Direct unit tests pinning the stem-derived fallback name contract."""
+
+    def test_strips_vr_prefix_and_title_cases(self):
+        from deciwaves.engine.speakers import _name_from_stem
+        assert _name_from_stem("vr0010_sam") == "Sam"
+
+    def test_multi_word_slug(self):
+        from deciwaves.engine.speakers import _name_from_stem
+        assert _name_from_stem("vr0099_mystery_person") == "Mystery Person"
+
+    def test_no_recognizable_prefix_falls_back_to_whole_stem(self):
+        from deciwaves.engine.speakers import _name_from_stem
+        assert _name_from_stem("weird_stem_noprefix") == "Weird Stem Noprefix"
+
+
 class TestCaching:
-    """SpeakerMap caches to/from JSON."""
+    """SpeakerMap caches to/from JSON.
+
+    The cache is versioned (issue #3): it is loaded unconditionally when
+    present, so any fix to _build_map's selection logic must be paired with
+    a schema marker that forces regeneration of stale on-disk caches --
+    otherwise existing workspaces keep serving the pre-fix (Japanese) names
+    forever.
+    """
 
     def test_saves_and_loads_cache(self, tmp_path):
-        """When cache_path is given, map is written and reloaded on next construction."""
+        """When cache_path is given, map is written (versioned) and reloaded
+        on next construction."""
         import deciwaves._vendor.pydecima.reader as reader
-        from deciwaves.engine.speakers import SpeakerMap
+        from deciwaves.engine.speakers import SpeakerMap, _SCHEMA_VERSION
 
         vp = "localized/sentences/voices/vr0010_sam/simpletext"
         b = _fake_ltr_bytes("Sam")
@@ -185,12 +262,86 @@ class TestCaching:
             smap1 = SpeakerMap(fake_idx, file_list, cache_path=cache_file)
 
         assert smap1.name_for("localized/voices/vr0010_sam") == "Sam"
-        assert json.loads(open(cache_file).read()) == {"vr0010_sam": "Sam"}
+        on_disk = json.loads(open(cache_file).read())
+        assert on_disk == {"schema_version": _SCHEMA_VERSION, "speakers": {"vr0010_sam": "Sam"}}
 
         # Second construction uses cache, never calls read_core
         fake_idx2 = _make_fake_idx({})  # would raise KeyError if called
         smap2 = SpeakerMap(fake_idx2, file_list, cache_path=cache_file)
         assert smap2.name_for("localized/voices/vr0010_sam") == "Sam"
+
+    def test_old_unversioned_format_ignored_and_regenerated(self, tmp_path):
+        """A pre-fix, unversioned cache (a flat {stem: name} dict, possibly
+        carrying a stale Japanese name from the bug) must be ignored, not
+        loaded -- and the map rebuilt from the real source."""
+        import deciwaves._vendor.pydecima.reader as reader
+        from deciwaves.engine.speakers import SpeakerMap, _SCHEMA_VERSION
+        from deciwaves._vendor.pydecima.resources.LocalizedTextResource import LocalizedTextResource
+
+        vp = "localized/sentences/voices/vr0010_sam/simpletext"
+        b = _fake_ltr_bytes("Sam")
+        cache_file = tmp_path / "speakers.json"
+        # Old unversioned format: flat dict, no "schema_version"/"speakers" wrapper.
+        cache_file.write_text(json.dumps({"vr0010_sam": "STALE-JAPANESE-NAME"}), encoding="utf-8")
+
+        fake_idx = _make_fake_idx({vp: b})
+
+        def fake_read(stream, objs):
+            if stream.read() == b:
+                obj = MagicMock(spec=LocalizedTextResource)
+                obj.language = ["Sam"]
+                objs["obj0"] = obj
+
+        with patch.object(reader, "read_objects_from_stream", side_effect=fake_read):
+            smap = SpeakerMap(fake_idx, [vp], cache_path=str(cache_file))
+
+        assert smap.name_for("localized/voices/vr0010_sam") == "Sam"
+        # Regeneration also rewrites the cache file to the new, versioned format.
+        rewritten = json.loads(cache_file.read_text(encoding="utf-8"))
+        assert rewritten == {"schema_version": _SCHEMA_VERSION, "speakers": {"vr0010_sam": "Sam"}}
+
+    def test_stale_schema_version_ignored_and_regenerated(self, tmp_path):
+        """A versioned cache with an older schema_version is also regenerated,
+        not just a fully-unversioned one."""
+        import deciwaves._vendor.pydecima.reader as reader
+        from deciwaves.engine.speakers import SpeakerMap, _SCHEMA_VERSION
+        from deciwaves._vendor.pydecima.resources.LocalizedTextResource import LocalizedTextResource
+
+        vp = "localized/sentences/voices/vr0010_sam/simpletext"
+        b = _fake_ltr_bytes("Sam")
+        cache_file = tmp_path / "speakers.json"
+        cache_file.write_text(
+            json.dumps({"schema_version": _SCHEMA_VERSION - 1, "speakers": {"vr0010_sam": "STALE"}}),
+            encoding="utf-8",
+        )
+
+        fake_idx = _make_fake_idx({vp: b})
+
+        def fake_read(stream, objs):
+            if stream.read() == b:
+                obj = MagicMock(spec=LocalizedTextResource)
+                obj.language = ["Sam"]
+                objs["obj0"] = obj
+
+        with patch.object(reader, "read_objects_from_stream", side_effect=fake_read):
+            smap = SpeakerMap(fake_idx, [vp], cache_path=str(cache_file))
+
+        assert smap.name_for("localized/voices/vr0010_sam") == "Sam"
+
+    def test_current_versioned_format_loaded_without_rebuild(self, tmp_path):
+        """A cache already in the current versioned format is loaded as-is
+        (no rebuild) -- read_core is never called."""
+        from deciwaves.engine.speakers import SpeakerMap, _SCHEMA_VERSION
+
+        cache_file = tmp_path / "speakers.json"
+        cache_file.write_text(
+            json.dumps({"schema_version": _SCHEMA_VERSION, "speakers": {"vr0010_sam": "Sam"}}),
+            encoding="utf-8",
+        )
+
+        fake_idx = _make_fake_idx({})  # would raise KeyError if read_core is called
+        smap = SpeakerMap(fake_idx, [], cache_path=str(cache_file))
+        assert smap.name_for("localized/voices/vr0010_sam") == "Sam"
 
 
 class TestSimpleTextFilter:
