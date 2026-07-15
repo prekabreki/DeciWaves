@@ -14,6 +14,8 @@ import struct
 import subprocess
 import wave
 
+from deciwaves.engine.atomic_io import atomic_write
+
 # Resolution order: explicit env override -> PATH -> bare name (fails loudly at
 # call time if truly absent). No more repo-relative vendor/ default -- tool setup
 # is the caller's job (see README's Install/Troubleshooting sections); Task 6's
@@ -112,17 +114,25 @@ def trim_long_silences(src, cache_dir, min_silence=10.0, threshold_db=-30.0, kee
 def _atrim_concat(src, keeps, dst):
     """Build `dst` by concatenating the [start, end] intervals `keeps` of `src`
     via an ffmpeg atrim+concat filter graph. Channel layout / sample rate are
-    preserved (normalize canonicalizes later). Raises ClipError on failure."""
+    preserved (normalize canonicalizes later). Raises ClipError on failure.
+
+    Written via atomic_write: ffmpeg targets a tmp path, moved into place at
+    `dst` only on success, so an interrupted/failed run never leaves a
+    truncated file at the cache path (see engine.atomic_io)."""
     parts = "".join(
         f"[0:a]atrim=start={a}:end={b},asetpts=N/SR/TB[k{i}];"
         for i, (a, b) in enumerate(keeps))
     labels = "".join(f"[k{i}]" for i in range(len(keeps)))
     fc = f"{parts}{labels}concat=n={len(keeps)}:v=0:a=1[out]"
-    proc = subprocess.run(
-        ["ffmpeg", "-y", "-i", src, "-filter_complex", fc, "-map", "[out]", dst],
-        capture_output=True, text=True)
-    if proc.returncode != 0 or not os.path.isfile(dst):
-        raise ClipError(f"atrim-concat failed for {src}: {proc.stderr[-300:]}")
+
+    def _run(tmp):
+        proc = subprocess.run(
+            ["ffmpeg", "-y", "-i", src, "-filter_complex", fc, "-map", "[out]", tmp],
+            capture_output=True, text=True)
+        if proc.returncode != 0 or not os.path.isfile(tmp):
+            raise ClipError(f"atrim-concat failed for {src}: {proc.stderr[-300:]}")
+
+    atomic_write(dst, _run)
 
 
 def apply_keep_spans(src, spans, cache_dir):
@@ -160,16 +170,23 @@ def clip_wav(idx, stream_path, cache_dir, vgmstream=VGMSTREAM):
         raise ClipError(f"bad RIFF in {stream_path}: {e}") from e
     with open(wem_path, "wb") as f:
         f.write(trimmed)
-    try:
-        proc = subprocess.run([vgmstream, "-o", wav_path, wem_path],
+
+    def _run(tmp):
+        proc = subprocess.run([vgmstream, "-o", tmp, wem_path],
                               capture_output=True, text=True)
+        if proc.returncode != 0 or not os.path.isfile(tmp):
+            detail = _returncode_detail(proc.returncode)
+            stderr = (proc.stderr or "").strip()
+            if stderr:
+                detail = f"{detail}; stderr: {stderr}"
+            raise ClipError(f"vgmstream failed for {stream_path}: {detail}")
+
+    try:
+        # atomic_write: vgmstream targets a tmp path, moved into place only on
+        # success, so a crash/interrupt mid-decode never poisons the cache
+        # with a truncated .wav (see engine.atomic_io).
+        atomic_write(wav_path, _run)
     finally:
         if os.path.isfile(wem_path):
             os.remove(wem_path)
-    if proc.returncode != 0 or not os.path.isfile(wav_path):
-        detail = _returncode_detail(proc.returncode)
-        stderr = (proc.stderr or "").strip()
-        if stderr:
-            detail = f"{detail}; stderr: {stderr}"
-        raise ClipError(f"vgmstream failed for {stream_path}: {detail}")
     return wav_path, wav_duration_seconds(wav_path)

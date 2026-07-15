@@ -151,6 +151,70 @@ def test_silence_wav_duration(tmp_path):
         assert abs(w.getnframes() / w.getframerate() - 0.5) < 1e-3
 
 
+def test_silence_wav_interrupted_write_does_not_poison_cache(tmp_path, monkeypatch):
+    """Regression for issue #18: an interrupted silence_wav write (Ctrl-C /
+    crash mid-write) must not leave a truncated .wav at the final cache path
+    -- silence_wav's cache check is a bare `isfile`, so ANY file sitting there
+    is treated as valid forever."""
+    real_wave_open = rs.wave.open
+
+    def flaky_open(path, mode):
+        with open(path, "wb") as f:
+            f.write(b"PARTIAL-GARBAGE-NOT-A-COMPLETE-WAVE-FILE")
+        raise RuntimeError("simulated interrupt mid-write (Ctrl-C)")
+
+    monkeypatch.setattr(rs.wave, "open", flaky_open)
+
+    with pytest.raises(RuntimeError):
+        rs.silence_wav(0.5, str(tmp_path))
+
+    final_path = os.path.join(str(tmp_path), "silence_500ms.wav")
+    assert not os.path.isfile(final_path), \
+        "interrupted write must not poison the cache at the final path"
+    assert os.listdir(str(tmp_path)) == [], "no tmp file should be left behind"
+
+    # Cache must not be permanently poisoned: a real run afterwards succeeds.
+    monkeypatch.setattr(rs.wave, "open", real_wave_open)
+    p = rs.silence_wav(0.5, str(tmp_path))
+    assert os.path.isfile(p)
+    with wave.open(p, "rb") as w:
+        assert abs(w.getnframes() / w.getframerate() - 0.5) < 1e-3
+
+
+@needs_ffmpeg
+def test_normalize_wav_interrupted_write_does_not_poison_cache(tmp_path, monkeypatch):
+    """Regression for issue #18: an ffmpeg normalize run that partially writes
+    the destination then fails must not leave a truncated file at the cache
+    path that a later run's `isfile and getsize > 44` check would accept."""
+    src = tmp_path / "mono.wav"
+    _write_wav(src, nchannels=1, seconds=1.0)
+    norm_dir = tmp_path / "norm"
+
+    real_run = rs.subprocess.run
+
+    def flaky_run(args, **kwargs):
+        out_path = args[-1]
+        with open(out_path, "wb") as f:
+            f.write(b"GARBAGE-OVER-44-BYTES-BUT-NOT-A-REAL-WAVE-FILE-AT-ALL")
+        return subprocess.CompletedProcess(
+            args=args, returncode=1, stdout="", stderr="simulated crash mid-write")
+
+    monkeypatch.setattr(rs.subprocess, "run", flaky_run)
+    with pytest.raises(RuntimeError):
+        rs.normalize_wav(str(src), str(norm_dir))
+
+    dst = os.path.join(str(norm_dir), os.path.basename(str(src)))
+    assert not os.path.isfile(dst), \
+        "failed normalize must not poison the cache at the final path"
+    assert not os.path.isdir(norm_dir) or os.listdir(norm_dir) == [], \
+        "no tmp file should be left behind after a failed normalize"
+
+    # Cache must not be permanently poisoned: a real run afterwards succeeds.
+    monkeypatch.setattr(rs.subprocess, "run", real_run)
+    out = rs.normalize_wav(str(src), str(norm_dir))
+    assert os.path.isfile(out)
+
+
 def test_load_keepspans_parses_map(tmp_path):
     p = tmp_path / "ks.csv"
     p.write_text(

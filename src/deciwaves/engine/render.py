@@ -14,6 +14,8 @@ import re
 import subprocess
 import wave
 
+from deciwaves.engine.atomic_io import atomic_write
+
 BUDGET_SECONDS = 290_000_000 * 8 / 128_000  # = 18125.0 (ideal 128 kbps, no overhead)
 
 # Real MP3s carry ~1.1% over the ideal CBR stream (frame headers + bit
@@ -112,9 +114,16 @@ def silence_wav(seconds, cache_dir):
     path = os.path.join(cache_dir, f"silence_{int(seconds * 1000)}ms.wav")
     if os.path.isfile(path):
         return path
-    with wave.open(path, "wb") as w:
-        w.setnchannels(2); w.setsampwidth(2); w.setframerate(SR)
-        w.writeframes(b"\x00\x00\x00\x00" * int(seconds * SR))
+
+    def _run(tmp):
+        with wave.open(tmp, "wb") as w:
+            w.setnchannels(2); w.setsampwidth(2); w.setframerate(SR)
+            w.writeframes(b"\x00\x00\x00\x00" * int(seconds * SR))
+
+    # atomic_write: write to a tmp path first so an interrupt mid-write can
+    # never leave a truncated file at `path` that the bare isfile() check
+    # above would treat as valid forever (see engine.atomic_io).
+    atomic_write(path, _run)
     return path
 
 
@@ -133,12 +142,19 @@ def normalize_wav(src, norm_dir):
     dst = os.path.join(norm_dir, os.path.basename(src))
     if os.path.isfile(dst) and os.path.getsize(dst) > 44:
         return dst
-    proc = subprocess.run(
-        ["ffmpeg", "-y", "-i", src, "-ac", "2", "-ar", str(SR),
-         "-sample_fmt", "s16", dst],
-        capture_output=True, text=True)
-    if proc.returncode != 0 or not os.path.isfile(dst):
-        raise RuntimeError(f"normalize failed for {src}: {proc.stderr[-300:]}")
+
+    def _run(tmp):
+        proc = subprocess.run(
+            ["ffmpeg", "-y", "-i", src, "-ac", "2", "-ar", str(SR),
+             "-sample_fmt", "s16", tmp],
+            capture_output=True, text=True)
+        if proc.returncode != 0 or not os.path.isfile(tmp):
+            raise RuntimeError(f"normalize failed for {src}: {proc.stderr[-300:]}")
+
+    # atomic_write: ffmpeg targets a tmp path, moved into place only on
+    # success (see engine.atomic_io) -- an interrupted/failed normalize can
+    # no longer poison the cache with a truncated file.
+    atomic_write(dst, _run)
     return dst
 
 

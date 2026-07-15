@@ -178,6 +178,65 @@ def test_clip_wav_error_includes_stderr_clause_when_present(tmp_path, monkeypatc
     assert "stderr: missing sample rate" in msg
 
 
+def test_clip_wav_interrupted_vgmstream_does_not_poison_cache(tmp_path, monkeypatch):
+    """Regression for issue #18: a vgmstream run that partially writes the
+    output then fails (simulating Ctrl-C / a crash mid-decode) must not leave
+    a truncated .wav sitting at the FINAL cache path -- clip_wav's own
+    `isfile and getsize > 44` check would otherwise treat that truncated file
+    as a valid cache hit on every later run, silently serving corrupt audio."""
+    def fake_run(args, **kwargs):
+        out_path = args[args.index("-o") + 1]
+        # >44 bytes: would pass clip_wav's own cache-validity check if it
+        # ever ended up at the real cache path.
+        with open(out_path, "wb") as f:
+            f.write(b"RIFF" + b"\x00" * 60)
+        return _FakeProc(1, stderr="simulated crash mid-decode")
+
+    monkeypatch.setattr(ac.subprocess, "run", fake_run)
+
+    with pytest.raises(ac.ClipError):
+        ac.clip_wav(_FakeIdxRaw(), "some/stream.core.stream", str(tmp_path),
+                    vgmstream="vgmstream-cli")
+
+    wav_path = os.path.join(str(tmp_path), ac._key("some/stream.core.stream") + ".wav")
+    assert not os.path.isfile(wav_path), \
+        "failed decode must not poison the WAV cache at the final path"
+    assert os.listdir(str(tmp_path)) == [], \
+        "no tmp .wav or .wem should be left behind after a failed decode"
+
+
+@needs_ffmpeg
+def test_apply_keep_spans_interrupted_write_does_not_poison_cache(tmp_path, monkeypatch):
+    """Regression for issue #18: an atrim-concat run that partially writes the
+    destination then fails must not leave a truncated file at the cache path
+    that a later run's `isfile and getsize > 44` check would accept."""
+    src = tmp_path / "track.wav"
+    _synth(src, [("tone", 5.0)])
+    cache_dir = tmp_path / "kept"
+
+    real_run = ac.subprocess.run
+
+    def flaky_run(args, **kwargs):
+        out_path = args[-1]  # ffmpeg output path is the last arg
+        with open(out_path, "wb") as f:
+            f.write(b"GARBAGE-NOT-REALLY-A-WAV-FILE-BUT-OVER-44-BYTES-LONG")
+        return _FakeProc(1, stderr="simulated ffmpeg crash mid-write")
+
+    monkeypatch.setattr(ac.subprocess, "run", flaky_run)
+    with pytest.raises(ac.ClipError):
+        ac.apply_keep_spans(str(src), [(1.0, 2.0)], str(cache_dir))
+
+    assert not os.path.isdir(cache_dir) or os.listdir(cache_dir) == [], \
+        "failed atrim-concat must not poison the cache with a truncated file"
+
+    # Cache must not be permanently poisoned: a real, successful run afterwards
+    # must still work (no leftover .tmp blocking/confusing later writes).
+    monkeypatch.setattr(ac.subprocess, "run", real_run)
+    out, dur = ac.apply_keep_spans(str(src), [(1.0, 2.0)], str(cache_dir))
+    assert os.path.isfile(out)
+    assert abs(dur - 1.0) < 0.1
+
+
 def test_clip_wav_cleans_temp_wem_when_vgmstream_missing(tmp_path):
     import os
     class FakeIdx:
