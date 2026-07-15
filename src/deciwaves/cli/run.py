@@ -1,9 +1,14 @@
 """``deciwaves <game> run`` — chain a game's stages end-to-end, with resume + gating.
 
 Deliberately dumb and explicit (YAGNI): a :class:`Stage` is a name, its STAGES module
-string, a function that builds that stage's argv from a small per-game context dict,
-and the workspace-relative path/dir that marks it done. The loop is a plain
-for-loop -- no plugin machinery, no stage discovery magic.
+string, and a function that builds that stage's argv from a small per-game context
+dict. The loop is a plain for-loop -- no plugin machinery, no stage discovery magic.
+
+Resume is driven by a per-stage done-marker file, ``out/<game>/.done-<stage>``,
+written only after a stage's ``main()`` returns rc==0. A stage's own output path or
+directory existing is NOT a skip criterion: a stage's own mkdir (or a leftover
+output from an old build) must not look like "done", and one stage's output
+directory must never be mistaken for another stage's (see issues #15 and #6).
 
 Per-game chains (see task-9 brief):
     ds:  catalog -> order -> render (cutscene voice tracks come from the packaged,
@@ -37,7 +42,6 @@ class Stage:
     name: str
     module: str
     build_argv: Callable[[dict], list]
-    primary_output: str
     gpu: bool = False  # gate on importlib.util.find_spec("whisperx") before running
 
 
@@ -47,10 +51,21 @@ def _gpu_gate_message(stage_name: str) -> str:
             f"(see https://pytorch.org/get-started/locally/).")
 
 
-def _run_chain(chain: list[Stage], ctx: dict) -> int:
+def _done_marker(game: str, stage_name: str) -> str:
+    """Workspace-relative path to a stage's done-marker (issues #15, #6).
+
+    A stage is considered done iff this file exists -- never its own output
+    path/directory, which can pre-exist from a crash after mkdir, a leftover
+    from an old build, or (for fw) another stage entirely.
+    """
+    return os.path.join("out", game, f".done-{stage_name}")
+
+
+def _run_chain(game: str, chain: list[Stage], ctx: dict) -> int:
     for st in chain:
-        if os.path.exists(st.primary_output):
-            print(f"skip {st.name} ({st.primary_output} exists — delete it to re-run)")
+        marker = _done_marker(game, st.name)
+        if os.path.isfile(marker):
+            print(f"skip {st.name} ({marker} exists -- delete it to force a re-run)")
             continue
         if st.gpu and importlib.util.find_spec("whisperx") is None:
             print(_gpu_gate_message(st.name))
@@ -63,6 +78,8 @@ def _run_chain(chain: list[Stage], ctx: dict) -> int:
         rc = _import_stage(st.module)(argv) or 0
         if rc:
             return rc
+        os.makedirs(os.path.dirname(marker), exist_ok=True)
+        open(marker, "w", encoding="utf-8").close()
     return 0
 
 
@@ -134,11 +151,11 @@ def _run_ds(cfg: dict, extra_argv: list) -> int:
     # the user's install. `deciwaves ds cutscenes` remains available standalone for
     # anyone who wants to regenerate it (e.g. against a patched install).
     chain = [
-        Stage("catalog", STAGES["ds"]["catalog"][0], _ds_catalog_argv, "out/catalog.csv"),
-        Stage("order", STAGES["ds"]["order"][0], _ds_order_argv, "out/playlist.csv"),
-        Stage("render", STAGES["ds"]["render"][0], _ds_render_argv, "out/audio"),
+        Stage("catalog", STAGES["ds"]["catalog"][0], _ds_catalog_argv),
+        Stage("order", STAGES["ds"]["order"][0], _ds_order_argv),
+        Stage("render", STAGES["ds"]["render"][0], _ds_render_argv),
     ]
-    return _run_chain(chain, ctx)
+    return _run_chain("ds", chain, ctx)
 
 
 # ---------------------------------------------------------------------------
@@ -160,13 +177,13 @@ def _run_hzd(cfg: dict, extra_argv: list) -> int:
 
     ctx = {"package": package}
     chain = [
-        Stage("catalog", STAGES["hzd"]["catalog"][0], _hzd_package_argv, "out/hzd/catalog.csv"),
-        Stage("clip-index", STAGES["hzd"]["clip-index"][0], _hzd_package_argv, "out/hzd/clip-index.csv"),
-        Stage("wem-metadata", STAGES["hzd"]["wem-metadata"][0], _hzd_package_argv, "out/hzd/wem-metadata.csv"),
-        Stage("bind", STAGES["hzd"]["bind"][0], _hzd_package_argv, "out/hzd/asr-manifest.csv", gpu=True),
-        Stage("render", STAGES["hzd"]["render"][0], _hzd_package_argv, "out/hzd/audio"),
+        Stage("catalog", STAGES["hzd"]["catalog"][0], _hzd_package_argv),
+        Stage("clip-index", STAGES["hzd"]["clip-index"][0], _hzd_package_argv),
+        Stage("wem-metadata", STAGES["hzd"]["wem-metadata"][0], _hzd_package_argv),
+        Stage("bind", STAGES["hzd"]["bind"][0], _hzd_package_argv, gpu=True),
+        Stage("render", STAGES["hzd"]["render"][0], _hzd_package_argv),
     ]
-    return _run_chain(chain, ctx)
+    return _run_chain("hzd", chain, ctx)
 
 
 # ---------------------------------------------------------------------------
@@ -225,12 +242,11 @@ def _run_fw(cfg: dict, extra_argv: list) -> int:
 
     ctx = {"package": package, "gamescript": ns.gamescript}
     chunk1 = [
-        Stage("extract", STAGES["fw"]["extract"][0], _fw_extract_argv, "out/fw"),
-        Stage("asr", STAGES["fw"]["asr"][0], _fw_asr_argv, "out/fw/transcripts.csv", gpu=True),
-        Stage("subtitle-bind", STAGES["fw"]["subtitle-bind"][0], _fw_subtitle_bind_argv,
-              _FW_SUBTITLE_MANIFEST_FULL),
+        Stage("extract", STAGES["fw"]["extract"][0], _fw_extract_argv),
+        Stage("asr", STAGES["fw"]["asr"][0], _fw_asr_argv, gpu=True),
+        Stage("subtitle-bind", STAGES["fw"]["subtitle-bind"][0], _fw_subtitle_bind_argv),
     ]
-    rc = _run_chain(chunk1, ctx)
+    rc = _run_chain("fw", chunk1, ctx)
     if rc:
         return rc
 
@@ -240,11 +256,11 @@ def _run_fw(cfg: dict, extra_argv: list) -> int:
         return 0
 
     chunk2 = [
-        Stage("match", STAGES["fw"]["match"][0], _fw_match_argv, "out/fw/story-manifest.csv"),
-        Stage("full-reel", STAGES["fw"]["full-reel"][0], _fw_full_reel_argv, _FW_FULL_REEL_MANIFEST),
-        Stage("render", STAGES["fw"]["render"][0], _fw_render_argv, "out/fw/audio"),
+        Stage("match", STAGES["fw"]["match"][0], _fw_match_argv),
+        Stage("full-reel", STAGES["fw"]["full-reel"][0], _fw_full_reel_argv),
+        Stage("render", STAGES["fw"]["render"][0], _fw_render_argv),
     ]
-    return _run_chain(chunk2, ctx)
+    return _run_chain("fw", chunk2, ctx)
 
 
 # ---------------------------------------------------------------------------
