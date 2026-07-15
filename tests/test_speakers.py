@@ -210,6 +210,65 @@ class TestEnglishSelectionGuard:
         result = self._run_build_with_language_list(vp, language_list)
         assert result == {}
 
+    def test_index0_english_accepted_ignores_different_sibling_names(self):
+        """T6b: happy path unchanged -- when index 0 passes the guard,
+        sibling slots are never consulted, even if they carry a different
+        plausible name."""
+        vp = "localized/sentences/voices/vr0010_sam/simpletext"
+        language_list = ["Sam", "NotSam", self.JAPANESE_ONLY] + [""] * 18
+        result = self._run_build_with_language_list(vp, language_list)
+        assert result == {"vr0010_sam": "Sam"}
+
+
+class TestSiblingSlotRecovery:
+    """T6b (issue #3 follow-up): in the shift case (index 0 rejected by
+    ``is_plausibly_english``), character display names are frequently
+    identical Latin text across locales, so scan the remaining language
+    slots in order for the first non-empty, plausibly-English candidate
+    before giving up and falling back to the stem-derived guess."""
+
+    JAPANESE_ONLY = "サム"  # stands in for a shifted, non-English index 0.
+
+    def _run_build_with_language_list(self, vp, language_list):
+        import deciwaves._vendor.pydecima.reader as reader
+        from deciwaves._vendor.pydecima.resources.LocalizedTextResource import LocalizedTextResource
+        from deciwaves.engine.speakers import SpeakerMap
+
+        fake_idx = _make_fake_idx({vp: b"data"})
+
+        def fake_read(stream, objs):
+            obj = MagicMock(spec=LocalizedTextResource)
+            obj.language = language_list
+            objs["obj0"] = obj
+
+        with patch.object(reader, "read_objects_from_stream", side_effect=fake_read):
+            return SpeakerMap._build_map(fake_idx, [vp])
+
+    def test_shift_case_uses_first_latin_sibling_slot(self):
+        """Shift case (index 0 rejected): a later slot with a plausibly-
+        English name ("Fragile") is used instead of the stem guess ("Frg")."""
+        vp = "localized/sentences/voices/vr0040_frg/simpletext"
+        language_list = [self.JAPANESE_ONLY, "Fragile"] + [""] * 19
+        result = self._run_build_with_language_list(vp, language_list)
+        assert result == {"vr0040_frg": "Fragile"}
+
+    def test_shift_case_picks_first_qualifying_sibling_in_order(self):
+        """When multiple sibling slots qualify, the first one (in list
+        order) wins."""
+        vp = "localized/sentences/voices/vr0040_frg/simpletext"
+        language_list = [self.JAPANESE_ONLY, "", "Fragile", "AlsoFragile"] + [""] * 17
+        result = self._run_build_with_language_list(vp, language_list)
+        assert result == {"vr0040_frg": "Fragile"}
+
+    def test_shift_case_all_siblings_non_latin_or_empty_falls_back_to_stem(self):
+        """Shift case where every remaining slot is also non-Latin or
+        empty: no sibling candidate qualifies, so fall back to the
+        stem-derived guess exactly as before this change."""
+        vp = "localized/sentences/voices/vr0099_mystery_person/simpletext"
+        language_list = [self.JAPANESE_ONLY, self.JAPANESE_ONLY, ""] + [""] * 18
+        result = self._run_build_with_language_list(vp, language_list)
+        assert result == {"vr0099_mystery_person": "Mystery Person"}
+
 
 class TestNameFromStem:
     """Direct unit tests pinning the stem-derived fallback name contract."""

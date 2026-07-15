@@ -29,9 +29,12 @@ _DS_SIMPLETEXT_FILTER: Callable[[str], bool] = (
 #: speakers.json cache schema version. Bump whenever a change to
 #: _build_map's selection logic would make previously-cached names wrong
 #: (issue #3: caches from before this fix could hold Japanese names spilled
-#: from the language[0] shift bug) -- a mismatched/absent marker forces a
-#: full rebuild instead of silently trusting stale disk content.
-_SCHEMA_VERSION = 2
+#: from the language[0] shift bug; T6b: caches from before sibling-slot
+#: recovery could hold a stem-derived guess where a sibling language slot
+#: now yields the real Latin display name instead) -- a mismatched/absent
+#: marker forces a full rebuild instead of silently trusting stale disk
+#: content.
+_SCHEMA_VERSION = 3
 
 #: Strips a leading "<letters><digits>_" voice-code prefix (e.g. "vr0010_")
 #: off a stem, leaving the human-readable slug behind.
@@ -145,7 +148,20 @@ class SpeakerMap:
                             # so an empty English slot shifts index 0 onto
                             # the first non-empty language (issue #3) --
                             # never surface that wrong-language text.
-                            result[stem] = _name_from_stem(stem)
+                            # Character display names are frequently
+                            # identical Latin text across locales, so
+                            # scan the remaining slots in order for the
+                            # first non-empty, plausibly-English sibling
+                            # (T6b) before giving up on a stem guess.
+                            sibling = next(
+                                (lang for lang in obj.language[1:]
+                                 if lang and is_plausibly_english(lang)),
+                                None,
+                            )
+                            result[stem] = (
+                                sibling if sibling is not None
+                                else _name_from_stem(stem)
+                            )
                         # else: no text at all -- leave unmapped, exactly
                         # as before (name_for() falls back to "").
                     # Assumption: each simpletext core holds exactly one
