@@ -19,7 +19,7 @@ per-game configuration seam, and the tail of the pipeline (selection, ordering, 
 ```
 src/deciwaves/
   engine/          game-agnostic core: archive readers, the GameProfile seam,
-                   the shared catalog/selection/story_order/render pipeline
+                   shared pipeline pieces (selection, render, catalog CSV-resume)
     pack/          per-archive-format byte readers
   games/
     ds/            Death Stranding specifics
@@ -34,11 +34,11 @@ tests/             the test suite (mirrors the src/ layout)
 ```
 
 `deciwaves.engine` is "game-agnostic" in the sense that nothing under it hardcodes a single
-game's paths or vocabulary — but it earns that status per-module, not by decree. Some
-engine modules (`catalog.py`, `story_order.py`) still lean on Death-Stranding-shaped
-defaults and reach into `deciwaves.games.ds` for a couple of constants; that's a known
-rough edge, not a hidden design goal. Treat `engine/` as "the code more than one game
-uses today," not as a strict abstraction boundary.
+game's paths or vocabulary. The DS-shaped stages that used to live here — the `catalog`
+builder and `story_order` — now sit under `deciwaves.games.ds`; what remains in `engine/`
+is what more than one game genuinely uses: archive readers, the `GameProfile` seam,
+`selection`, `render`, and the game-free CSV-resume helpers in `catalog_io.py`. Treat
+`engine/` as "the code more than one game uses today," not as a strict abstraction boundary.
 
 ## The `GameProfile` seam
 
@@ -52,15 +52,15 @@ game-agnostic module needs without hardcoding a specific game's paths:
 - `speaker_simpletext_filter` — a predicate that picks out the per-voice files used to
   resolve human-readable speaker names.
 
-Those four fields are the ones actually read off a `GameProfile` today
-(`engine/catalog.py`, `games/hzd/catalog.py`, `games/hzd/wem_metadata.py`). The dataclass
-also declares `name`, `transcript_path`, `out_dir`, `episode_map`, and `cutscene_resolver` —
-five more fields with no current profile-level reader. The DS code that plays their role
-(`engine/story_order.py`, `games/ds/episode_map.py`, `games/ds/cutscene_audio.py`) imports
-the DS module directly instead of going through the profile, so passing those fields on a
-profile object doesn't currently do anything. Trimming `GameProfile` down to the four
-consumed fields is tracked in issue #24 — don't take the extra five as a contract a fourth
-game needs to fill in.
+Those four fields are the only ones a `GameProfile` carries — they are exactly what the
+per-game `catalog` stage (`games/ds/catalog.py`, `games/hzd/catalog.py`) and
+`games/hzd/wem_metadata.py` read off a profile. DS-specific behaviour that has no
+cross-game reader — episode ordering, cutscene resolution, transcript anchoring, output
+paths — is handled by the `games.ds` modules (`games/ds/story_order.py`,
+`games/ds/episode_map.py`, `games/ds/cutscene_audio.py`) directly, not through the seam.
+(Earlier revisions of this dataclass also declared `name`, `transcript_path`, `out_dir`,
+`episode_map`, and `cutscene_resolver`; those had no profile-level reader and were removed
+in issue #24 — don't take them as a contract a fourth game needs to fill in.)
 
 Each game builds its own profile from a `build_profile(...)` factory
 (`games/ds/profile.py`, `games/hzd/profile.py`) that supplies its own prefix map and
@@ -73,7 +73,8 @@ what HZD actually reads off the profile before assuming you need every field.
 
 The DS and HZD pipelines share this shape (FW's is described in its own section below):
 
-1. **Catalog** (`engine/catalog.py` for DS, `games/hzd/catalog.py` for HZD) — walk the
+1. **Catalog** (`games/ds/catalog.py` for DS, `games/hzd/catalog.py` for HZD; the game-free
+   CSV-resume bookkeeping both share lives in `engine/catalog_io.py`) — walk the
    game's dialogue resources and emit one CSV row per voice line: a stable line ID, the
    source `.core` path, category/scene, speaker code and display name, the English
    subtitle, and a path to the encoded audio stream. This stage is resumable (it skips
@@ -84,12 +85,12 @@ The DS and HZD pipelines share this shape (FW's is described in its own section 
    drop within-scene duplicate `(scene, speaker, subtitle)` triples while keeping the same
    line if it recurs in a different scene. This is deliberately factored out of
    `story_order` so a future profile can reuse it without copying the logic.
-3. **Story order** (`engine/story_order.py`) — turns the filtered catalog plus (for DS)
+3. **Story order** (`games/ds/story_order.py`) — turns the filtered catalog plus (for DS)
    cutscene track rows into an ordered playlist. Where a user-supplied narrative
    transcript is available it anchors scenes to their real chronological position;
-   everywhere else, episode/scene heuristics place the line. A `GameProfile` with an empty
-   `transcript_path` (the shipped default — DeciWaves does not bundle any game's script
-   text) falls back cleanly to the heuristic order.
+   everywhere else, episode/scene heuristics place the line. The stage's `--transcript`
+   argument defaults to empty (DeciWaves does not bundle any game's script text), so it
+   falls back cleanly to the heuristic order.
 4. **Render** (`engine/render.py`) — packs the ordered playlist into MP3 files sized to
    stay under a fixed per-file budget (comfortably under 290 MB per file at a given
    bitrate), inserting small silence gaps between lines and a longer one between scenes,

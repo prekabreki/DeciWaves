@@ -18,8 +18,10 @@ stable ID, internal name, speaker (where derivable), category/scene, language, a
 a playable WAV — rendered into ≤290 MB story-ordered MP3 reels.
 
 **Architecture:** `src/deciwaves/engine/` is the (largely) game-agnostic core — archive/pack
-readers, the `GameProfile` config seam, and the catalog → selection → story_order → render
-pipeline; `src/deciwaves/games/{ds,hzd,fw}/` hold the per-game specializations. The three
+readers, the `GameProfile` config seam, and the shared tail of the catalog → selection →
+story_order → render pipeline (`selection`, `render`, and the game-free CSV-resume helpers in
+`catalog_io.py`); `src/deciwaves/games/{ds,hzd,fw}/` hold the per-game specializations,
+including each game's own `catalog` and (for DS) `story_order`. The three
 games share an engine, but each required a genuinely distinct extraction/binding solution —
 **true cross-game agnosticism is a non-goal**; the shared seam earns its keep only for what is
 genuinely common across all three. See [`docs/architecture.md`](docs/architecture.md) for the
