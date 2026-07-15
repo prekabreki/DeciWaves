@@ -8,8 +8,8 @@ dependency, no auth, and the flatten step means callers never need to know
 whether the upstream zip nests its exe one folder deep.
 
 URLs are pinned to specific releases (not "latest" redirects) so a run next
-year fetches the same bits this one did; see .memories/ or the Task 7 report
-for the `gh release view` commands used to verify these asset names exist.
+year fetches the same bits this one did; .memories/toolchain-notes.md records
+how the pinned asset names were verified against the upstream releases.
 """
 from __future__ import annotations
 
