@@ -85,6 +85,28 @@ def test_order_cutscene_groups_uses_anchor_then_hint():
     assert so.order_cutscene_groups(anchors) == ["cs03", "cs53", "cs04", "cs11"]
 
 
+def test_order_cutscene_groups_default_fallback_orders_by_cs_number():
+    # No transcript (the shipped default): every group is unanchored. Unhinted groups
+    # must fall back to the numeric cs-number embedded in their name (not the old flat
+    # tied sentinel), so the main story orders numerically and lands BEFORE the hinted
+    # extras' explicit ~980+ keys. A group name with no parsable cs-number sorts last.
+    groups = {"cs10": None, "cs2": None, "cs7": None, "cs71": None, "weird_group": None}
+    assert so.order_cutscene_groups(groups) == ["cs2", "cs7", "cs10", "cs71", "weird_group"]
+
+
+def test_order_cutscene_groups_is_independent_of_input_order():
+    # Same groups, deliberately different insertion/iteration order (standing in for the
+    # hash-randomized set the caller used to build this from) -- output must not change.
+    order_a = {"cs2": None, "cs10": None, "cs7": None, "weird_b": None, "weird_a": None}
+    order_b = {"weird_a": None, "weird_b": None, "cs7": None, "cs10": None, "cs2": None}
+    assert so.order_cutscene_groups(order_a) == so.order_cutscene_groups(order_b)
+    # tied (unparseable) names must still resolve deterministically via the name tiebreak
+    assert so.order_cutscene_groups(order_a)[-2:] == ["weird_a", "weird_b"]
+    # and a set (genuinely hash-order-dependent iteration) feeds through the same way
+    from_set = {g: None for g in {"cs2", "cs10", "cs7"}}
+    assert so.order_cutscene_groups(from_set) == ["cs2", "cs7", "cs10"]
+
+
 def test_cutscene_scenes_ordered_by_anchor_not_csnumber():
     # build an index so cs53 lines anchor between cs03 and cs04
     idx = {"line for cs03 scene here": 100, "line for cs53 scene here": 150,

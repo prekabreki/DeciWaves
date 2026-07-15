@@ -58,11 +58,26 @@ def _section_for(category):
     return SECTION["radio"] if category == "common" else SECTION[category]
 
 
+_UNPARSEABLE_CS_KEY = 1e6  # sentinel: sorts after every real anchor/hint/cs-number
+
+
 def order_cutscene_groups(group_anchors):
-    """Cutscene groups ordered by anchor; unanchored groups by CS_ORDER_HINT (else large)."""
+    """Cutscene groups ordered by transcript anchor; else CS_ORDER_HINT; else the numeric
+    cs-number parsed from the group name (e.g. "sq_cs07_..." group "cs07" -> 7), so the
+    main story orders numerically and sorts before the hinted extras' ~980+ keys instead
+    of tying at a flat sentinel. Group names with no parsable cs-number sort last. The
+    group name is an explicit tiebreak, so equal keys still sort deterministically --
+    independent of set-iteration order, hash seed, or insertion order."""
     def key(g):
         a = group_anchors.get(g)
-        return a if a is not None else em.CS_ORDER_HINT.get(g, 1e6)
+        if a is not None:
+            k = float(a)
+        elif g in em.CS_ORDER_HINT:
+            k = em.CS_ORDER_HINT[g]
+        else:
+            n = em.cs_number(g)
+            k = float(n) if n is not None else _UNPARSEABLE_CS_KEY
+        return (k, g)
     return sorted(group_anchors, key=key)
 
 

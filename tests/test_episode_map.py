@@ -7,6 +7,23 @@ def test_cs_group_extracts_group():
     assert em.cs_group("lines_m00010") is None
 
 
+def test_cs_number_extracts_numeric_ordinal():
+    assert em.cs_number("cs07") == 7
+    assert em.cs_number("cs00") == 0
+    assert em.cs_number("cs71") == 71
+
+
+def test_cs_number_lexicographic_trap():
+    # "cs10" < "cs9" as strings, but 10 > 9 numerically -- the sort key must use the
+    # latter or multi-digit groups silently sort before single-digit ones.
+    assert em.cs_number("cs10") > em.cs_number("cs9")
+
+
+def test_cs_number_unparseable_returns_none():
+    assert em.cs_number("csXX") is None
+    assert em.cs_number("mystery_group") is None
+
+
 def test_non_story_cs_groups_are_the_extra_and_battlefield_titles():
     # The main-story cull excludes exactly the Extra/Battlefield cutscene groups,
     # and never a real story episode.
