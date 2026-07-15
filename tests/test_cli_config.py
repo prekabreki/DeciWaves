@@ -35,6 +35,23 @@ def test_load_returns_empty_dict_and_warns_on_truncated_file(tmp_path, monkeypat
     assert capsys.readouterr().out.strip() != ""
 
 
+@pytest.mark.parametrize("payload", ["null", "[1, 2]", '"a string"', "42"])
+def test_load_returns_empty_dict_and_warns_on_non_object_json(
+        tmp_path, monkeypatch, capsys, payload):
+    # Valid JSON of the wrong type is corruption too: every caller does
+    # cfg.get(...), so a null/list/scalar payload would brick commands
+    # with AttributeError just like malformed JSON does.
+    cfg_dir = tmp_path / "cfg"
+    cfg_dir.mkdir(parents=True)
+    (cfg_dir / "config.json").write_text(payload, encoding="utf-8")
+    monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(cfg_dir))
+
+    result = config.load()
+
+    assert result == {}
+    assert capsys.readouterr().out.strip() != ""
+
+
 def test_load_returns_empty_dict_and_warns_on_os_error(tmp_path, monkeypatch, capsys):
     cfg_dir = tmp_path / "cfg"
     cfg_dir.mkdir(parents=True)

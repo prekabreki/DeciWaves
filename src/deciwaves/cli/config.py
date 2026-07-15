@@ -11,18 +11,25 @@ def path() -> Path:
         os.environ.get("LOCALAPPDATA", str(Path.home())), "DeciWaves")
     return Path(root) / "config.json"
 
+def _warn_corrupted(cfg_path: Path, reason) -> None:
+    print(
+        f"warning: config file {cfg_path} is corrupted ({reason}); "
+        "ignoring it and starting fresh -- run `deciwaves setup` to repair."
+    )
+
 def load() -> dict:
     cfg_path = path()
     try:
-        return json.loads(cfg_path.read_text(encoding="utf-8"))
+        cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return {}
     except (json.JSONDecodeError, OSError) as exc:
-        print(
-            f"warning: config file {cfg_path} is corrupted ({exc}); "
-            "ignoring it and starting fresh -- run `deciwaves setup` to repair."
-        )
+        _warn_corrupted(cfg_path, exc)
         return {}
+    if not isinstance(cfg, dict):
+        _warn_corrupted(cfg_path, f"expected a JSON object, got {type(cfg).__name__}")
+        return {}
+    return cfg
 
 def save(cfg: dict) -> None:
     cfg_path = path()
