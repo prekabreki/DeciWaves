@@ -26,8 +26,8 @@ def _rtti_walk_len(buf: bytes) -> int:
 
 
 def _locator_hash(fw, loc):
-    # reverse-lookup the hash for a given Locator (internal map)
-    for h, l in fw._locators._by_hash.items():
+    # reverse-lookup the hash for a given Locator, via the public items() view
+    for h, l in fw.locators.items():
         if l is loc:
             return h
     raise AssertionError("locator not found")
@@ -103,7 +103,55 @@ def test_missing_path(tmp_path):
         fw.read_by_hash(0xDEADBEEF)
 
 
+def test_has_present_and_missing(tmp_path):
+    pkg = _make_package(tmp_path, [("localized/x/sentences.core", b"payload"),
+                                    ("localized/y/other.core", b"other")])
+    fw = FwPackage(pkg)
+    assert fw.has("localized/x/sentences.core") is True
+    assert fw.has("localized/y/other.core") is True
+    assert fw.has("nope/missing.core") is False
+
+
+def test_has_core_delegates_to_has(tmp_path):
+    pkg = _make_package(tmp_path, [("localized/x/sentences.core", b"payload")])
+    fw = FwPackage(pkg)
+    assert fw.has_core("localized/x/sentences") == fw.has("localized/x/sentences.core")
+
+
+def test_read_by_hash_matches_read(tmp_path):
+    payload = b"payload-bytes"
+    pkg = _make_package(tmp_path, [("localized/x/sentences.core", payload)])
+    fw = FwPackage(pkg)
+    assert fw.read_by_hash(file_hash("localized/x/sentences.core")) == payload
+    assert fw.read("localized/x/sentences.core") == fw.read_by_hash(
+        file_hash("localized/x/sentences.core"))
+
+
 def test_first_locator_empty_package(tmp_path):
     fw = FwPackage(_make_package(tmp_path, []))
     with pytest.raises(RuntimeError):
         fw.first_locator()
+
+
+def test_first_locator_picks_smallest_nonempty_core(tmp_path):
+    # first_locator inspects locator metadata only (no archive reads), so a bare
+    # PackFileLocators.bin suffices. It must skip zero-length records and .stream
+    # archives (even smaller ones) and return the smallest remaining .core locator.
+    pkg = tmp_path / "package"
+    pkg.mkdir()
+    packfiles = [
+        (b"package.00.00.core", [(0x01, 0, 0),      # zero-length: skipped
+                                 (0x02, 0, 500),
+                                 (0x03, 512, 40)]),  # smallest qualifying
+        (b"package.00.01.core.stream", [(0x04, 0, 5)]),  # .stream: skipped
+    ]
+    out = struct.pack("<I", len(packfiles))
+    for name, records in packfiles:
+        out += struct.pack("<I", len(name)) + name + struct.pack("<I", len(records))
+        for h, off, length in records:
+            out += struct.pack("<QII", h, off, length)
+    (pkg / "PackFileLocators.bin").write_bytes(out)
+
+    loc = FwPackage(str(pkg)).first_locator()
+    assert loc.archive == "package.00.00.core"
+    assert loc.length == 40

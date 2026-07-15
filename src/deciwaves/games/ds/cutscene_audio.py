@@ -147,18 +147,13 @@ def write_tracks_csv(results: Iterable[SceneAudio], out_path: str) -> None:
 
 
 def packindex_accessors(idx):
-    """Build (read_core, path_exists) callables backed by a PackIndex.
+    """Build (read_core, path_exists) callables backed by a PackReader.
 
-    path_exists is a cheap hash-membership test (no extraction). It reads PackIndex's
-    internal hash table directly because PackIndex exposes no public existence check
-    for an arbitrary path-with-extension (`has_core` only appends `.core`).
+    path_exists is a cheap hash-membership test (no extraction) backed by the
+    PackReader.has() primitive -- an arbitrary path-with-extension existence
+    check (unlike `has_core`, which only appends `.core`).
     """
-    from deciwaves.engine.pack.bin_archive import file_hash
-
-    def path_exists(full_path):
-        return file_hash(full_path) in idx._by_hash
-
-    return idx.read_core, path_exists
+    return idx.read_core, idx.has
 
 
 def cutscene_scenes_from_catalog(catalog_path):

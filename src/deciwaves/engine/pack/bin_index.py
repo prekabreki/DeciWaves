@@ -29,4 +29,14 @@ class PackIndex:
         return self.read(virtual_path + ".core")
 
     def has_core(self, virtual_path: str) -> bool:
-        return file_hash(virtual_path + ".core") in self._by_hash
+        return self.has(virtual_path + ".core")
+
+    def has(self, virtual_path_with_ext: str) -> bool:
+        return file_hash(virtual_path_with_ext) in self._by_hash
+
+    def read_by_hash(self, path_hash: int) -> bytes:
+        hit = self._by_hash.get(path_hash)
+        if hit is None:
+            raise KeyError(hex(path_hash))
+        arc, entry = hit
+        return arc.extract(entry, self.oodle_dll)

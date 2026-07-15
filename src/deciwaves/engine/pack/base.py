@@ -28,6 +28,17 @@ class PackReader(Protocol):
         Convenience wrapper: appends ``.core`` and calls :meth:`read`.
     has_core(virtual_path)
         Return ``True`` if the pack contains a ``.core`` entry for *virtual_path*.
+    has(virtual_path_with_ext)
+        Return ``True`` if the pack contains an entry for the exact virtual path
+        (extension included) — the generic existence check :meth:`read` mirrors,
+        for arbitrary paths (not just the ``.core`` convention ``has_core`` tests).
+        Lets callers test membership without reaching into a reader's internal
+        hash table.
+    read_by_hash(path_hash)
+        Extract raw bytes directly by a precomputed path hash, skipping the
+        string-hashing step in :meth:`read`. Useful for callers that already
+        hold a hash (e.g. while iterating an index) and would otherwise need
+        to reach into reader internals to resolve it.
     """
 
     def read(self, virtual_path_with_ext: str) -> bytes:
@@ -37,4 +48,10 @@ class PackReader(Protocol):
         ...
 
     def has_core(self, virtual_path: str) -> bool:
+        ...
+
+    def has(self, virtual_path_with_ext: str) -> bool:
+        ...
+
+    def read_by_hash(self, path_hash: int) -> bytes:
         ...

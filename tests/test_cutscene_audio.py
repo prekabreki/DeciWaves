@@ -157,6 +157,31 @@ def test_resolve_scene_falls_through_to_nested_subcut():
 
 # --------------------------------------------------------------- csv writer
 
+# ----------------------------------------- packindex_accessors (issue #27)
+
+def test_packindex_accessors_delegates_to_public_has():
+    """packindex_accessors must be backed by the public PackReader.has() primitive,
+    not by reaching into a reader's internal hash table (regression guard, issue #27)."""
+
+    class _FakeReader:
+        def __init__(self):
+            self.has_calls = []
+
+        def read_core(self, vpath):
+            return b"CORE:" + vpath.encode()
+
+        def has(self, full_path):
+            self.has_calls.append(full_path)
+            return full_path == "present.core"
+
+    idx = _FakeReader()
+    read_core, path_exists = ca.packindex_accessors(idx)
+    assert read_core("x") == b"CORE:x"
+    assert path_exists("present.core") is True
+    assert path_exists("missing.core") is False
+    assert idx.has_calls == ["present.core", "missing.core"]
+
+
 def test_write_tracks_csv_one_row_per_track(tmp_path):
     s1 = ca.SceneAudio("sq_cs00_s00400", "resolved", ["a.core.stream", "b.core.stream"])
     s2 = ca.SceneAudio("sq_cs11_s00100", "no_sound_core", [])

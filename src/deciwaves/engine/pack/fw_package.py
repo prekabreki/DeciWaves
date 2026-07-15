@@ -38,10 +38,14 @@ class FwPackage:
         return self.read(virtual_path + ".core")
 
     def has_core(self, virtual_path: str) -> bool:
-        return file_hash(virtual_path + ".core") in self._locators
+        return self.has(virtual_path + ".core")
 
-    # --- escape hatches for Phase-3 self-verify (no path string needed) ---
+    def has(self, virtual_path_with_ext: str) -> bool:
+        return file_hash(virtual_path_with_ext) in self._locators
+
     def read_by_hash(self, path_hash: int) -> bytes:
+        """Read by a precomputed hash (also used by Phase-3 self-verify, which
+        has no path string to hash — see :meth:`first_locator`)."""
         loc = self._locators.lookup(path_hash)
         if loc is None:
             raise KeyError(hex(path_hash))
@@ -60,7 +64,7 @@ class FwPackage:
         # smallest non-empty .core resource (not .core.stream — those are raw payloads,
         # not RTTI streams, so we skip them for the self-verify gate)
         best = None
-        for loc in self._locators._by_hash.values():
+        for _hash, loc in self._locators.items():
             if loc.length > 0 and not loc.archive.endswith(".stream"):
                 if best is None or loc.length < best.length:
                     best = loc
