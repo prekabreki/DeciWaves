@@ -29,6 +29,9 @@ CS_TITLES = {
 
 # Order positions (transcript anchor-scale, ~0..1320) for cutscene groups the transcript
 # does NOT anchor. Anchored groups use their real anchor instead. cs11 = finale (after cs10).
+# CAUTION: if an entry here is removed or typo'd, that group silently falls back to its
+# raw cs_number(group) ordering and can land mid-story instead of at the curated tail --
+# every NON_STORY_CS_GROUPS group must have an entry here (see test_episode_map.py).
 CS_ORDER_HINT = {
     "cs71": 980.0, "cs77": 1000.0, "cs80": 1020.0,
     "cs11": 1320.0, "cs50": 1340.0, "cs56": 1360.0,

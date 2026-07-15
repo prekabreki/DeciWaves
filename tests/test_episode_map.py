@@ -63,3 +63,11 @@ def test_radio_proportional_split():
 def test_every_cutscene_group_has_a_title():
     for g in ("cs00", "cs10", "cs11", "cs53", "cs71"):
         assert g in em.CS_TITLES
+
+
+def test_non_story_cs_groups_all_have_an_order_hint():
+    # Every NON_STORY_CS_GROUPS group must carry a CS_ORDER_HINT entry -- if one is ever
+    # removed or typo'd, that group silently falls back to cs_number(group) ordering and
+    # can land mid-story instead of at the curated ~980+ tail (see CS_ORDER_HINT comment).
+    missing = em.NON_STORY_CS_GROUPS - em.CS_ORDER_HINT.keys()
+    assert missing == set()
