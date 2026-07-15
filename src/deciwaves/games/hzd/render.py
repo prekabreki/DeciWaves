@@ -17,6 +17,7 @@ import argparse
 import csv
 import os
 import re
+import wave
 from dataclasses import dataclass
 
 from deciwaves.engine.render import (
@@ -141,6 +142,43 @@ def build_spine(manifest_rows, catalog, clip_index, episode_map=None) -> list[Sp
     return spine
 
 
+def decode_spine_clips(spine, dsar, cache_dir, errors_path):
+    """Decode each clip once (cached by clip_row) into ``cache_dir/<clip_row>.wav``.
+
+    Fail-soft per clip: a decode failure (``Atrac9Error``, ``OSError``,
+    ``wave.Error``) or a bad archive read (``ValueError`` -- see the
+    dsar_archive/fw_stream read hardening) is logged to *errors_path* with the
+    line id and clip row, then skipped -- never aborting the whole render.
+
+    Returns ``(decoded, ep_secs, skipped)``: ``decoded`` maps
+    ``line_id -> (wav_path, duration_seconds)``; ``ep_secs`` is the
+    per-episode accumulated duration ``pack_episodes`` packs against.
+    """
+    decoded: dict = {}
+    ep_secs: dict = {}
+    prev_scene_by_ep: dict = {}
+    skipped = 0
+    with open(errors_path, "w", encoding="utf-8") as ferr:
+        for s in spine:
+            wav = os.path.join(cache_dir, f"{s.clip_row}.wav")
+            try:
+                if not (os.path.isfile(wav) and os.path.getsize(wav) > 44):
+                    decode_wem_to_wav(dsar.read(s.offset, s.a_bytes), wav)
+                with wave.open(wav) as w:
+                    dur = w.getnframes() / float(w.getframerate())
+            except (Atrac9Error, OSError, wave.Error, ValueError) as e:
+                ferr.write(f"{s.line_id}\t{s.clip_row}\t{e}\n")
+                skipped += 1
+                continue
+            decoded[s.line_id] = (wav, dur)
+            gap = 0.0
+            if s.episode in prev_scene_by_ep:
+                gap = SCENE_GAP if s.scene != prev_scene_by_ep[s.episode] else LINE_GAP
+            prev_scene_by_ep[s.episode] = s.scene
+            ep_secs[s.episode] = ep_secs.get(s.episode, 0.0) + gap + dur
+    return decoded, ep_secs, skipped
+
+
 def _load_csv(path):
     with open(path, newline="", encoding="utf-8") as f:
         return list(csv.DictReader(f))
@@ -178,26 +216,9 @@ def main(argv=None):
     pkg = FwPackage(a.package)
     dsar = pkg.dsar_for(ARCHIVE)
 
-    # decode each clip once (cached by clip_row); accumulate per-episode duration
-    decoded, ep_secs, prev_scene_by_ep = {}, {}, {}
-    import wave
-    with open(a.errors, "w", encoding="utf-8") as ferr:
-        for s in spine:
-            wav = os.path.join(a.cache, f"{s.clip_row}.wav")
-            try:
-                if not (os.path.isfile(wav) and os.path.getsize(wav) > 44):
-                    decode_wem_to_wav(dsar.read(s.offset, s.a_bytes), wav)
-                with wave.open(wav) as w:
-                    dur = w.getnframes() / float(w.getframerate())
-            except (Atrac9Error, OSError, wave.Error) as e:
-                ferr.write(f"{s.line_id}\t{s.clip_row}\t{e}\n")
-                continue
-            decoded[s.line_id] = (wav, dur)
-            gap = 0.0
-            if s.episode in prev_scene_by_ep:
-                gap = SCENE_GAP if s.scene != prev_scene_by_ep[s.episode] else LINE_GAP
-            prev_scene_by_ep[s.episode] = s.scene
-            ep_secs[s.episode] = ep_secs.get(s.episode, 0.0) + gap + dur
+    decoded, ep_secs, skipped = decode_spine_clips(spine, dsar, a.cache, a.errors)
+    if skipped:
+        print(f"decode: {skipped} clips skipped (see {a.errors})")
 
     for fi, eps in enumerate(pack_episodes(list(ep_secs.items()), budget=budget_seconds())):
         eps_set = set(eps)

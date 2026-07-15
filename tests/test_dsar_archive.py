@@ -1,3 +1,4 @@
+import re
 import struct
 import lz4.block
 import pytest
@@ -58,6 +59,30 @@ def test_bad_magic_raises(tmp_path):
     p.write_bytes(b"XXXX" + b"\x00" * 60)
     with pytest.raises(ValueError, match="DSAR"):
         DsarArchive(str(p))
+
+
+def test_read_before_first_chunk_raises_not_last_chunk_garbage(tmp_path):
+    """A negative (out-of-range) offset finds no containing chunk: _first_chunk
+    returns -1. Before the fix, Python negative-indexing `self._chunks[-1]` served
+    bytes from the LAST chunk instead of erroring -- assert it raises and names
+    the archive path, not that it silently returns data from the wrong chunk."""
+    a, b = b"A" * 500, b"B" * 500
+    path = _write_dsar(tmp_path, [(a, False), (b, False)])
+    arc = DsarArchive(path)
+    with pytest.raises(ValueError, match=re.escape(path)):
+        arc.read(-5, 10)
+
+
+def test_read_past_eof_raises_not_silent_truncation(tmp_path):
+    """A read whose offset+length runs past the archive's last chunk must raise,
+    not silently return a short (truncated) result."""
+    a, b = b"A" * 500, b"B" * 500
+    path = _write_dsar(tmp_path, [(a, False), (b, False)])
+    arc = DsarArchive(path)
+    with pytest.raises(ValueError, match=re.escape(path)):
+        arc.read(10_000, 10)   # well past total_size (1000)
+    with pytest.raises(ValueError, match=re.escape(path)):
+        arc.read(990, 20)      # starts in range but crosses EOF
 
 
 HZD_PACKAGE = Path(r"C:\Program Files (x86)\Steam\steamapps\common\Horizon - Zero Dawn Remastered\LocalCacheDX12\package")

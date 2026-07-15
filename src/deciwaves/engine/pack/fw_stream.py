@@ -45,9 +45,16 @@ class FwStreamStore:
         dsar = self._reader(file_index)
         if dsar is not None:
             return dsar.read(offset, length)
-        with open(self._path(file_index), "rb") as f:
+        path = self._path(file_index)
+        with open(path, "rb") as f:
             f.seek(offset)
-            return f.read(length)
+            data = f.read(length)
+        if len(data) != length:
+            raise ValueError(
+                f"short read at offset {offset} length {length} in {path} "
+                f"(got {len(data)} bytes, likely past EOF)"
+            )
+        return data
 
     def read_riff_clip(self, file_index: int, offset: int) -> bytes:
         """Read a self-describing RIFF clip (``RIFF`` + u32 size) at *offset*

@@ -1,4 +1,6 @@
-from deciwaves.games.hzd.render import mq_rank, build_spine
+import wave
+
+from deciwaves.games.hzd.render import mq_rank, build_spine, decode_spine_clips, SpineItem
 
 
 def test_mq_rank_parses_variants():
@@ -97,3 +99,70 @@ def test_build_spine_skips_lines_without_clip_coords():
     manifest = [{"clip_row": "99", "line_id": "MQ04_a", "tier": "S"}]
     spine = build_spine(manifest, catalog, {})   # clip_row 99 absent
     assert spine == []
+
+
+# --- decode_spine_clips: fail-soft per-clip decode/read (issue #19) ---
+
+def _write_silent_wav(path, n_frames=48000, rate=48000):
+    with wave.open(path, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(b"\x00\x00" * n_frames)
+
+
+class _FakeDsar:
+    """Raises ValueError for offsets in `fail_offsets` (mirrors a bad-offset
+    dsar_archive/fw_stream read -- see test_dsar_archive.py), else succeeds."""
+
+    def __init__(self, fail_offsets):
+        self.fail_offsets = set(fail_offsets)
+
+    def read(self, offset, length):
+        if offset in self.fail_offsets:
+            raise ValueError(f"no chunk contains offset {offset} in fake.core")
+        return b"\x00" * length
+
+
+def test_decode_spine_clips_skips_bad_read_and_continues(tmp_path, monkeypatch):
+    spine = [
+        SpineItem(episode=0, scene="mq01", line_index=0, speaker="aloy", subtitle="a",
+                  line_id="L0", clip_row=0, offset=0, a_bytes=10),
+        SpineItem(episode=0, scene="mq01", line_index=1, speaker="aloy", subtitle="b",
+                  line_id="L1", clip_row=1, offset=100, a_bytes=10),
+        SpineItem(episode=0, scene="mq01", line_index=2, speaker="aloy", subtitle="c",
+                  line_id="L2", clip_row=2, offset=200, a_bytes=10),
+    ]
+    monkeypatch.setattr(
+        "deciwaves.games.hzd.render.decode_wem_to_wav",
+        lambda wem_bytes, wav_path: _write_silent_wav(wav_path),
+    )
+    cache_dir = tmp_path / "cache"; cache_dir.mkdir()
+    errors = tmp_path / "render-errors.log"
+
+    decoded, ep_secs, skipped = decode_spine_clips(
+        spine, _FakeDsar(fail_offsets={100}), str(cache_dir), str(errors))
+
+    assert skipped == 1
+    assert set(decoded) == {"L0", "L2"}    # L1's read raised -> skipped, loop continued
+    assert ep_secs[0] > 0                  # the two good clips still contributed duration
+    err_text = errors.read_text(encoding="utf-8")
+    assert "L1\t1\t" in err_text           # line id + clip row logged
+    assert "no chunk contains offset 100" in err_text
+
+
+def test_decode_spine_clips_no_failures_no_skips(tmp_path, monkeypatch):
+    spine = [SpineItem(episode=0, scene="mq01", line_index=0, speaker="aloy", subtitle="a",
+                       line_id="L0", clip_row=0, offset=0, a_bytes=10)]
+    monkeypatch.setattr(
+        "deciwaves.games.hzd.render.decode_wem_to_wav",
+        lambda wem_bytes, wav_path: _write_silent_wav(wav_path),
+    )
+    cache_dir = tmp_path / "cache"; cache_dir.mkdir()
+    errors = tmp_path / "render-errors.log"
+
+    decoded, ep_secs, skipped = decode_spine_clips(
+        spine, _FakeDsar(fail_offsets=set()), str(cache_dir), str(errors))
+
+    assert skipped == 0
+    assert set(decoded) == {"L0"}
