@@ -11,17 +11,9 @@ purposes only (e.g. in tests) — pack_reader will be None in that case.
 from __future__ import annotations
 
 from deciwaves.engine.profile import GameProfile
-from deciwaves.games.ds import episode_map as _em
-from deciwaves.games.ds import cutscene_audio as _ca
-
-# Default narrative transcript for anchor_index building: disabled. The DS gamescript
-# transcript is copyrighted game prose (BYO — see docs/BYO.md), not shipped in this
-# repo. "" means story_order.main falls back to episode/scene ordering; pass a real
-# path via --transcript (or story_order's own default) to enable anchoring.
-DS_TRANSCRIPT = ""
 
 # Authoritative DS prefix map (Phase 2 Task 2.3).
-# engine.catalog aliases this as CORE_PREFIXES for backward compatibility.
+# games.ds.catalog aliases this as CORE_PREFIXES for backward compatibility.
 DS_CORE_PREFIXES: dict[str, str] = {
     "localized/sentences/ds_lines_cutscene": "cutscene",
     "localized/sentences/ds_lines_mission": "mission",
@@ -51,21 +43,10 @@ def build_profile(data_dir: str | None, oodle: str | None) -> GameProfile:
         pack_reader = None
 
     return GameProfile(
-        name="ds",
         pack_reader=pack_reader,
         decima_version="DSPC",
         core_prefixes=DS_CORE_PREFIXES,
         speaker_simpletext_filter=lambda p: (
             "sentences/voices/" in p and p.strip().endswith("/simpletext")
         ),
-        transcript_path=DS_TRANSCRIPT,
-        out_dir="out/ds",
-        # episode_map: wired — the module exposes cs_group, fallback_group,
-        # scene_number which story_order consumes directly by import; passing
-        # the module object here makes it discoverable on the profile.
-        episode_map=_em,
-        # cutscene_resolver: the cutscene_audio module's resolve_scene function
-        # is the natural per-scene resolver callable; store the module so callers
-        # can reach both resolve_scene and helper utilities.
-        cutscene_resolver=_ca,
     )

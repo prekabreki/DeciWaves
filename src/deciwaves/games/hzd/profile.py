@@ -34,12 +34,6 @@ HZD_FAMILY_PREFIXES: dict[str, str] = {
 # (e.g. "collectab" is a prefix of "collectables") and keep plain substring matching.
 HZD_ANCHORED_PREFIXES: frozenset[str] = frozenset({"mq", "sq", "ec", "dlc"})
 
-# Default narrative transcript for anchor_index building: disabled. The HZD gamescript
-# transcript is copyrighted game prose (BYO — see docs/BYO.md), not shipped in this
-# repo. "" means story_order.main falls back to episode/scene ordering; pass a real
-# path via --transcript (or story_order's own default) to enable anchoring.
-HZD_TRANSCRIPT = ""
-
 
 def build_profile(package_dir: str | None) -> GameProfile:
     """Build and return the HZD GameProfile.
@@ -57,13 +51,10 @@ def build_profile(package_dir: str | None) -> GameProfile:
         pack_reader = None
 
     return GameProfile(
-        name="hzd",
         pack_reader=pack_reader,
         decima_version="HZDR",  # informational: HZD parse does not use pydecima
         core_prefixes=HZD_FAMILY_PREFIXES,
         speaker_simpletext_filter=lambda p: (
             "sentences/voices/" in p and p.strip().endswith("/simpletext")
         ),
-        transcript_path=HZD_TRANSCRIPT,
-        out_dir="out/hzd",
     )
