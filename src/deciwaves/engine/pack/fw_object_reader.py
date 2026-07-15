@@ -42,6 +42,12 @@ _PRIMITIVE_SIZES = {
 }
 _INT_FMT = {1: "<b", 2: "<h", 4: "<i", 8: "<q", 16: None}
 
+# Sentinel for scan_group's `capture` parameter: materialise *every* walked
+# object instead of only the named types (e.g. for completeness auditing).
+# Additive -- the default and any explicit capture tuple keep behaving
+# exactly as before; only a caller that opts in by passing this gets it.
+CAPTURE_ALL = object()
+
 
 @dataclass
 class FwObject:
@@ -75,6 +81,20 @@ class GroupReader:
     def __init__(self, graph: StreamingGraph, registry: TypeRegistry):
         self.graph = graph
         self.reg = registry
+        self._atom_cache: dict[str, str] = {}
+        self._group_id = None  # set by read_group/scan_group; used in error messages
+
+    @staticmethod
+    def _check_span_blobs(group: Group, span_blobs: list[bytes]) -> None:
+        """*span_blobs* must be exactly one blob per declared span -- a
+        mismatch is a caller bug, not a walk desync, but must surface as an
+        actionable ValueError rather than an ``assert`` that silently
+        vanishes under ``-O``."""
+        if len(span_blobs) != group.span_count:
+            raise ValueError(
+                f"group {group.group_id}: expected {group.span_count} span "
+                f"blobs, got {len(span_blobs)}"
+            )
 
     def read_group(self, group: Group, span_blobs: list[bytes]) -> list[FwObject]:
         """Deserialise *group*'s objects. *span_blobs* are the raw bytes of each
@@ -89,12 +109,18 @@ class GroupReader:
         self._locators = iter(
             self.graph.locators[group.locator_start:group.locator_start + group.locator_count]
         )
+        self._check_span_blobs(group, span_blobs)
+        self._group_id = group.group_id
 
         index = 0
-        assert len(span_blobs) == group.span_count
         for blob in span_blobs:
             cur = _Cur(blob, 0, len(blob))
             while cur.p < cur.end:
+                if index >= len(objects):
+                    raise ValueError(
+                        f"group {group.group_id}: span data holds more objects "
+                        f"than the type table declares ({len(objects)}) -> walk desync"
+                    )
                 obj = objects[index]
                 index += 1
                 self._fill_compound(obj.type_name, cur, obj.fields)
@@ -120,7 +146,16 @@ class GroupReader:
         is not in *capture*. Every object is still walked (so nested
         ``StreamingDataSource`` locators are consumed in the right order); only
         captured objects are returned. Essential for the giant groups (up to
-        ~96k objects) where full materialisation is impractical."""
+        ~96k objects) where full materialisation is impractical.
+
+        *capture* may also be :data:`CAPTURE_ALL` to materialise every walked
+        object -- additive: the default and any explicit tuple keep behaving
+        exactly as before.
+
+        Rejects an incomplete walk (fewer objects filled than the type table
+        declares) exactly like :meth:`read_group` does -- previously this
+        silently returned partial results, which a caller's blanket
+        ``except Exception`` could never see."""
         type_names = [
             self.reg.name_for_hash(int(h))
             for h in self.graph.type_table[group.type_start:group.type_start + group.type_count]
@@ -128,15 +163,23 @@ class GroupReader:
         self._locators = iter(
             self.graph.locators[group.locator_start:group.locator_start + group.locator_count]
         )
+        self._check_span_blobs(group, span_blobs)
+        self._group_id = group.group_id
+        capture_all = capture is CAPTURE_ALL
+
         captured: list[FwObject] = []
         index = 0
-        assert len(span_blobs) == group.span_count
         for blob in span_blobs:
             cur = _Cur(blob, 0, len(blob))
             while cur.p < cur.end:
+                if index >= len(type_names):
+                    raise ValueError(
+                        f"group {group.group_id}: span data holds more objects "
+                        f"than the type table declares ({len(type_names)}) -> walk desync"
+                    )
                 tn = type_names[index]
                 index += 1
-                if tn in capture:
+                if capture_all or tn in capture:
                     obj = FwObject(tn)
                     self._fill_compound(tn, cur, obj.fields)
                     captured.append(obj)
@@ -146,6 +189,10 @@ class GroupReader:
                 raise ValueError(
                     f"span not size-exact in group {group.group_id}: {cur.p} != {cur.end}"
                 )
+        if index != len(type_names):
+            raise ValueError(
+                f"group {group.group_id}: filled {index} of {len(type_names)} objects"
+            )
         return captured
 
     def _advance(self, type_name: str, cur: _Cur) -> None:
@@ -172,14 +219,29 @@ class GroupReader:
         else:
             raise NotImplementedError(f"kind {kind} ({type_name})")
 
-    def _advance_atom(self, type_name: str, cur: _Cur) -> None:
+    def _resolve_atom(self, type_name: str) -> str:
+        """Resolve *type_name*'s ``base_type`` chain down to the primitive/
+        String/WString name that terminates it, with a cycle guard (some
+        chains self-reference immediately, e.g. ``HalfFloat``; a longer cycle
+        would otherwise loop forever). Cached per instance -- a type's chain
+        is fixed by the schema, so it's only ever walked once."""
+        cached = self._atom_cache.get(type_name)
+        if cached is not None:
+            return cached
         reg = self.reg
         name = type_name
+        seen = set()
         while reg.kind(name) == "atom":
             bt = reg.define(name)["base_type"]
-            if bt == name:
+            if bt == name or bt in seen:  # builtin self-ref or longer cycle
                 break
+            seen.add(name)
             name = bt
+        self._atom_cache[type_name] = name
+        return name
+
+    def _advance_atom(self, type_name: str, cur: _Cur) -> None:
+        name = self._resolve_atom(type_name)
         if name in ("String", "Filename"):
             self._read_string(cur)
         elif name == "WString":
@@ -203,12 +265,7 @@ class GroupReader:
         count = cur.u32()
         self._check_count(count, cur)
         if ctype not in ("HashMap", "HashSet"):
-            nm = item
-            while self.reg.kind(nm) == "atom":
-                bt = self.reg.define(nm)["base_type"]
-                if bt == nm:
-                    break
-                nm = bt
+            nm = self._resolve_atom(item)
             if nm in _PRIMITIVE_SIZES and nm not in ("String", "Filename", "WString"):
                 cur.p += count * _PRIMITIVE_SIZES[nm]
                 return
@@ -224,7 +281,13 @@ class GroupReader:
         # mirror odradek's overridden fillCompound: any StreamingDataSource
         # (nested or top-level) consumes a locator when valid.
         if type_name == "StreamingDataSource" and self._sds_valid(out):
-            out["_locator"] = next(self._locators)
+            try:
+                out["_locator"] = next(self._locators)
+            except StopIteration:
+                raise ValueError(
+                    f"group {self._group_id}: locator cursor exhausted while "
+                    "filling a valid StreamingDataSource -> walk desync"
+                ) from None
         elif type_name in _EXTRA_BINARY:
             out["_texts"] = self._read_extra_binary(type_name, cur)
 
@@ -259,16 +322,7 @@ class GroupReader:
         raise NotImplementedError(f"kind {kind} ({type_name})")
 
     def _read_atom(self, type_name: str, cur: _Cur):
-        # resolve atom base_type chain to a primitive
-        reg = self.reg
-        name = type_name
-        seen = set()
-        while reg.kind(name) == "atom":
-            bt = reg.define(name)["base_type"]
-            if bt == name or bt in seen:  # builtin self-ref (e.g. HalfFloat)
-                break
-            seen.add(name)
-            name = bt
+        name = self._resolve_atom(type_name)
         if name in ("String", "Filename"):
             return self._read_string(cur)
         if name == "WString":
@@ -313,13 +367,7 @@ class GroupReader:
         is_hash = ctype in ("HashMap", "HashSet")
         # fast path for byte arrays
         if not is_hash and self.reg.kind(item) == "atom":
-            ar = self.reg
-            nm = item
-            while ar.kind(nm) == "atom":
-                bt = ar.define(nm)["base_type"]
-                if bt == nm:
-                    break
-                nm = bt
+            nm = self._resolve_atom(item)
             if nm in _PRIMITIVE_SIZES and nm not in ("String", "Filename", "WString"):
                 return cur.take(count * _PRIMITIVE_SIZES[nm])
         out = []
