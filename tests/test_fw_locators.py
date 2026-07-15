@@ -57,6 +57,24 @@ def test_ordered_entries_preserve_file_order_and_duplicates():
     ]
 
 
+def test_items_dedupes_first_wins():
+    # 0xBB duplicated across archives: items() must expose only the deduped,
+    # first-packfile-wins view (the public counterpart to iterating the
+    # internal hash table directly -- see games/hzd/inventory.py, issue #27).
+    data = _build_locators([
+        ("a.core", [(0xAA, 0, 10), (0xBB, 16, 20)]),
+        ("b.core.stream", [(0xBB, 0, 30), (0xCC, 64, 40)]),
+    ])
+    loc = FwLocators.from_bytes(data)
+    items = loc.items()
+    assert dict(items) == {
+        0xAA: Locator("a.core", 0, 10),
+        0xBB: Locator("a.core", 16, 20),  # first archive wins, matches lookup()
+        0xCC: Locator("b.core.stream", 64, 40),
+    }
+    assert len(items) == len(loc)
+
+
 HZD_PACKAGE = Path(r"C:\Program Files (x86)\Steam\steamapps\common\Horizon - Zero Dawn Remastered\LocalCacheDX12\package")
 
 

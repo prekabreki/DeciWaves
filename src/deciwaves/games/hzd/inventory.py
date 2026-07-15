@@ -34,7 +34,7 @@ def harvest_sentence_cores(fw, sample_cap: int | None = None,
     """
     found: set[str] = set()
     scanned = 0
-    for path_hash, loc in fw._locators._by_hash.items():
+    for path_hash, loc in fw.locators.items():
         if loc.archive.endswith(".stream") or loc.length > max_bytes or loc.length < 12:
             continue
         if sample_cap is not None and scanned >= sample_cap:

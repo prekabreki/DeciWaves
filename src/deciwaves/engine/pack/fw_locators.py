@@ -64,6 +64,12 @@ class FwLocators:
             return list(self._ordered)
         return [e for e in self._ordered if e.archive == archive]
 
+    def items(self) -> list[tuple[int, Locator]]:
+        """Deduped ``(path_hash, Locator)`` pairs (first-packfile-wins), mirroring
+        :meth:`lookup`/:meth:`__contains__` — the public counterpart to iterating
+        the internal hash table directly."""
+        return list(self._by_hash.items())
+
     def __contains__(self, path_hash: int) -> bool:
         return path_hash in self._by_hash
 

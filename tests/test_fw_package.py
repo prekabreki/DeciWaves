@@ -26,8 +26,8 @@ def _rtti_walk_len(buf: bytes) -> int:
 
 
 def _locator_hash(fw, loc):
-    # reverse-lookup the hash for a given Locator (internal map)
-    for h, l in fw._locators._by_hash.items():
+    # reverse-lookup the hash for a given Locator, via the public items() view
+    for h, l in fw.locators.items():
         if l is loc:
             return h
     raise AssertionError("locator not found")
@@ -101,6 +101,30 @@ def test_missing_path(tmp_path):
         fw.read("nope/missing.core")
     with pytest.raises(KeyError):
         fw.read_by_hash(0xDEADBEEF)
+
+
+def test_has_present_and_missing(tmp_path):
+    pkg = _make_package(tmp_path, [("localized/x/sentences.core", b"payload"),
+                                    ("localized/y/other.core", b"other")])
+    fw = FwPackage(pkg)
+    assert fw.has("localized/x/sentences.core") is True
+    assert fw.has("localized/y/other.core") is True
+    assert fw.has("nope/missing.core") is False
+
+
+def test_has_core_delegates_to_has(tmp_path):
+    pkg = _make_package(tmp_path, [("localized/x/sentences.core", b"payload")])
+    fw = FwPackage(pkg)
+    assert fw.has_core("localized/x/sentences") == fw.has("localized/x/sentences.core")
+
+
+def test_read_by_hash_matches_read(tmp_path):
+    payload = b"payload-bytes"
+    pkg = _make_package(tmp_path, [("localized/x/sentences.core", payload)])
+    fw = FwPackage(pkg)
+    assert fw.read_by_hash(file_hash("localized/x/sentences.core")) == payload
+    assert fw.read("localized/x/sentences.core") == fw.read_by_hash(
+        file_hash("localized/x/sentences.core"))
 
 
 def test_first_locator_empty_package(tmp_path):
