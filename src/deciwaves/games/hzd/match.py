@@ -1,14 +1,7 @@
 """Transcript -> candidate-subtitle matching with tiered confidence."""
 from __future__ import annotations
 import re
-from dataclasses import dataclass
 from rapidfuzz import fuzz
-
-@dataclass
-class Match:
-    line_id: str | None
-    score: float
-    tier: str
 
 _MARKUP = re.compile(r"<[^>]*>")        # HZD subtitle directives: <subtitle-delay=..>, <split..>
 _PUNCT = re.compile(r"[^\w\s]")
@@ -85,19 +78,3 @@ def assign_bucket(lines, clip_rows, transcripts, strong=90.0, margin=8.0):
         result[cr] = (lid, "E", s)
         used_c.add(cr); used_l.add(lid)
     return result
-
-
-def match_clip(transcript, candidates, speech_ratio, strong=90.0, margin=8.0):
-    # strong/margin are starting-point thresholds; tune against the validation
-    # sample before shipping (spec §calibration defers this to real data).
-    t = normalize(transcript)
-    scored = sorted(
-        ((_score(t, normalize(c["subtitle_en"])), c) for c in candidates),
-        key=lambda x: x[0], reverse=True)
-    if not scored or scored[0][0] < strong:
-        return Match(None, scored[0][0] if scored else 0.0, "3")
-    top_score, top = scored[0]
-    runner = scored[1][0] if len(scored) > 1 else 0.0
-    generic = len(t.split()) <= 2
-    tier = "2" if (top_score - runner < margin or generic or speech_ratio < 0.5) else "1"
-    return Match(top["line_id"], top_score, tier)

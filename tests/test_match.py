@@ -1,4 +1,4 @@
-from deciwaves.games.hzd.match import normalize, match_clip, assign_bucket
+from deciwaves.games.hzd.match import normalize, assign_bucket
 
 C = [{"line_id": "L1", "subtitle_en": "I'll find a way to stop it."},
      {"line_id": "L2", "subtitle_en": "We should head north now."}]
@@ -7,28 +7,28 @@ def test_normalize():
     assert normalize("I'LL, find  a Way!") == "ill find a way"
 
 def test_tier1_unique_strong():
-    m = match_clip("ill find a way to stop it", C, speech_ratio=0.9)
-    assert m.line_id == "L1" and m.tier == "1"
+    out = assign_bucket(C, ["c1"], {"c1": "ill find a way to stop it"})
+    assert out["c1"][0] == "L1" and out["c1"][1] == "1"
 
 def test_tier3_no_match():
-    m = match_clip("completely unrelated words here", C, speech_ratio=0.9)
-    assert m.tier == "3" and m.line_id is None
+    out = assign_bucket(C, ["c1"], {"c1": "completely unrelated words here"})
+    assert out["c1"] == (None, "3", 0.0)
 
 def test_tier2_close_runners():
     # token_set_ratio: "open the gate" vs "open the gate"=100, vs "open the door"=76.19
     # gap=23.81, so margin=30 puts the runner-up inside the margin → tier "2"
     close = [{"line_id": "A", "subtitle_en": "open the gate"},
              {"line_id": "B", "subtitle_en": "open the door"}]
-    m = match_clip("open the gate", close, speech_ratio=0.9, margin=30)
-    assert m.tier == "2"          # runner-up within explicit margin → downgraded
+    out = assign_bucket(close, ["c1"], {"c1": "open the gate"}, margin=30)
+    assert out["c1"][1] == "2"          # runner-up within explicit margin → downgraded
 
 
 def test_tier1_at_default_margin():
     # At default margin=8.0, gap=23.81 > 8.0 → confident tier-1 match
     close = [{"line_id": "A", "subtitle_en": "open the gate"},
              {"line_id": "B", "subtitle_en": "open the door"}]
-    m = match_clip("open the gate", close, speech_ratio=0.9)
-    assert m.tier == "1" and m.line_id == "A"
+    out = assign_bucket(close, ["c1"], {"c1": "open the gate"})
+    assert out["c1"][1] == "1" and out["c1"][0] == "A"
 
 
 def test_long_transcript_not_bound_to_short_subset_subtitle():
@@ -38,16 +38,16 @@ def test_long_transcript_not_bound_to_short_subset_subtitle():
     the real length-matching line instead."""
     cands = [{"line_id": "ALOY", "subtitle_en": "Aloy!"},
              {"line_id": "SYLENS", "subtitle_en": "Aloy, follow my lead or the plan is ruined."}]
-    m = match_clip("Aloy, follow my lead or the plan is ruined", cands, speech_ratio=0.9)
-    assert m.line_id == "SYLENS"
+    out = assign_bucket(cands, ["c1"], {"c1": "Aloy, follow my lead or the plan is ruined"})
+    assert out["c1"][0] == "SYLENS"
 
 
 def test_guard_preserves_legitimate_short_match():
     """The short-subtitle guard must not break a genuine short clip<->short line match."""
     cands = [{"line_id": "ALOY", "subtitle_en": "Aloy!"},
              {"line_id": "OTHER", "subtitle_en": "We should head north now."}]
-    m = match_clip("Aloy!", cands, speech_ratio=0.9)
-    assert m.line_id == "ALOY"
+    out = assign_bucket(cands, ["c1"], {"c1": "Aloy!"})
+    assert out["c1"][0] == "ALOY"
 
 
 def test_short_transcript_not_bound_to_long_subset_subtitle():
@@ -55,8 +55,8 @@ def test_short_transcript_not_bound_to_long_subset_subtitle():
     merely contains it as a token subset; it should bind to the short shout line instead."""
     cands = [{"line_id": "SYLENS", "subtitle_en": "Aloy! Follow my lead, or the plan is ruined!"},
              {"line_id": "ALOY", "subtitle_en": "ALOY!!!"}]
-    m = match_clip("Aloy!", cands, speech_ratio=0.9)
-    assert m.line_id == "ALOY"
+    out = assign_bucket(cands, ["c1"], {"c1": "Aloy!"})
+    assert out["c1"][0] == "ALOY"
 
 
 def test_assign_bucket_unique_and_elimination():
