@@ -74,6 +74,63 @@ def test_setup_saves_hzd_and_fw_package_paths(tmp_path, monkeypatch, capsys):
     assert cfg["ds_install"] == ""
 
 
+def test_setup_second_run_with_different_game_preserves_first(tmp_path, monkeypatch):
+    # Registering game A, then later registering game B without repeating A's
+    # flags, must not blank out A's previously-saved entries (issue #36).
+    ds = tmp_path / "DS"; ds.mkdir(); (ds / "oo2core_7_win64.dll").write_bytes(b"x")
+    hzd = tmp_path / "hzd.package"
+    cfg_dir = tmp_path / "cfg"
+    monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(cfg_dir))
+    monkeypatch.setattr(s, "_download_and_unpack", _stub_download_ok)
+
+    rc1 = s.run_setup(["--ds-install", str(ds), "--tools-dir", str(tmp_path / "tools")])
+    assert rc1 == 0
+
+    rc2 = s.run_setup(["--hzd-package", str(hzd), "--tools-dir", str(tmp_path / "tools")])
+    assert rc2 == 0
+
+    cfg = json.loads((cfg_dir / "config.json").read_text())
+    assert cfg["ds_install"] == str(ds)
+    assert cfg["oodle_dll"].endswith("oo2core_7_win64.dll")
+    assert cfg["hzd_package"] == str(hzd)
+
+
+def test_setup_reregistering_same_game_updates_not_stuck_on_old_path(tmp_path, monkeypatch):
+    ds_old = tmp_path / "DS_old"; ds_old.mkdir(); (ds_old / "oo2core_7_win64.dll").write_bytes(b"x")
+    ds_new = tmp_path / "DS_new"; ds_new.mkdir(); (ds_new / "oo2core_7_win64.dll").write_bytes(b"x")
+    cfg_dir = tmp_path / "cfg"
+    monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(cfg_dir))
+    monkeypatch.setattr(s, "_download_and_unpack", _stub_download_ok)
+
+    assert s.run_setup(["--ds-install", str(ds_old), "--tools-dir", str(tmp_path / "tools")]) == 0
+    assert s.run_setup(["--ds-install", str(ds_new), "--tools-dir", str(tmp_path / "tools")]) == 0
+
+    cfg = json.loads((cfg_dir / "config.json").read_text())
+    assert cfg["ds_install"] == str(ds_new)
+    assert cfg["oodle_dll"] == str(ds_new / "oo2core_7_win64.dll")
+
+
+def test_setup_after_corrupted_config_yields_only_current_game(tmp_path, monkeypatch, capsys):
+    # Per the load()-hardening fix landed on this branch: a corrupted
+    # config.json is ignored (with a warning) and treated as if empty, so a
+    # one-game setup after corruption yields a config with just that game --
+    # not a crash, and not silently retaining unreadable stale data.
+    hzd = tmp_path / "hzd.package"
+    cfg_dir = tmp_path / "cfg"
+    cfg_dir.mkdir(parents=True)
+    (cfg_dir / "config.json").write_text("{not json", encoding="utf-8")
+    monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(cfg_dir))
+    monkeypatch.setattr(s, "_download_and_unpack", _stub_download_ok)
+
+    rc = s.run_setup(["--hzd-package", str(hzd), "--tools-dir", str(tmp_path / "tools")])
+    assert rc == 0
+    assert "corrupted" in capsys.readouterr().out.lower()
+
+    cfg = json.loads((cfg_dir / "config.json").read_text())
+    assert cfg["hzd_package"] == str(hzd)
+    assert cfg["ds_install"] == ""
+
+
 def test_skip_downloads_never_calls_download(tmp_path, monkeypatch):
     tools_dir = tmp_path / "tools"; tools_dir.mkdir()
     (tools_dir / "vgmstream-cli.exe").write_bytes(b"x")  # only one of the three present

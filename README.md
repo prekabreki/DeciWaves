@@ -166,6 +166,10 @@ the tools directory and the install path for each game you configured (`ds_insta
 `hzd_package`, `fw_package`, `oodle_dll`). Set `DECIWAVES_CONFIG_DIR` to keep that file
 somewhere else.
 
+Each run merges its flags over what's already saved -- an omitted flag keeps its previous
+value, so running `deciwaves setup --hzd-package ...` later doesn't blank out a `--ds-install`
+configured earlier. Pass a flag again (with a new path) to update it.
+
 Environment overrides, all optional:
 
 - `DECIWAVES_CONFIG_DIR` - directory that holds `config.json` (default `%LOCALAPPDATA%\DeciWaves`).

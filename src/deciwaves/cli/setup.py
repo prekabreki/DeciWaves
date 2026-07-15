@@ -143,29 +143,47 @@ def run_setup(argv) -> int:
     ap.add_argument("--skip-downloads", action="store_true", help="don't fetch tools, just re-check what's already there and rewrite config")
     args = ap.parse_args(argv)
 
-    tools_dir = Path(args.tools_dir) if args.tools_dir else _default_tools_dir()
+    # Merge this run's flags over whatever was already saved -- an omitted
+    # flag means "keep what I had", so registering one game never blanks
+    # another game's previously-configured paths (issue #36). A corrupted
+    # config.json is already handled by config.load() (returns {} plus a
+    # warning), so this merge degrades gracefully to "just this run's flags"
+    # in that case too.
+    saved = config.load()
+    ds_install = args.ds_install or saved.get("ds_install", "")
+    hzd_package = args.hzd_package or saved.get("hzd_package", "")
+    fw_package = args.fw_package or saved.get("fw_package", "")
+    tools_dir = (
+        Path(args.tools_dir) if args.tools_dir
+        else Path(saved["tools_dir"]) if saved.get("tools_dir")
+        else _default_tools_dir()
+    )
     tools_dir.mkdir(parents=True, exist_ok=True)
 
     tool_rows, tools_failed = _fetch_tools(tools_dir, args.skip_downloads)
 
-    oodle_dll = _find_oodle(args.ds_install)
-    if args.ds_install and not oodle_dll:
-        print(f"WARNING: {OODLE_DLL_NAME} not found under {args.ds_install!r}. "
+    # Recomputed (not merely carried forward) from the merged ds_install so a
+    # DS install that moved, or gained/lost the Oodle DLL since last run, is
+    # reflected -- while an unrelated run (e.g. registering HZD only) still
+    # sees the same ds_install and therefore the same oodle_dll.
+    oodle_dll = _find_oodle(ds_install)
+    if ds_install and not oodle_dll:
+        print(f"WARNING: {OODLE_DLL_NAME} not found under {ds_install!r}. "
               f"Point --ds-install at the DS:DC game root -- the folder that directly "
               f"contains {OODLE_DLL_NAME}, alongside ds.exe.")
 
-    if not (args.ds_install or args.hzd_package or args.fw_package):
+    if not (ds_install or hzd_package or fw_package):
         print("No game install configured (pass --ds-install / --hzd-package / --fw-package). "
               "Tools are set up regardless -- rerun `deciwaves setup` with a game path once you "
               "have one, or check status anytime with `deciwaves doctor`.")
 
-    _print_summary(tool_rows, args.ds_install, oodle_dll, args.hzd_package, args.fw_package)
+    _print_summary(tool_rows, ds_install, oodle_dll, hzd_package, fw_package)
 
     config.save({
         "tools_dir": str(tools_dir),
-        "ds_install": args.ds_install,
-        "hzd_package": args.hzd_package,
-        "fw_package": args.fw_package,
+        "ds_install": ds_install,
+        "hzd_package": hzd_package,
+        "fw_package": fw_package,
         "oodle_dll": oodle_dll,
     })
     print(f"\nWrote {config.path()}")
