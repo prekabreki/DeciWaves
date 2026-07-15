@@ -127,7 +127,7 @@ def test_lazy_stage_import():
     script = (
         "import sys\n"
         "import deciwaves.cli.main\n"
-        "assert 'deciwaves.engine.catalog' not in sys.modules, sorted(m for m in sys.modules if m.startswith('deciwaves'))\n"
+        "assert 'deciwaves.games.ds.catalog' not in sys.modules, sorted(m for m in sys.modules if m.startswith('deciwaves'))\n"
         "print('OK')\n"
     )
     result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)

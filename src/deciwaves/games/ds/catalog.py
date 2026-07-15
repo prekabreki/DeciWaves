@@ -1,7 +1,7 @@
-"""Phase B: build out/catalog.csv from all story-dialogue sentences cores.
+"""DS Phase B: build out/catalog.csv from all story-dialogue sentence cores.
 
 Invoke as a module (package form):
-    python -m deciwaves.engine.catalog --data-dir <DS:DC/data> --oodle <oo2core_7_win64.dll>
+    python -m deciwaves.games.ds.catalog --data-dir <DS:DC/data> --oodle <oo2core_7_win64.dll>
 """
 from __future__ import annotations
 import argparse
@@ -13,13 +13,11 @@ import deciwaves._vendor.pydecima.reader as _pydecima_reader
 from deciwaves import data
 from deciwaves.engine.sentence_core import parse_sentences
 from deciwaves.engine.speakers import SpeakerMap
+from deciwaves.engine.catalog_io import CSV_COLUMNS, done_core_paths, processed_core_paths
 
 # Alias for backward compatibility (imported by some tests and callers).
 # Authoritative map is games.ds.profile.DS_CORE_PREFIXES — catalog merely aliases it.
 from deciwaves.games.ds.profile import DS_CORE_PREFIXES as CORE_PREFIXES  # noqa: E402
-
-CSV_COLUMNS = ["line_id", "core_path", "line_index", "category", "scene",
-               "speaker_code", "speaker_name", "subtitle_en", "wem_path_en", "language"]
 
 
 def select_core_paths(file_list_lines, core_prefixes=None):
@@ -63,26 +61,6 @@ def classify(core_path, core_prefixes=None):
             scene = core_path[len(pref) + 1:].rsplit("/sentences", 1)[0]
             return cat, scene
     return "unknown", ""
-
-
-def done_core_paths(csv_path):
-    if not os.path.isfile(csv_path):
-        return set()
-    done = set()
-    with open(csv_path, "r", newline="", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
-            done.add(row["core_path"])
-    return done
-
-
-def processed_core_paths(processed_path):
-    """Cores that reached a terminal outcome (rows, zero-rows, OR hard-failure). Unlike the CSV,
-    this also records cores that parsed to zero rows or failed -- which leave no CSV row and
-    would otherwise silently re-run every invocation)."""
-    if not os.path.isfile(processed_path):
-        return set()
-    with open(processed_path, "r", encoding="utf-8") as f:
-        return {ln.strip() for ln in f if ln.strip()}
 
 
 def main(argv=None):

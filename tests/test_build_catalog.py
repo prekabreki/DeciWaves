@@ -1,6 +1,6 @@
 # tests/test_build_catalog.py
-from deciwaves.engine.catalog import (select_core_paths, classify, done_core_paths,
-                            processed_core_paths, CSV_COLUMNS)
+from deciwaves.games.ds.catalog import select_core_paths, classify
+from deciwaves.engine.catalog_io import done_core_paths, processed_core_paths, CSV_COLUMNS
 import csv
 
 # ---------------------------------------------------------------------------

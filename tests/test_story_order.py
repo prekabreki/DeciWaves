@@ -1,6 +1,6 @@
 import csv
 
-from deciwaves.engine import story_order as so
+from deciwaves.games.ds import story_order as so
 from deciwaves.games.ds import episode_map as em
 
 

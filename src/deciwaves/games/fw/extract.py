@@ -5,7 +5,7 @@ reads its self-describing RIFF/ATRAC9 clip from the package stream store, and
 decodes it to a WAV with VGAudio. **Resumable** (skips line_ids already in the
 manifest / processed log) and **fail-soft** (per-line errors logged, the run
 never aborts) -- mirrors the HZD catalog batch conventions
-(``engine.catalog.done_core_paths`` / ``processed_core_paths``).
+(``engine.catalog_io.done_core_paths`` / ``processed_core_paths``).
 
 Output (all gitignored under ``out/fw/``)::
 

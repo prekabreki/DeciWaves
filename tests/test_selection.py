@@ -9,7 +9,7 @@ fits the pipeline):
   (e) Cutscenes are NOT passed to filter_and_dedup — story_order handles them separately.
   (f) Dropped duplicates are recorded by appending to dupes_sink.
 
-These rules are extracted verbatim from deciwaves.engine.story_order.build_playlist.
+These rules are extracted verbatim from deciwaves.games.ds.story_order.build_playlist.
 """
 from deciwaves.engine.selection import filter_and_dedup, PLACEHOLDER_SUBTITLE
 

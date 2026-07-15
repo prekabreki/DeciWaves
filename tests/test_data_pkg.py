@@ -23,7 +23,7 @@ def test_packaged_ds_file_list_has_sentence_paths():
 
 def test_packaged_ds_file_list_has_dialogue_and_simpletext_paths():
     """The bundled DS file list carries both the dialogue sentence cores (what
-    engine.catalog.select_core_paths selects) and the voice simpletext cores
+    games.ds.catalog.select_core_paths selects) and the voice simpletext cores
     (what engine.speakers.SpeakerMap's default filter selects), so an
     out-of-box `deciwaves ds` run can derive speaker names live from the
     user's install."""
