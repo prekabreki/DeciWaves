@@ -12,6 +12,10 @@ from deciwaves.games.hzd.atrac9 import Atrac9Error, decode_wem_to_wav
 from deciwaves.games.hzd.binding import build_buckets, structural_binds
 
 ARCHIVE = "package.01.00.core.stream"
+# Single source of truth for the incremental checkpoint sidecar's default path --
+# also read by cli/run.py's chained `hzd run` to decide whether to pass a prior
+# run's sidecar back in via --transcripts (see _load_transcripts_sidecar below).
+DEFAULT_TRANSCRIPTS_OUT = "out/hzd/asr-transcripts.csv"
 MANIFEST_COLS = ["clip_row", "offset", "line_id", "speaker_name", "subtitle_en", "scene", "tier", "score", "transcript"]
 # Incremental transcript checkpoint sidecar: exactly the columns the --transcripts reuse
 # path below consumes (r["clip_row"], r.get("transcript", "")) -- a prior full manifest
@@ -44,7 +48,13 @@ def _load_transcripts_sidecar(path):
     completed transcript. An intact row always ends in a newline (see the writer), so:
     if the file's last byte is NOT a newline, the final row is torn and is dropped --
     it is simply re-transcribed on resume, which is safe.
+
+    Raises FileNotFoundError if `path` doesn't exist -- callers (main(), below) turn
+    that into a clean usage error instead of letting os.path.getsize's raw traceback
+    through.
     """
+    if not os.path.isfile(path):
+        raise FileNotFoundError(path)
     torn = False
     if os.path.getsize(path):
         with open(path, "rb") as fb:
@@ -77,7 +87,7 @@ def main(argv=None):
     ap.add_argument("--errors", default="out/hzd/asr-manifest-errors.log",
                     help="per-clip decode/archive-read failures: clip_row + reason, "
                          "one per line (see games/hzd/clip_index.py's convention)")
-    ap.add_argument("--transcripts-out", default="out/hzd/asr-transcripts.csv",
+    ap.add_argument("--transcripts-out", default=DEFAULT_TRANSCRIPTS_OUT,
                     help="incremental transcript checkpoint sidecar; appended to per clip "
                          "as it is transcribed so a crash/interrupt loses at most one clip -- "
                          "resume with --transcripts <this file> --package <pkg>")
@@ -128,6 +138,8 @@ def main(argv=None):
     # skipped, only the remainder is (re)transcribed.
     transcripts = {}
     if a.transcripts:
+        if not os.path.isfile(a.transcripts):
+            ap.error(f"--transcripts path not found: {a.transcripts}")
         for r in _load_transcripts_sidecar(a.transcripts):
             if r["clip_row"] in want:
                 transcripts[r["clip_row"]] = r.get("transcript", "")

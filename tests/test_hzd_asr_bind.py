@@ -397,6 +397,23 @@ def test_resume_sidecar_clips_dont_count_toward_breaker(tmp_path, monkeypatch, c
     assert "environment" in err.lower()
 
 
+def test_missing_transcripts_path_is_a_clean_usage_error(tmp_path, monkeypatch, capsys):
+    """A --transcripts path that doesn't exist must fail as a clean, ASCII usage error
+    (argparse's ap.error() convention, exit code 2) -- not an unguarded
+    os.path.getsize(path) raising a raw FileNotFoundError traceback."""
+    catalog, wem_meta, clip_index = _write_fixture(tmp_path, n_clips=1)
+    missing = tmp_path / "does-not-exist.csv"
+    argv = _argv(tmp_path, catalog, wem_meta, clip_index, transcripts=str(missing))
+
+    with pytest.raises(SystemExit) as exc:
+        asr_bind.main(argv)
+
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert str(missing) in err
+    assert err.isascii()
+
+
 def test_torn_sidecar_used_as_both_transcripts_and_transcripts_out_is_healed(tmp_path, monkeypatch):
     """The documented resume recipe reuses the SAME path for --transcripts and
     --transcripts-out. If that sidecar's last row was torn by a crash mid-write, the

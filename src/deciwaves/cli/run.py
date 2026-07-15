@@ -30,6 +30,7 @@ from typing import Callable
 
 from deciwaves import data
 from deciwaves.cli.main import STAGES, _import_stage  # noqa: F401 -- re-exported for monkeypatching
+from deciwaves.games.hzd import asr_bind
 
 
 class StageConfigError(Exception):
@@ -190,6 +191,20 @@ def _hzd_package_argv(ctx: dict) -> list:
     return ["--package", ctx["package"]]
 
 
+def _hzd_bind_argv(ctx: dict) -> list:
+    """bind's argv, PLUS --transcripts pointed at the sidecar's own default path when
+    that file already exists (a crashed/interrupted prior bind run left it there).
+    asr_bind.py's --transcripts loader already handles resuming from it (torn-row
+    drop, tail heal, same-path append) -- this only decides *whether* to pass it,
+    making the README's "an interrupted bind picks up where it stopped" claim true
+    for the chained `hzd run` (previously only true for a manually-rerun `hzd bind`
+    that passed --transcripts itself)."""
+    argv = ["--package", ctx["package"]]
+    if os.path.isfile(asr_bind.DEFAULT_TRANSCRIPTS_OUT):
+        argv += ["--transcripts", asr_bind.DEFAULT_TRANSCRIPTS_OUT]
+    return argv
+
+
 def _run_hzd(cfg: dict, extra_argv: list) -> int:
     ap = argparse.ArgumentParser(
         prog="deciwaves hzd run",
@@ -210,7 +225,7 @@ def _run_hzd(cfg: dict, extra_argv: list) -> int:
         Stage("catalog", STAGES["hzd"]["catalog"][0], _hzd_package_argv),
         Stage("clip-index", STAGES["hzd"]["clip-index"][0], _hzd_package_argv),
         Stage("wem-metadata", STAGES["hzd"]["wem-metadata"][0], _hzd_package_argv),
-        Stage("bind", STAGES["hzd"]["bind"][0], _hzd_package_argv, gpu=True),
+        Stage("bind", STAGES["hzd"]["bind"][0], _hzd_bind_argv, gpu=True),
         Stage("render", STAGES["hzd"]["render"][0], _hzd_package_argv),
     ]
     return _run_chain("hzd", chain, ctx)

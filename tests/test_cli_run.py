@@ -329,6 +329,46 @@ def test_hzd_chain_order_and_injection(tmp_path, monkeypatch):
         assert _after(argv, "--package") == "PKG"
 
 
+def test_hzd_bind_argv_omits_transcripts_when_sidecar_absent(tmp_path, monkeypatch):
+    """A fresh workspace (no prior asr-transcripts.csv) has nothing to resume from --
+    bind's argv must not include --transcripts."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    mods = _mods("hzd")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _hzd_outputs(mods)))
+
+    rc = run_mod.run_game("hzd", {"hzd_package": "PKG"}, [])
+    assert rc == 0
+
+    bind_argv = dict(calls)[mods["bind"]]
+    assert "--transcripts" not in bind_argv
+
+
+def test_hzd_bind_argv_includes_transcripts_when_sidecar_present(tmp_path, monkeypatch):
+    """A sidecar already sitting at asr_bind's own default --transcripts-out path (left
+    behind by a crashed/interrupted prior bind run) must be passed back in via
+    --transcripts, so a re-run of `hzd run` actually resumes instead of re-transcribing
+    everything from scratch -- making the README's "an interrupted bind picks up where
+    it stopped" claim true for the chained `run` command, not just a manual `hzd bind
+    --transcripts ...` invocation."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    sidecar = Path(run_mod.asr_bind.DEFAULT_TRANSCRIPTS_OUT)
+    sidecar.parent.mkdir(parents=True, exist_ok=True)
+    sidecar.write_text("clip_row,transcript\n0,prior ok\n", encoding="utf-8")
+
+    mods = _mods("hzd")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _hzd_outputs(mods)))
+
+    rc = run_mod.run_game("hzd", {"hzd_package": "PKG"}, [])
+    assert rc == 0
+
+    bind_argv = dict(calls)[mods["bind"]]
+    assert _after(bind_argv, "--transcripts") == run_mod.asr_bind.DEFAULT_TRANSCRIPTS_OUT
+
+
 def test_hzd_bind_gpu_gate_aborts_without_whisperx(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("importlib.util.find_spec", lambda name: None)

@@ -9,7 +9,7 @@ Reuses engine.render's game-agnostic packing/concat (pack_episodes, silence gaps
 _ffmpeg_concat -> MP3 128k, tracklist sidecars); the HZD-specific part is decoding each
 clip from package.01 by (offset, length) via VGAudio.
 
-    PYTHONPATH="src;vendor/pydecima" python -m deciwaves.games.hzd.render --package <pkg dir>
+    deciwaves hzd render --package <pkg dir>
 """
 from __future__ import annotations
 
