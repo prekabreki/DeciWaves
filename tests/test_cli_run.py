@@ -13,6 +13,7 @@ import pytest
 
 from deciwaves.cli import run as run_mod
 from deciwaves.cli.main import STAGES
+from deciwaves.cli.main import _import_stage as real_import_stage
 
 
 def _mods(game):
@@ -406,6 +407,41 @@ def test_fw_render_runs_despite_extract_creating_audio_dir(tmp_path, monkeypatch
     assert mods["render"] in called
     assert called == [mods["extract"], mods["asr"], mods["subtitle-bind"],
                        mods["match"], mods["full-reel"], mods["render"]]
+
+
+def test_fw_run_missing_types_json_aborts_chain_cleanly(tmp_path, monkeypatch, capsys):
+    """`fw run` must surface a missing --types-json at the subtitle-bind stage as
+    a clean, actionable failure -- not an unhandled FileNotFoundError traceback
+    (issue #7). extract/asr are faked (they need a real install); subtitle-bind
+    dispatches to its REAL main() so its own check is what's under test here.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    mods = _mods("fw")
+    calls = []
+    fake_import_stage = _make_fake_import_stage(calls, _fw_outputs(mods))
+
+    def _import_stage(module_name):
+        if module_name == mods["subtitle-bind"]:
+            return real_import_stage(module_name)  # the real subtitle_bind.main
+        return fake_import_stage(module_name)
+
+    monkeypatch.setattr(run_mod, "_import_stage", _import_stage)
+
+    rc = run_mod.run_game("fw", {"fw_package": "PKG"}, [])
+    assert rc == 1
+
+    called = [m for m, _ in calls]
+    assert called == [mods["extract"], mods["asr"]]  # subtitle-bind ran for real, then chain stopped
+
+    captured = capsys.readouterr()
+    assert "--types-json" in captured.out
+    assert "docs/BYO.md" in captured.out
+    assert "vendor/odradek" not in captured.out
+    assert captured.err == ""  # no traceback
+
+    assert not os.path.exists(_marker("fw", "subtitle-bind"))  # failed -> no done-marker
+    assert not os.path.exists(_marker("fw", "match"))          # never reached
 
 
 def test_fw_byo_stop_without_gamescript(tmp_path, monkeypatch, capsys):

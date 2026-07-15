@@ -175,13 +175,28 @@ def _load_csv(path):
         return list(csv.DictReader(f))
 
 
+def types_json_error(path: str) -> str | None:
+    """Return an actionable error message if *path* (the BYO Decima RTTI type
+    map for Forbidden West) doesn't exist, else ``None``. Kept separate from
+    ``main`` so the missing-file message is unit-testable without the rest of
+    the (install-dependent) pipeline."""
+    if os.path.isfile(path):
+        return None
+    return (
+        f"subtitle-bind: --types-json not found at {path!r}. This must be a "
+        "Decima RTTI type map for Forbidden West, user-supplied (BYO -- this "
+        "repo can't ship one). See docs/BYO.md for how to obtain it."
+    )
+
+
 def main(argv=None):  # pragma: no cover - integration glue
     ap = argparse.ArgumentParser(description="FW subtitle fast-path manifest")
     ap.add_argument("--package-dir", required=True,
                     help="FW LocalCacheWinGame/package dir")
-    ap.add_argument("--types-json",
-                    default=os.path.join("vendor", "odradek", "odradek-game-hfw",
-                                         "src", "main", "resources", "types.json"))
+    ap.add_argument("--types-json", default="types.json",
+                    help="Decima RTTI type map for Forbidden West, user-supplied "
+                         "(BYO -- see docs/BYO.md); default: types.json in the "
+                         "workspace root")
     ap.add_argument("--clip-index", default="out/fw/clip-index.csv")
     ap.add_argument("--transcripts", default="out/fw/transcripts.csv")
     ap.add_argument("--out", default="out/fw/subtitle-manifest.csv")
@@ -192,6 +207,11 @@ def main(argv=None):  # pragma: no cover - integration glue
     ap.add_argument("--limit", type=int, default=None,
                     help="stop after N groups (review/sample runs)")
     a = ap.parse_args(argv)
+
+    err = types_json_error(a.types_json)
+    if err:
+        print(err)
+        return 1
 
     from deciwaves.engine.pack.fw_streaming_graph import StreamingGraph
     from deciwaves.engine.pack.fw_stream import FwStreamStore

@@ -5,8 +5,11 @@ manifest row building — is install-independent and tested here. The graph/scan
 glue is exercised by the integration test in test_fw_object_reader.py (skips
 without the install).
 """
+import pytest
+
+from deciwaves.games.fw import subtitle_bind
 from deciwaves.games.fw.subtitle_bind import (
-    clean_subtitle, assign_subtitles, build_subtitle_rows,
+    clean_subtitle, assign_subtitles, build_subtitle_rows, types_json_error,
 )
 from deciwaves.games.fw.bind import MANIFEST_COLS
 
@@ -98,3 +101,65 @@ def test_build_rows_drops_low_score_multi_line_but_keeps_certain_single():
     assert "g9_0000" in ids          # single-line certain pairing kept
     g9 = next(r for r in rows if r["line_id"] == "g9_0000")
     assert g9["subtitle"] == "This subtitle is certain."
+
+
+# ---------------------------------------------------------------------------
+# --types-json: actionable failure when the BYO Decima RTTI type map is
+# missing, instead of a bare open() traceback (issue #7). Was previously a
+# gitignored `vendor/odradek/...` dev-machine path that no stock user has.
+# ---------------------------------------------------------------------------
+
+def test_types_json_error_none_when_file_present(tmp_path):
+    p = tmp_path / "types.json"
+    p.write_text("{}", encoding="utf-8")
+    assert types_json_error(str(p)) is None
+
+
+def test_types_json_error_message_when_missing(tmp_path):
+    p = tmp_path / "types.json"
+    msg = types_json_error(str(p))
+    assert msg is not None
+    assert "--types-json" in msg
+    assert "Forbidden West" in msg
+    assert "docs/BYO.md" in msg
+    # public-flip hygiene: no dev-machine path residue anywhere user-visible
+    assert "vendor/odradek" not in msg
+
+
+def test_main_missing_default_types_json_fails_actionably(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    rc = subtitle_bind.main(["--package-dir", str(tmp_path / "pkg")])
+    assert rc == 1
+
+    captured = capsys.readouterr()
+    assert "--types-json" in captured.out
+    assert "types.json" in captured.out
+    assert "docs/BYO.md" in captured.out
+    assert "vendor/odradek" not in captured.out
+    assert captured.err == ""  # no traceback
+
+
+def test_main_missing_explicit_types_json_fails_actionably(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    explicit = tmp_path / "my-types.json"
+    rc = subtitle_bind.main(["--package-dir", str(tmp_path / "pkg"),
+                             "--types-json", str(explicit)])
+    assert rc == 1
+
+    captured = capsys.readouterr()
+    assert "--types-json" in captured.out
+    assert repr(str(explicit)) in captured.out
+    assert "docs/BYO.md" in captured.out
+    assert captured.err == ""  # no traceback
+
+
+def test_main_present_types_json_proceeds_past_the_check(tmp_path, monkeypatch):
+    """With types.json present (the workspace-root default), main() must move
+    on to the next real step instead of stopping at our new check -- proven by
+    letting it reach (and fail on) the next, unrelated missing input, rather
+    than repeating the types.json-missing message."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "types.json").write_text("{}", encoding="utf-8")
+
+    with pytest.raises(FileNotFoundError):
+        subtitle_bind.main(["--package-dir", str(tmp_path / "no-such-package")])
