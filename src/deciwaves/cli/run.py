@@ -89,6 +89,24 @@ def _missing_config(game: str, hint: str, flag_hint: str) -> int:
     return 1
 
 
+def _parse_or_exit(ap: argparse.ArgumentParser, extra_argv: list):
+    """Parse a per-game ``run`` parser's argv, mirroring cli.main.main()'s own
+    "usage errors return 2" contract for its top-level parser: argparse raises
+    SystemExit both for a clean exit (--help, code 0) and for a usage error
+    (unknown/typo'd flag, code 2). Code 0 is "nothing went wrong, just exiting"
+    -- let it propagate as a real SystemExit, so `--help` behaves like any other
+    argparse CLI. A nonzero code is converted into a plain return value (an int,
+    instead of a Namespace) so callers -- including `run_game()`'s own return
+    value -- observe exit code 2 without needing a try/except.
+    """
+    try:
+        return ap.parse_args(extra_argv)
+    except SystemExit as exc:
+        if not exc.code:
+            raise
+        return exc.code
+
+
 # ---------------------------------------------------------------------------
 # ds
 # ---------------------------------------------------------------------------
@@ -133,10 +151,15 @@ def _ds_render_argv(ctx: dict) -> list:
 
 
 def _run_ds(cfg: dict, extra_argv: list) -> int:
-    ap = argparse.ArgumentParser(add_help=False)
-    ap.add_argument("--data-dir")
-    ap.add_argument("--oodle")
-    ns, _ = ap.parse_known_args(extra_argv)
+    ap = argparse.ArgumentParser(
+        prog="deciwaves ds run",
+        description="Run the DS pipeline end-to-end: catalog -> order -> render.",
+    )
+    ap.add_argument("--data-dir", help="DS install's data directory (default: from `deciwaves setup`)")
+    ap.add_argument("--oodle", help="path to oo2core_7_win64.dll (default: from `deciwaves setup`)")
+    ns = _parse_or_exit(ap, extra_argv)
+    if isinstance(ns, int):
+        return ns
 
     ds_install = cfg.get("ds_install")
     data_dir = ns.data_dir or (os.path.join(ds_install, "data") if ds_install else None)
@@ -167,9 +190,15 @@ def _hzd_package_argv(ctx: dict) -> list:
 
 
 def _run_hzd(cfg: dict, extra_argv: list) -> int:
-    ap = argparse.ArgumentParser(add_help=False)
-    ap.add_argument("--package")
-    ns, _ = ap.parse_known_args(extra_argv)
+    ap = argparse.ArgumentParser(
+        prog="deciwaves hzd run",
+        description="Run the HZD pipeline end-to-end: catalog -> clip-index -> "
+                    "wem-metadata -> bind -> render.",
+    )
+    ap.add_argument("--package", help="HZD package/install path (default: from `deciwaves setup`)")
+    ns = _parse_or_exit(ap, extra_argv)
+    if isinstance(ns, int):
+        return ns
 
     package = ns.package or cfg.get("hzd_package")
     if not package:
@@ -231,10 +260,17 @@ def _fw_render_argv(ctx: dict) -> list:
 
 
 def _run_fw(cfg: dict, extra_argv: list) -> int:
-    ap = argparse.ArgumentParser(add_help=False)
-    ap.add_argument("--package")
-    ap.add_argument("--gamescript")
-    ns, _ = ap.parse_known_args(extra_argv)
+    ap = argparse.ArgumentParser(
+        prog="deciwaves fw run",
+        description="Run the FW pipeline end-to-end: extract -> asr -> subtitle-bind, "
+                    "then (with a BYO gamescript) match -> full-reel -> render.",
+    )
+    ap.add_argument("--package", help="FW package/install path (default: from `deciwaves setup`)")
+    ap.add_argument("--gamescript", help="path to your own Forbidden West gamescript transcript "
+                                          "(BYO -- required to run match/full-reel/render)")
+    ns = _parse_or_exit(ap, extra_argv)
+    if isinstance(ns, int):
+        return ns
 
     package = ns.package or cfg.get("fw_package")
     if not package:

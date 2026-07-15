@@ -255,6 +255,35 @@ def test_ds_render_missing_packaged_keepspans_is_soft_failure(tmp_path, monkeypa
     assert "--speech-trim" in out
 
 
+def test_ds_run_help_exits_0_without_running_any_stage(tmp_path, monkeypatch, capsys):
+    """`deciwaves ds run --help` must print real help for the run parser (its own
+    prog name, at minimum) and exit 0 -- and never dispatch a single stage. See #8."""
+    monkeypatch.chdir(tmp_path)
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, {}))
+
+    with pytest.raises(SystemExit) as exc:
+        run_mod.run_game("ds", {"ds_install": "X"}, ["--help"])
+
+    assert exc.value.code == 0
+    assert calls == []
+    assert "deciwaves ds run" in capsys.readouterr().out
+
+
+def test_ds_run_unknown_flag_exits_2_without_running_any_stage(tmp_path, monkeypatch, capsys):
+    """A typo'd flag must be a usage error naming it (exit 2), not silently
+    dropped into a live multi-hour pipeline. See #8."""
+    monkeypatch.chdir(tmp_path)
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, {}))
+
+    rc = run_mod.run_game("ds", {"ds_install": "X"}, ["--bogus-flag"])
+
+    assert rc == 2
+    assert calls == []
+    assert "--bogus-flag" in capsys.readouterr().err
+
+
 # ---------------------------------------------------------------------------
 # hzd
 # ---------------------------------------------------------------------------
@@ -308,6 +337,31 @@ def test_hzd_missing_config_errors(tmp_path, monkeypatch, capsys):
     rc = run_mod.run_game("hzd", {}, [])
     assert rc == 1
     assert "deciwaves setup" in capsys.readouterr().out
+
+
+def test_hzd_run_help_exits_0_without_running_any_stage(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, {}))
+
+    with pytest.raises(SystemExit) as exc:
+        run_mod.run_game("hzd", {"hzd_package": "PKG"}, ["--help"])
+
+    assert exc.value.code == 0
+    assert calls == []
+    assert "deciwaves hzd run" in capsys.readouterr().out
+
+
+def test_hzd_run_unknown_flag_exits_2_without_running_any_stage(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, {}))
+
+    rc = run_mod.run_game("hzd", {"hzd_package": "PKG"}, ["--bogus-flag"])
+
+    assert rc == 2
+    assert calls == []
+    assert "--bogus-flag" in capsys.readouterr().err
 
 
 # ---------------------------------------------------------------------------
@@ -435,3 +489,42 @@ def test_fw_missing_config_errors(tmp_path, monkeypatch, capsys):
     rc = run_mod.run_game("fw", {}, [])
     assert rc == 1
     assert "deciwaves setup" in capsys.readouterr().out
+
+
+def test_fw_run_help_exits_0_without_running_any_stage(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, {}))
+
+    with pytest.raises(SystemExit) as exc:
+        run_mod.run_game("fw", {"fw_package": "PKG"}, ["--help"])
+
+    assert exc.value.code == 0
+    assert calls == []
+    assert "deciwaves fw run" in capsys.readouterr().out
+
+
+def test_fw_run_help_after_other_flags_still_exits_0_without_running_any_stage(tmp_path, monkeypatch, capsys):
+    """--help must win no matter where it falls in argv, same as any argparse CLI."""
+    monkeypatch.chdir(tmp_path)
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, {}))
+
+    with pytest.raises(SystemExit) as exc:
+        run_mod.run_game("fw", {"fw_package": "PKG"}, ["--package", "OTHER", "--help"])
+
+    assert exc.value.code == 0
+    assert calls == []
+    assert "deciwaves fw run" in capsys.readouterr().out
+
+
+def test_fw_run_unknown_flag_exits_2_without_running_any_stage(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, {}))
+
+    rc = run_mod.run_game("fw", {"fw_package": "PKG"}, ["--bogus-flag"])
+
+    assert rc == 2
+    assert calls == []
+    assert "--bogus-flag" in capsys.readouterr().err
