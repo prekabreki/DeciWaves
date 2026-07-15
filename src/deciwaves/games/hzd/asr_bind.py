@@ -144,6 +144,20 @@ def main(argv=None):
             os.makedirs(os.path.dirname(os.path.abspath(a.transcripts_out)), exist_ok=True)
             os.makedirs(os.path.dirname(os.path.abspath(a.errors)), exist_ok=True)
             sidecar_is_new = not os.path.exists(a.transcripts_out)
+            # Heal a torn tail before appending (Task 14c / issue #20 review): a torn
+            # final row is dropped in memory by _load_transcripts_sidecar, but the
+            # on-disk bytes still end mid-row. If --transcripts-out is the SAME path
+            # (the documented resume recipe), appending straight onto that torn tail
+            # would merge the next row's bytes into it, producing one corrupt mid-file
+            # row no later load can detect. A lone "\n" terminates the torn row as its
+            # own (garbled but isolated) row before any new row is appended.
+            if not sidecar_is_new and os.path.getsize(a.transcripts_out) > 0:
+                with open(a.transcripts_out, "rb") as f:
+                    f.seek(-1, os.SEEK_END)
+                    torn = f.read(1) != b"\n"
+                if torn:
+                    with open(a.transcripts_out, "a", newline="", encoding="utf-8") as f:
+                        f.write("\n")
             # Circuit breaker state (see BREAKER_K docstring): armed until the first
             # success this run; while armed, n_failed IS the count of clips processed
             # so far (all of them failures) since no success has occurred yet.

@@ -361,3 +361,80 @@ def test_resume_with_transcripts_sidecar_skips_already_done_clips(tmp_path, monk
     rows = list(csv.DictReader(open(sidecar, encoding="utf-8")))
     assert {r["clip_row"] for r in rows} == {"0", "1", "2"}   # old rows kept, new one appended
     assert set(_manifest_clip_rows(tmp_path)) == {"0", "1", "2"}
+
+
+def test_resume_sidecar_clips_dont_count_toward_breaker(tmp_path, monkeypatch, capsys):
+    """Clips skipped via a --transcripts resume sidecar never enter the processing loop,
+    so they must never count toward the circuit breaker: 10 already-done clips (from a
+    prior run) + 7 new clips that all fail must trip the breaker at exactly the 5th
+    NEWLY-processed clip -- not never (if the 10 resumed clips wrongly counted as
+    successes and disarmed the breaker) and not immediately (if they wrongly counted as
+    failures already partway to BREAKER_K)."""
+    n_done = 10
+    n_new = 7
+    catalog, wem_meta, clip_index = _write_fixture(tmp_path, n_clips=n_done + n_new)
+    sidecar = tmp_path / "asr-transcripts.csv"
+    # pre-seed as if a prior run already checkpointed clip_row 0..9 before crashing
+    _write_csv(sidecar,
+               [{"clip_row": str(i), "transcript": "prior ok"} for i in range(n_done)],
+               asr_bind.TRANSCRIPTS_COLS)
+
+    dsar = FakeDsar()
+    calls = []
+
+    def always_fail(wav_path, model, **kw):
+        calls.append(wav_path)
+        raise OSError("whisperx: ffmpeg not found")
+
+    _patch_asr_stack(monkeypatch, dsar, transcribe_fn=always_fail)
+
+    argv = _argv(tmp_path, catalog, wem_meta, clip_index, transcripts=str(sidecar))
+    rc = asr_bind.main(argv)
+
+    assert rc == 1
+    assert len(calls) == asr_bind.BREAKER_K      # tripped at the 5th newly-processed clip
+    err = capsys.readouterr().err
+    assert "environment" in err.lower()
+
+
+def test_torn_sidecar_used_as_both_transcripts_and_transcripts_out_is_healed(tmp_path, monkeypatch):
+    """The documented resume recipe reuses the SAME path for --transcripts and
+    --transcripts-out. If that sidecar's last row was torn by a crash mid-write, the
+    on-disk bytes (unlike the in-memory dict, which drops the torn row) still end
+    mid-row; opening it for append must heal the tail first, or the re-transcribed
+    row merges with the torn tail into one corrupt row."""
+    catalog, wem_meta, clip_index = _write_fixture(tmp_path, n_clips=3)
+    sidecar = tmp_path / "asr-transcripts.csv"
+    with open(sidecar, "w", newline="", encoding="utf-8") as f:
+        f.write("clip_row,transcript\r\n")
+        f.write("0,prior ok\r\n")
+        f.write("1,prior ok\r\n")
+        f.write("2,this is a partial tran")   # no trailing newline: torn
+
+    dsar = FakeDsar()
+    calls = []
+
+    def spy_transcribe(wav_path, model, **kw):
+        calls.append(wav_path)
+        return FakeTranscript("new")
+
+    _patch_asr_stack(monkeypatch, dsar, transcribe_fn=spy_transcribe)
+
+    # SAME path for both flags: the documented resume recipe.
+    argv = _argv(tmp_path, catalog, wem_meta, clip_index, transcripts=str(sidecar),
+                 transcripts_out=str(sidecar))
+    rc = asr_bind.main(argv)
+
+    assert rc == 0
+    assert len(calls) == 1                       # only clip_row 2 was re-transcribed
+
+    raw = sidecar.read_bytes()
+    assert b"this is a partial tran2" not in raw  # no merged/corrupt row
+    rows = list(csv.DictReader(open(sidecar, newline="", encoding="utf-8")))
+    assert len(rows) == 4              # 0, 1, the healed (stale) torn row, new clip_row 2
+    assert all(len(r) == 2 for r in rows)          # every row parses as exactly 2 fields
+    by_row = {r["clip_row"]: r["transcript"] for r in rows}   # later row wins on dup key
+    assert by_row["0"] == "prior ok"
+    assert by_row["1"] == "prior ok"
+    assert by_row["2"] == "new"                    # re-transcribed clip is its own intact row
+    assert set(_manifest_clip_rows(tmp_path)) == {"0", "1", "2"}
