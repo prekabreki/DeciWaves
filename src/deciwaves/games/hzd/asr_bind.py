@@ -4,13 +4,19 @@ import argparse
 import csv
 import os
 import tempfile
+import wave
 from deciwaves.engine.pack.fw_package import FwPackage
 from deciwaves.games.hzd import asr, match
-from deciwaves.games.hzd.atrac9 import decode_wem_to_wav
+from deciwaves.games.hzd.atrac9 import Atrac9Error, decode_wem_to_wav
 from deciwaves.games.hzd.binding import build_buckets, structural_binds
 
 ARCHIVE = "package.01.00.core.stream"
 MANIFEST_COLS = ["clip_row", "offset", "line_id", "speaker_name", "subtitle_en", "scene", "tier", "score", "transcript"]
+# Incremental transcript checkpoint sidecar: exactly the columns the --transcripts reuse
+# path below consumes (r["clip_row"], r.get("transcript", "")) -- a prior full manifest
+# (MANIFEST_COLS, a superset) also satisfies this reader, so either can be passed to
+# --transcripts.
+TRANSCRIPTS_COLS = ["clip_row", "transcript"]
 
 
 def _load_csv(path):
@@ -20,13 +26,24 @@ def _load_csv(path):
 
 def main(argv=None):
     ap = argparse.ArgumentParser()
-    ap.add_argument("--package", help="HZDR package dir (required unless --transcripts)")
-    ap.add_argument("--transcripts", help="reuse the transcript column of a prior manifest "
-                    "(re-match without re-transcribing); skips WhisperX entirely")
+    ap.add_argument("--package", help="HZDR package dir (required unless --transcripts "
+                    "covers every clip)")
+    ap.add_argument("--transcripts", help="reuse a transcript sidecar's clip_row/transcript "
+                    "columns (skips WhisperX for clips already present there -- a prior "
+                    "manifest works too, MANIFEST_COLS is a superset); combine with "
+                    "--package to also transcribe whatever's left, resuming a "
+                    "crashed/interrupted run")
     ap.add_argument("--clip-index", default="out/hzd/clip-index.csv")
     ap.add_argument("--wem-metadata", default="out/hzd/wem-metadata.csv")
     ap.add_argument("--catalog", default="out/hzd/catalog.csv")
     ap.add_argument("--out", default="out/hzd/asr-manifest.csv")
+    ap.add_argument("--errors", default="out/hzd/asr-manifest-errors.log",
+                    help="per-clip decode/archive-read failures: clip_row + reason, "
+                         "one per line (see games/hzd/clip_index.py's convention)")
+    ap.add_argument("--transcripts-out", default="out/hzd/asr-transcripts.csv",
+                    help="incremental transcript checkpoint sidecar; appended to per clip "
+                         "as it is transcribed so a crash/interrupt loses at most one clip -- "
+                         "resume with --transcripts <this file> --package <pkg>")
     ap.add_argument("--sample-cap", type=int, default=300)   # MVP: cap ASR work
     ap.add_argument("--all-buckets", action="store_true",
                     help="transcribe every ambiguous bucket, not just story-relevant "
@@ -68,26 +85,64 @@ def main(argv=None):
         want.extend(c["clip_row"] for c in grp["clips"])
     want = set(want)
 
-    # Transcripts: reuse a prior manifest's column (instant re-match) or run WhisperX.
+    # Transcripts: reuse a prior manifest/sidecar's clip_row+transcript columns (instant
+    # re-match, no GPU) and/or run WhisperX for whatever's left. Combining --transcripts
+    # with --package resumes a crashed/interrupted run: clips already checkpointed are
+    # skipped, only the remainder is (re)transcribed.
     transcripts = {}
     if a.transcripts:
         for r in _load_csv(a.transcripts):
             if r["clip_row"] in want:
                 transcripts[r["clip_row"]] = r.get("transcript", "")
-    else:
+    n_skipped = len(transcripts)
+    remaining = sorted((cr for cr in want if cr not in transcripts), key=int)
+    n_transcribed = n_failed = 0
+
+    if remaining:
         if not a.package:
-            ap.error("--package is required unless --transcripts is given")
-        dsar = FwPackage(a.package).dsar_for(ARCHIVE)
-        model = asr.load_model() if want else None
-        for cr in want:
-            c = by_row[int(cr)]
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tf:
-                wav = tf.name
-            try:
-                decode_wem_to_wav(dsar.read(int(c["offset"]), int(c["a_bytes"])), wav)
-                transcripts[cr] = asr.transcribe(wav, model).text
-            finally:
-                os.unlink(wav)
+            if not a.transcripts:
+                ap.error("--package is required unless --transcripts is given")
+            # pure reuse mode (no --package): clips missing from the sidecar simply stay
+            # unbound this run -- there's nothing to transcribe them with.
+        else:
+            dsar = FwPackage(a.package).dsar_for(ARCHIVE)
+            model = asr.load_model()
+            os.makedirs(os.path.dirname(os.path.abspath(a.transcripts_out)), exist_ok=True)
+            os.makedirs(os.path.dirname(os.path.abspath(a.errors)), exist_ok=True)
+            sidecar_is_new = not os.path.exists(a.transcripts_out)
+            with open(a.transcripts_out, "a", newline="", encoding="utf-8") as tf, \
+                 open(a.errors, "w", encoding="utf-8") as ferr:
+                tw = csv.DictWriter(tf, fieldnames=TRANSCRIPTS_COLS)
+                if sidecar_is_new:
+                    tw.writeheader()
+                for cr in remaining:
+                    c = by_row[int(cr)]
+                    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as wf:
+                        wav = wf.name
+                    try:
+                        decode_wem_to_wav(dsar.read(int(c["offset"]), int(c["a_bytes"])), wav)
+                        text = asr.transcribe(wav, model).text
+                    except (Atrac9Error, OSError, wave.Error, ValueError) as exc:
+                        # fail-soft: log clip + reason, keep going -- one corrupt clip must
+                        # never abort an hours-long GPU run. Not caught: anything NOT a
+                        # known decode/archive-read failure (nor KeyboardInterrupt/
+                        # SystemExit, which aren't Exception subclasses anyway) still
+                        # aborts -- see test_sidecar_checkpoints_incrementally_and_survives_an_abort.
+                        ferr.write(f"{cr}\t{exc}\n"); ferr.flush()
+                        n_failed += 1
+                        continue
+                    finally:
+                        os.unlink(wav)
+                    transcripts[cr] = text
+                    n_transcribed += 1
+                    tw.writerow({"clip_row": cr, "transcript": text})
+                    tf.flush()
+
+    print(f"asr: transcribed={n_transcribed} skipped={n_skipped} failed={n_failed}")
+    if n_failed:
+        print(f"asr errors: {n_failed} clip(s) failed, see {a.errors}")
+        print(f"resume: rerun with --package {a.package} --transcripts {a.transcripts_out} "
+              f"(clips already in {a.transcripts_out} are skipped; failed clips are retried)")
 
     # Resolve each bucket: unique confident assignment + 1-leftover elimination.
     for grp in relevant:
