@@ -51,8 +51,16 @@ game-agnostic module needs without hardcoding a specific game's paths:
   which `.core` files hold dialogue.
 - `speaker_simpletext_filter` — a predicate that picks out the per-voice files used to
   resolve human-readable speaker names.
-- `transcript_path` / `out_dir` / `episode_map` / `cutscene_resolver` — optional,
-  game-specific extras a handful of DS-only call sites read directly.
+
+Those four fields are the ones actually read off a `GameProfile` today
+(`engine/catalog.py`, `games/hzd/catalog.py`, `games/hzd/wem_metadata.py`). The dataclass
+also declares `name`, `transcript_path`, `out_dir`, `episode_map`, and `cutscene_resolver` —
+five more fields with no current profile-level reader. The DS code that plays their role
+(`engine/story_order.py`, `games/ds/episode_map.py`, `games/ds/cutscene_audio.py`) imports
+the DS module directly instead of going through the profile, so passing those fields on a
+profile object doesn't currently do anything. Trimming `GameProfile` down to the four
+consumed fields is tracked in issue #24 — don't take the extra five as a contract a fourth
+game needs to fill in.
 
 Each game builds its own profile from a `build_profile(...)` factory
 (`games/ds/profile.py`, `games/hzd/profile.py`) that supplies its own prefix map and
@@ -100,8 +108,19 @@ reuse of, `filter_and_dedup`. The two games don't share `story_order.py` itself.
 
 The package declares a single console-script entry point (`deciwaves`, see
 `pyproject.toml`) pointing at `deciwaves.cli.main:main`, giving every stage a uniform
-`deciwaves [--workspace DIR] <game> <stage>` invocation.
+`deciwaves [--workspace DIR] <game> <stage>` invocation — or, with no subcommand at all, a
+guided interactive flow (see below).
 
+- **Guided mode (bare `deciwaves`).** The primary entry point for someone who just wants to
+  point the tool at a game and get a reel, not memorize stage names. Running `deciwaves`
+  with no subcommand runs `deciwaves/cli/guided.py`, which reuses the same pieces the
+  explicit subcommands use rather than reimplementing them: it prints which games
+  `doctor.py`'s own install checks (`check_ds_install` / `check_hzd_package` /
+  `check_fw_package`) consider configured, prompts for a game and a workspace directory,
+  `chdir`s into that workspace, and calls the identical
+  `deciwaves.cli.run.run_game(...)` that `deciwaves <game> run` calls. If stdin isn't a
+  TTY (CI, a pipe, a scripted invocation) it never blocks on `input()` — it prints a
+  one-line usage hint and returns a nonzero exit code instead.
 - **Stage dispatch.** `deciwaves/cli/main.py` keeps a `STAGES` registry — a
   `{game: {stage_name: (module_path, help_text)}}` mapping covering every stage in all
   three pipelines (DS: `catalog` / `cutscenes` / `trim` / `order` / `render`; HZD:
@@ -114,7 +133,9 @@ The package declares a single console-script entry point (`deciwaves`, see
   that stage's own module, not the CLI layer.
 - **Workspace.** `--workspace` (default `.`) is resolved to an absolute path, created if
   it doesn't exist, and the process `chdir`s into it before a stage runs. Stage modules
-  default their own outputs to CWD-relative `out/` paths, so this `chdir` is what lets one
+  default their own outputs to CWD-relative `out/` paths (this is also why FW's
+  `subtitle-bind` stage can default `--types-json` to a bare `types.json`: it resolves
+  against whatever directory `--workspace` chdir'd into), so this `chdir` is what lets one
   flag redirect an entire run without touching every stage's individual path arguments.
 - **Config env application.** `deciwaves/cli/config.py` persists a small JSON config
   (`tools_dir`, `ds_install`, `hzd_package`, `fw_package`, `oodle_dll`) under
@@ -125,14 +146,39 @@ The package declares a single console-script entry point (`deciwaves`, see
   stage module is imported: `engine/audio_clip.py`, `games/fw/extract.py`, and
   `games/hzd/atrac9.py` all read those environment variables to resolve their tool-path
   constants at import time, not lazily.
-- **`setup` / `doctor` / `run`.** The top-level parser also accepts `setup` (fetch the
-  external decode tools and record install paths) and `doctor` (preflight check) as
-  subcommands, and each per-game subparser accepts `run` alongside its real stage names as
-  a future whole-pipeline shortcut. All three are registered in the argparse surface today
-  as stubs — `main()` dispatches to `deciwaves.cli.setup`, `deciwaves.cli.doctor`, and
-  `deciwaves.cli.run`, which don't exist as modules yet — so the individual `<game>
-  <stage>` invocations are the reliable path today; `setup`/`doctor`/`run` are wired up
-  for later work to fill in.
+- **`setup`.** `deciwaves setup` (`deciwaves/cli/setup.py`) fetches `vgmstream-cli`,
+  `VGAudioCli`, and `ffmpeg` into a tools directory (default
+  `%LOCALAPPDATA%\DeciWaves\tools`), locates `oo2core_7_win64.dll` under a supplied
+  `--ds-install`, and persists all of that — plus any `--hzd-package` / `--fw-package`
+  paths — via `deciwaves/cli/config.py`. Each tool's download/unpack is isolated (one
+  failed fetch is reported in the summary table and doesn't stop the others), but the
+  command exits nonzero overall if any tool ended up missing.
+- **`doctor`.** `deciwaves doctor` (`deciwaves/cli/doctor.py`) runs a set of small,
+  independently-testable `(ok, message)` checks — the decode tools, the Oodle DLL, each
+  game's install/package path, the optional ASR extra, and CUDA availability — and prints
+  a report. The exit code is 0 only when every *required* check passes; an unconfigured
+  game (the user simply doesn't own it) reports `[--] not configured` but its check
+  reports `ok=True` regardless, so `doctor` never requires a DS (or HZD, or FW) install to
+  report a clean bill of health. The ASR extra and CUDA checks are purely informational
+  either way.
+- **`<game> run`.** Each per-game subparser accepts `run` alongside its real stage names,
+  as a whole-pipeline shortcut (`deciwaves/cli/run.py`): `ds run` chains `catalog -> order
+  -> render`; `hzd run` chains `catalog -> clip-index -> wem-metadata -> bind -> render`;
+  `fw run` chains `extract -> asr -> subtitle-bind`, then — only once a `--gamescript`
+  (BYO; see `docs/BYO.md`) is supplied — continues `match -> full-reel -> render`. The
+  GPU-bound stages in those chains (`hzd bind`, `fw asr`) are gated on
+  `importlib.util.find_spec("whisperx")` and print an actionable install hint (`pip
+  install deciwaves[asr]`, plus a matching PyTorch build) instead of crashing when the ASR
+  extra isn't installed. **Resume is per-stage**: once a stage's `main()` returns `0`,
+  `run` writes a done-marker file at `out/<game>/.done-<stage>`, and a later `run`
+  invocation skips any stage whose marker already exists (delete the marker to force a
+  re-run of just that stage). A stage's own output path or directory existing is
+  deliberately *not* treated as "done" — a crash-interrupted run's partial output, or one
+  stage's output directory being mistaken for another's, must never look like a finished
+  stage. Each `run` subcommand builds its own `argparse` parser for its own flags (e.g. `ds
+  run --data-dir/--oodle`, `fw run --package/--gamescript`), so `deciwaves <game> run
+  --help` prints that game's actual flags instead of falling through and starting the
+  multi-hour pipeline.
 
 ## Death Stranding: Director's Cut
 
@@ -266,7 +312,7 @@ machine, including CI runners that own none of the three games:
 ```
 python -m venv .venv
 .venv\Scripts\Activate.ps1
-pip install -e .
+pip install -e ".[test]"
 python -m pytest -q
 ```
 

@@ -1,5 +1,16 @@
 # ASR binding plan: name the clips by content
 
+> **Historical.** This plan shipped. HZD Remastered voice binding is offline content
+> fingerprinting: an exact `(A, B)` byte-length/sample-count structural join
+> (`games/hzd/binding.py`) resolves the large majority of lines for free, and the ASR
+> text-match pipeline described below (`games/hzd/asr.py`, `games/hzd/match.py`,
+> `games/hzd/asr_bind.py`) resolves only the "collision bucket" minority — see
+> `docs/architecture.md`'s Horizon Zero Dawn Remastered section for the shipped shape.
+> Forbidden West never needed this route; it ships an actual streaming-graph positional
+> index instead (see `docs/architecture.md`'s Horizon Forbidden West section). The
+> **Status** line and open questions below are a snapshot from when this was still a
+> proposal, not current state.
+
 **Status:** proposed (2026-06-26). An **offline, content-based** alternative to cracking the
 structural `hi32` line→stream binding (see `docs/runtime-binding-plan.md`). Instead of recovering
 *which slot* a clip sits in, we recover
