@@ -148,6 +148,26 @@ def test_check_cuda_never_fails():
     assert ok
 
 
+def test_check_cuda_survives_broken_torch_import(monkeypatch):
+    # A half-installed/locked torch raises non-ImportError (e.g. PermissionError
+    # on a DLL); doctor must report a row, never traceback.
+    import builtins
+
+    real_import = builtins.__import__
+
+    def broken_import(name, *args, **kwargs):
+        if name == "torch":
+            raise PermissionError("[WinError 32] shm.dll is locked")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.delitem(__import__("sys").modules, "torch", raising=False)
+    monkeypatch.setattr(builtins, "__import__", broken_import)
+    ok, msg = doctor.check_cuda()
+    assert ok
+    assert "torch import failed" in msg
+    assert "WinError 32" in msg
+
+
 def test_check_config_file_echo():
     ok, msg = doctor.check_config_file()
     assert ok
