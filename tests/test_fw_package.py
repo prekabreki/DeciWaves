@@ -131,3 +131,27 @@ def test_first_locator_empty_package(tmp_path):
     fw = FwPackage(_make_package(tmp_path, []))
     with pytest.raises(RuntimeError):
         fw.first_locator()
+
+
+def test_first_locator_picks_smallest_nonempty_core(tmp_path):
+    # first_locator inspects locator metadata only (no archive reads), so a bare
+    # PackFileLocators.bin suffices. It must skip zero-length records and .stream
+    # archives (even smaller ones) and return the smallest remaining .core locator.
+    pkg = tmp_path / "package"
+    pkg.mkdir()
+    packfiles = [
+        (b"package.00.00.core", [(0x01, 0, 0),      # zero-length: skipped
+                                 (0x02, 0, 500),
+                                 (0x03, 512, 40)]),  # smallest qualifying
+        (b"package.00.01.core.stream", [(0x04, 0, 5)]),  # .stream: skipped
+    ]
+    out = struct.pack("<I", len(packfiles))
+    for name, records in packfiles:
+        out += struct.pack("<I", len(name)) + name + struct.pack("<I", len(records))
+        for h, off, length in records:
+            out += struct.pack("<QII", h, off, length)
+    (pkg / "PackFileLocators.bin").write_bytes(out)
+
+    loc = FwPackage(str(pkg)).first_locator()
+    assert loc.archive == "package.00.00.core"
+    assert loc.length == 40

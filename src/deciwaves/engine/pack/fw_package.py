@@ -64,7 +64,7 @@ class FwPackage:
         # smallest non-empty .core resource (not .core.stream — those are raw payloads,
         # not RTTI streams, so we skip them for the self-verify gate)
         best = None
-        for loc in self._locators._by_hash.values():
+        for _hash, loc in self._locators.items():
             if loc.length > 0 and not loc.archive.endswith(".stream"):
                 if best is None or loc.length < best.length:
                     best = loc
