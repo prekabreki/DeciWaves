@@ -1,11 +1,13 @@
+import os
 import shutil
 import subprocess
 import wave
 
 import pytest
 
+from deciwaves.engine import audio_clip as ac
 from deciwaves.engine import render as rs
-from deciwaves.engine.story_order import Segment
+from deciwaves.engine.story_order import Segment, write_playlist
 
 
 def _seg(is_side, line_id, scene="sq_cs00_s00100", category="cutscene"):
@@ -163,3 +165,97 @@ def test_load_keepspans_parses_map(tmp_path):
 
 def test_load_keepspans_missing_file_is_empty():
     assert rs.load_keepspans("does/not/exist.csv") == {}
+
+
+# --- main(): zero-decode must be a loud failure, not a silent zero-clip "success" ---
+# Real-world repro: every one of 2,049 vgmstream-cli calls died on a Windows Store
+# Python (STATUS_DLL_NOT_FOUND) and main() returned 0 with zero reels produced.
+
+def _playlist_segs(n_good=0, n_bad=0):
+    segs = []
+    for i in range(n_good):
+        segs.append(Segment(episode=0, is_side=0, pos=float(i), section=0,
+                             scene="sq_cs00_s00100", line_index=i, track_index=0,
+                             category="cutscene", speaker="Sam", subtitle="hi",
+                             stream_path=f"good/stream{i}.core.stream", line_id=f"Lgood{i}"))
+    for i in range(n_bad):
+        segs.append(Segment(episode=0, is_side=0, pos=float(n_good + i), section=0,
+                             scene="sq_cs00_s00100", line_index=n_good + i, track_index=0,
+                             category="cutscene", speaker="Sam", subtitle="bye",
+                             stream_path=f"bad/stream{i}.core.stream", line_id=f"Lbad{i}"))
+    return segs
+
+
+def _render_argv(tmp_path, playlist, errors, extra=()):
+    data_dir = tmp_path / "data"
+    data_dir.mkdir(exist_ok=True)
+    return [
+        "--data-dir", str(data_dir),
+        "--oodle", str(tmp_path / "fake_oodle.dll"),
+        "--playlist", str(playlist),
+        "--out-dir", str(tmp_path / "out-audio"),
+        "--cache", str(tmp_path / "cache"),
+        "--errors", str(errors),
+        *extra,
+    ]
+
+
+def test_render_main_zero_decode_returns_1_and_prints_actionable_error(tmp_path, monkeypatch, capsys):
+    """Every segment fails to decode (idx has no archives -> clip_wav raises
+    ClipError for each). main() must return 1, never write a done-marker via the
+    chain runner, and its message must name the errors file, `deciwaves doctor`,
+    and the README's Windows Store Python troubleshooting note."""
+    monkeypatch.chdir(tmp_path)
+    playlist = tmp_path / "playlist.csv"
+    write_playlist(_playlist_segs(n_good=0, n_bad=2), str(playlist))
+    errors = tmp_path / "render-errors.log"
+
+    rc = rs.main(_render_argv(tmp_path, playlist, errors))
+
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "render: decoded 0 clips, 2 failed" in out
+    assert str(errors) in out
+    assert "deciwaves doctor" in out
+    assert "Windows Store Python" in out
+
+
+def test_render_main_all_decode_ok_but_no_segments_returns_0(tmp_path, monkeypatch, capsys):
+    """An empty playlist (nothing to decode at all) must not be treated as the
+    zero-decode failure -- there's simply nothing to do."""
+    monkeypatch.chdir(tmp_path)
+    playlist = tmp_path / "playlist.csv"
+    write_playlist([], str(playlist))
+    errors = tmp_path / "render-errors.log"
+
+    rc = rs.main(_render_argv(tmp_path, playlist, errors))
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "render: decoded 0 clips, 0 failed" in out
+
+
+@needs_ffmpeg
+def test_render_main_partial_success_returns_0_with_summary(tmp_path, monkeypatch, capsys):
+    """One clip decodes, one fails: partial success keeps returning 0, but the
+    summary line still reports the failure count."""
+    monkeypatch.chdir(tmp_path)
+    playlist = tmp_path / "playlist.csv"
+    write_playlist(_playlist_segs(n_good=1, n_bad=1), str(playlist))
+    errors = tmp_path / "render-errors.log"
+
+    def fake_clip_wav(idx, stream_path, cache_dir, vgmstream=None):
+        if stream_path.startswith("good/"):
+            os.makedirs(cache_dir, exist_ok=True)
+            wav_path = os.path.join(cache_dir, "good.wav")
+            _write_wav(wav_path, nchannels=1, seconds=1.0)
+            return wav_path, 1.0
+        raise ac.ClipError(f"vgmstream failed for {stream_path}: exit code 1")
+
+    monkeypatch.setattr(ac, "clip_wav", fake_clip_wav)
+
+    rc = rs.main(_render_argv(tmp_path, playlist, errors, extra=["--min-silence", "0"]))
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "render: decoded 1 clips, 1 failed" in out

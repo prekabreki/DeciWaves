@@ -208,6 +208,14 @@ Common failures:
   `%LOCALAPPDATA%`, which can hide or misplace DeciWaves' `config.json` and tools. Install
   Python from python.org instead, or set `DECIWAVES_CONFIG_DIR` to a plain directory you
   control.
+- **Windows Store Python, second-order variant.** Even when `config.json` resolves fine, a
+  tools directory fetched under `%LOCALAPPDATA%` by `deciwaves setup` still lands inside that
+  same virtualized shadow. The parent Python resolves the tool there without trouble, but the
+  spawned `vgmstream-cli`/`ffmpeg` child process can't find its own side-by-side DLLs at the
+  real path and dies with an exit code like `0xC0000135` (STATUS_DLL_NOT_FOUND) -- every clip
+  fails and `render` reports zero decoded clips. The mitigation is the same, and matters more
+  here: use a python.org Python, or pass a plain directory outside `%LOCALAPPDATA%` to both
+  `DECIWAVES_CONFIG_DIR` and `deciwaves setup --tools-dir`.
 
 ## License
 
