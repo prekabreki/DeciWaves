@@ -1,9 +1,14 @@
 """``deciwaves <game> run`` — chain a game's stages end-to-end, with resume + gating.
 
 Deliberately dumb and explicit (YAGNI): a :class:`Stage` is a name, its STAGES module
-string, a function that builds that stage's argv from a small per-game context dict,
-and the workspace-relative path/dir that marks it done. The loop is a plain
-for-loop -- no plugin machinery, no stage discovery magic.
+string, and a function that builds that stage's argv from a small per-game context
+dict. The loop is a plain for-loop -- no plugin machinery, no stage discovery magic.
+
+Resume is driven by a per-stage done-marker file, ``out/<game>/.done-<stage>``,
+written only after a stage's ``main()`` returns rc==0. A stage's own output path or
+directory existing is NOT a skip criterion: a stage's own mkdir (or a leftover
+output from an old build) must not look like "done", and one stage's output
+directory must never be mistaken for another stage's (see issues #15 and #6).
 
 Per-game chains (see task-9 brief):
     ds:  catalog -> order -> render (cutscene voice tracks come from the packaged,
@@ -20,10 +25,12 @@ import argparse
 import importlib.util
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable
 
 from deciwaves import data
 from deciwaves.cli.main import STAGES, _import_stage  # noqa: F401 -- re-exported for monkeypatching
+from deciwaves.games.hzd import asr_bind
 
 
 class StageConfigError(Exception):
@@ -37,7 +44,6 @@ class Stage:
     name: str
     module: str
     build_argv: Callable[[dict], list]
-    primary_output: str
     gpu: bool = False  # gate on importlib.util.find_spec("whisperx") before running
 
 
@@ -47,10 +53,21 @@ def _gpu_gate_message(stage_name: str) -> str:
             f"(see https://pytorch.org/get-started/locally/).")
 
 
-def _run_chain(chain: list[Stage], ctx: dict) -> int:
+def _done_marker(game: str, stage_name: str) -> str:
+    """Workspace-relative path to a stage's done-marker (issues #15, #6).
+
+    A stage is considered done iff this file exists -- never its own output
+    path/directory, which can pre-exist from a crash after mkdir, a leftover
+    from an old build, or (for fw) another stage entirely.
+    """
+    return os.path.join("out", game, f".done-{stage_name}")
+
+
+def _run_chain(game: str, chain: list[Stage], ctx: dict) -> int:
     for st in chain:
-        if os.path.exists(st.primary_output):
-            print(f"skip {st.name} ({st.primary_output} exists — delete it to re-run)")
+        marker = _done_marker(game, st.name)
+        if os.path.isfile(marker):
+            print(f"skip {st.name} ({marker} exists -- delete it to force a re-run)")
             continue
         if st.gpu and importlib.util.find_spec("whisperx") is None:
             print(_gpu_gate_message(st.name))
@@ -63,6 +80,8 @@ def _run_chain(chain: list[Stage], ctx: dict) -> int:
         rc = _import_stage(st.module)(argv) or 0
         if rc:
             return rc
+        os.makedirs(os.path.dirname(marker), exist_ok=True)
+        Path(marker).touch()
     return 0
 
 
@@ -70,6 +89,24 @@ def _missing_config(game: str, hint: str, flag_hint: str) -> int:
     print(f"deciwaves {game} run: no {hint} configured -- run `deciwaves setup` first, "
           f"or pass {flag_hint} explicitly.")
     return 1
+
+
+def _parse_or_exit(ap: argparse.ArgumentParser, extra_argv: list) -> argparse.Namespace | int:
+    """Parse a per-game ``run`` parser's argv, mirroring cli.main.main()'s own
+    "usage errors return 2" contract for its top-level parser: argparse raises
+    SystemExit both for a clean exit (--help, code 0) and for a usage error
+    (unknown/typo'd flag, code 2). Code 0 is "nothing went wrong, just exiting"
+    -- let it propagate as a real SystemExit, so `--help` behaves like any other
+    argparse CLI. A nonzero code is converted into a plain return value (an int,
+    instead of a Namespace) so callers -- including `run_game()`'s own return
+    value -- observe exit code 2 without needing a try/except.
+    """
+    try:
+        return ap.parse_args(extra_argv)
+    except SystemExit as exc:
+        if not exc.code:
+            raise
+        return exc.code
 
 
 # ---------------------------------------------------------------------------
@@ -116,10 +153,15 @@ def _ds_render_argv(ctx: dict) -> list:
 
 
 def _run_ds(cfg: dict, extra_argv: list) -> int:
-    ap = argparse.ArgumentParser(add_help=False)
-    ap.add_argument("--data-dir")
-    ap.add_argument("--oodle")
-    ns, _ = ap.parse_known_args(extra_argv)
+    ap = argparse.ArgumentParser(
+        prog="deciwaves ds run",
+        description="Run the DS pipeline end-to-end: catalog -> order -> render.",
+    )
+    ap.add_argument("--data-dir", help="DS install's data directory (default: from `deciwaves setup`)")
+    ap.add_argument("--oodle", help="path to oo2core_7_win64.dll (default: from `deciwaves setup`)")
+    ns = _parse_or_exit(ap, extra_argv)
+    if isinstance(ns, int):
+        return ns
 
     ds_install = cfg.get("ds_install")
     data_dir = ns.data_dir or (os.path.join(ds_install, "data") if ds_install else None)
@@ -134,11 +176,11 @@ def _run_ds(cfg: dict, extra_argv: list) -> int:
     # the user's install. `deciwaves ds cutscenes` remains available standalone for
     # anyone who wants to regenerate it (e.g. against a patched install).
     chain = [
-        Stage("catalog", STAGES["ds"]["catalog"][0], _ds_catalog_argv, "out/catalog.csv"),
-        Stage("order", STAGES["ds"]["order"][0], _ds_order_argv, "out/playlist.csv"),
-        Stage("render", STAGES["ds"]["render"][0], _ds_render_argv, "out/audio"),
+        Stage("catalog", STAGES["ds"]["catalog"][0], _ds_catalog_argv),
+        Stage("order", STAGES["ds"]["order"][0], _ds_order_argv),
+        Stage("render", STAGES["ds"]["render"][0], _ds_render_argv),
     ]
-    return _run_chain(chain, ctx)
+    return _run_chain("ds", chain, ctx)
 
 
 # ---------------------------------------------------------------------------
@@ -149,10 +191,30 @@ def _hzd_package_argv(ctx: dict) -> list:
     return ["--package", ctx["package"]]
 
 
+def _hzd_bind_argv(ctx: dict) -> list:
+    """bind's argv, PLUS --transcripts pointed at the sidecar's own default path when
+    that file already exists (a crashed/interrupted prior bind run left it there).
+    asr_bind.py's --transcripts loader already handles resuming from it (torn-row
+    drop, tail heal, same-path append) -- this only decides *whether* to pass it,
+    making the README's "an interrupted bind picks up where it stopped" claim true
+    for the chained `hzd run` (previously only true for a manually-rerun `hzd bind`
+    that passed --transcripts itself)."""
+    argv = ["--package", ctx["package"]]
+    if os.path.isfile(asr_bind.DEFAULT_TRANSCRIPTS_OUT):
+        argv += ["--transcripts", asr_bind.DEFAULT_TRANSCRIPTS_OUT]
+    return argv
+
+
 def _run_hzd(cfg: dict, extra_argv: list) -> int:
-    ap = argparse.ArgumentParser(add_help=False)
-    ap.add_argument("--package")
-    ns, _ = ap.parse_known_args(extra_argv)
+    ap = argparse.ArgumentParser(
+        prog="deciwaves hzd run",
+        description="Run the HZD pipeline end-to-end: catalog -> clip-index -> "
+                    "wem-metadata -> bind -> render.",
+    )
+    ap.add_argument("--package", help="HZD package/install path (default: from `deciwaves setup`)")
+    ns = _parse_or_exit(ap, extra_argv)
+    if isinstance(ns, int):
+        return ns
 
     package = ns.package or cfg.get("hzd_package")
     if not package:
@@ -160,13 +222,13 @@ def _run_hzd(cfg: dict, extra_argv: list) -> int:
 
     ctx = {"package": package}
     chain = [
-        Stage("catalog", STAGES["hzd"]["catalog"][0], _hzd_package_argv, "out/hzd/catalog.csv"),
-        Stage("clip-index", STAGES["hzd"]["clip-index"][0], _hzd_package_argv, "out/hzd/clip-index.csv"),
-        Stage("wem-metadata", STAGES["hzd"]["wem-metadata"][0], _hzd_package_argv, "out/hzd/wem-metadata.csv"),
-        Stage("bind", STAGES["hzd"]["bind"][0], _hzd_package_argv, "out/hzd/asr-manifest.csv", gpu=True),
-        Stage("render", STAGES["hzd"]["render"][0], _hzd_package_argv, "out/hzd/audio"),
+        Stage("catalog", STAGES["hzd"]["catalog"][0], _hzd_package_argv),
+        Stage("clip-index", STAGES["hzd"]["clip-index"][0], _hzd_package_argv),
+        Stage("wem-metadata", STAGES["hzd"]["wem-metadata"][0], _hzd_package_argv),
+        Stage("bind", STAGES["hzd"]["bind"][0], _hzd_bind_argv, gpu=True),
+        Stage("render", STAGES["hzd"]["render"][0], _hzd_package_argv),
     ]
-    return _run_chain(chain, ctx)
+    return _run_chain("hzd", chain, ctx)
 
 
 # ---------------------------------------------------------------------------
@@ -214,10 +276,17 @@ def _fw_render_argv(ctx: dict) -> list:
 
 
 def _run_fw(cfg: dict, extra_argv: list) -> int:
-    ap = argparse.ArgumentParser(add_help=False)
-    ap.add_argument("--package")
-    ap.add_argument("--gamescript")
-    ns, _ = ap.parse_known_args(extra_argv)
+    ap = argparse.ArgumentParser(
+        prog="deciwaves fw run",
+        description="Run the FW pipeline end-to-end: extract -> asr -> subtitle-bind, "
+                    "then (with a BYO gamescript) match -> full-reel -> render.",
+    )
+    ap.add_argument("--package", help="FW package/install path (default: from `deciwaves setup`)")
+    ap.add_argument("--gamescript", help="path to your own Forbidden West gamescript transcript "
+                                          "(BYO -- required to run match/full-reel/render)")
+    ns = _parse_or_exit(ap, extra_argv)
+    if isinstance(ns, int):
+        return ns
 
     package = ns.package or cfg.get("fw_package")
     if not package:
@@ -225,12 +294,11 @@ def _run_fw(cfg: dict, extra_argv: list) -> int:
 
     ctx = {"package": package, "gamescript": ns.gamescript}
     chunk1 = [
-        Stage("extract", STAGES["fw"]["extract"][0], _fw_extract_argv, "out/fw"),
-        Stage("asr", STAGES["fw"]["asr"][0], _fw_asr_argv, "out/fw/transcripts.csv", gpu=True),
-        Stage("subtitle-bind", STAGES["fw"]["subtitle-bind"][0], _fw_subtitle_bind_argv,
-              _FW_SUBTITLE_MANIFEST_FULL),
+        Stage("extract", STAGES["fw"]["extract"][0], _fw_extract_argv),
+        Stage("asr", STAGES["fw"]["asr"][0], _fw_asr_argv, gpu=True),
+        Stage("subtitle-bind", STAGES["fw"]["subtitle-bind"][0], _fw_subtitle_bind_argv),
     ]
-    rc = _run_chain(chunk1, ctx)
+    rc = _run_chain("fw", chunk1, ctx)
     if rc:
         return rc
 
@@ -240,11 +308,11 @@ def _run_fw(cfg: dict, extra_argv: list) -> int:
         return 0
 
     chunk2 = [
-        Stage("match", STAGES["fw"]["match"][0], _fw_match_argv, "out/fw/story-manifest.csv"),
-        Stage("full-reel", STAGES["fw"]["full-reel"][0], _fw_full_reel_argv, _FW_FULL_REEL_MANIFEST),
-        Stage("render", STAGES["fw"]["render"][0], _fw_render_argv, "out/fw/audio"),
+        Stage("match", STAGES["fw"]["match"][0], _fw_match_argv),
+        Stage("full-reel", STAGES["fw"]["full-reel"][0], _fw_full_reel_argv),
+        Stage("render", STAGES["fw"]["render"][0], _fw_render_argv),
     ]
-    return _run_chain(chunk2, ctx)
+    return _run_chain("fw", chunk2, ctx)
 
 
 # ---------------------------------------------------------------------------

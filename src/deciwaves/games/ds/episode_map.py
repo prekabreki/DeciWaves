@@ -29,6 +29,9 @@ CS_TITLES = {
 
 # Order positions (transcript anchor-scale, ~0..1320) for cutscene groups the transcript
 # does NOT anchor. Anchored groups use their real anchor instead. cs11 = finale (after cs10).
+# CAUTION: if an entry here is removed or typo'd, that group silently falls back to its
+# raw cs_number(group) ordering and can land mid-story instead of at the curated tail --
+# every NON_STORY_CS_GROUPS group must have an entry here (see test_episode_map.py).
 CS_ORDER_HINT = {
     "cs71": 980.0, "cs77": 1000.0, "cs80": 1020.0,
     "cs11": 1320.0, "cs50": 1340.0, "cs56": 1360.0,
@@ -44,6 +47,7 @@ NON_STORY_CS_GROUPS = frozenset(
 
 _CS_RE = re.compile(r"sq_(cs\d+)_")
 _DIGITS_RE = re.compile(r"\d+")
+_CS_NUM_RE = re.compile(r"cs(\d+)")
 
 # Unanchored non-cutscene scene -> cutscene group. TUNABLE.
 _MISSION_BREAKS = [(30, "cs00"), (85, "cs01"), (150, "cs02"), (200, "cs03"), (270, "cs04"),
@@ -61,6 +65,15 @@ _NPC_GROUP = {"amelie": "cs01", "deadman": "cs01", "higgs": "cs02", "mama": "cs0
 def cs_group(scene):
     m = _CS_RE.match(scene)
     return m.group(1) if m else None
+
+
+def cs_number(group):
+    """Numeric ordinal embedded in a cutscene group id (e.g. "cs07" -> 7); None if the
+    group name has no parsable cs-number. Used as a deterministic story_order fallback
+    key for groups the transcript/CS_ORDER_HINT don't place -- compare the int, never the
+    group id string (e.g. "cs10" < "cs9" lexicographically, but 10 > 9 numerically)."""
+    m = _CS_NUM_RE.match(group)
+    return int(m.group(1)) if m else None
 
 
 def scene_number(scene):

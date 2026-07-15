@@ -49,15 +49,34 @@ def test_check_tool_not_found(tmp_path, monkeypatch):
 def test_check_oodle_found(tmp_path):
     dll = tmp_path / "oo2core_7_win64.dll"
     dll.write_bytes(b"x")
-    ok, msg = doctor.check_oodle(str(dll))
+    ok, msg = doctor.check_oodle(str(dll), str(tmp_path))
     assert ok and msg.startswith("[ok]")
 
 
 def test_check_oodle_missing(tmp_path):
-    ok, msg = doctor.check_oodle(str(tmp_path / "nope.dll"))
+    # DS is configured, but the DLL itself is missing -- this must fail.
+    ok, msg = doctor.check_oodle(str(tmp_path / "nope.dll"), str(tmp_path))
     assert not ok
     assert msg.startswith("[--]")
     assert "deciwaves setup" in msg
+
+
+def test_check_oodle_not_configured():
+    # When DS is not configured (keyed off ds_install), Oodle is "not needed"
+    # and must not fail the exit code -- regardless of oodle_dll.
+    ok, msg = doctor.check_oodle("", "")
+    assert ok  # must not fail
+    assert "not needed" in msg.lower() or "not configured" in msg.lower()
+    assert msg.startswith("[--]")
+
+
+def test_check_oodle_ds_configured_but_oodle_dll_unset():
+    # DS install is configured but oodle_dll itself is empty (e.g. a hand-edited
+    # config): this must fail, not report "not needed" -- ds_install is the
+    # actual condition the message names.
+    ok, msg = doctor.check_oodle("", "/some/ds/install")
+    assert not ok
+    assert msg.startswith("[--]")
 
 
 # --- DS / HZD / FW game checks: unconfigured never fails exit code ----------
@@ -171,6 +190,40 @@ def test_run_doctor_exit_0_when_all_found(tmp_path, monkeypatch, capsys):
     # hzd_package / fw_package intentionally left unconfigured -- must not fail
     rc = doctor.run_doctor([])
     assert rc == 0
+
+
+def test_run_doctor_exit_1_when_ds_configured_but_oodle_dll_missing(tmp_path, monkeypatch, capsys):
+    # DS configured and everything else healthy -- only the Oodle DLL itself is
+    # missing. Isolates check_oodle's own fail case from the exit-code wiring
+    # (see check_oodle: keyed off ds_install, not oodle_dll being empty).
+    monkeypatch.setattr(doctor.shutil, "which", lambda name: str(tmp_path / name))
+    for var in ("DECIWAVES_VGMSTREAM", "DECIWAVES_VGAUDIO"):
+        monkeypatch.delenv(var, raising=False)
+    ds = tmp_path / "ds"
+    (ds / "data").mkdir(parents=True)
+    _write_config(tmp_path, monkeypatch, tools_dir=str(tmp_path),
+                  ds_install=str(ds), oodle_dll=str(ds / "oo2core_7_win64.dll"))
+    rc = doctor.run_doctor([])
+    out = capsys.readouterr().out.lower()
+    assert rc == 1
+    assert "oodle" in out
+
+
+def test_run_doctor_exit_0_with_hzd_fw_only(tmp_path, monkeypatch, capsys):
+    # Healthy machine with only HZD/FW configured, no DS: must exit 0 (not 1)
+    monkeypatch.setattr(doctor.shutil, "which", lambda name: str(tmp_path / name))
+    for var in ("DECIWAVES_VGMSTREAM", "DECIWAVES_VGAUDIO"):
+        monkeypatch.delenv(var, raising=False)
+    hzd = tmp_path / "hzd"
+    hzd.mkdir()
+    fw = tmp_path / "fw"
+    fw.mkdir()
+    (fw / "streaming_graph.core").write_bytes(b"x")
+    # DS intentionally not configured: ds_install and oodle_dll both empty
+    _write_config(tmp_path, monkeypatch, tools_dir=str(tmp_path),
+                  hzd_package=str(hzd), fw_package=str(fw))
+    rc = doctor.run_doctor([])
+    assert rc == 0, "doctor should exit 0 when only HZD/FW configured (DS not owned)"
 
 
 def test_run_doctor_config_roundtrips_through_env_override(tmp_path, monkeypatch):

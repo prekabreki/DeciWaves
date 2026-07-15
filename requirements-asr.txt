@@ -1,3 +1,0 @@
-# GPU ASR deps for the ASR content-binding pass — install separately into the .venv.
-# torch must match the local CUDA; see https://pytorch.org for the right index URL.
-whisperx>=3.1,<4

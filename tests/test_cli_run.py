@@ -1,7 +1,10 @@
 """Tests for `deciwaves <game> run` (Task 9): chained pipelines, resume, GPU/BYO gating.
 
-Stage mains are monkeypatched to record (module, argv) and touch their primary
-output so the resume/skip logic under test has something real to look at.
+Stage mains are monkeypatched to record (module, argv) and touch their real
+output path/dir, so tests can assert on the actual directory shape a stage
+leaves behind (e.g. the fw extract fake creates out/fw/audio, matching the
+real extractor -- see #6). Resume/skip itself is driven purely by per-stage
+done-marker files (see `_marker` below), never by that output existing.
 """
 import os
 from pathlib import Path
@@ -10,6 +13,7 @@ import pytest
 
 from deciwaves.cli import run as run_mod
 from deciwaves.cli.main import STAGES
+from deciwaves.cli.main import _import_stage as real_import_stage
 
 
 def _mods(game):
@@ -41,6 +45,11 @@ def _make_fake_import_stage(calls, outputs_by_module):
 
 def _after(argv, flag):
     return argv[argv.index(flag) + 1]
+
+
+def _marker(game, stage):
+    """The per-stage done-marker path _run_chain reads/writes (issues #15, #6)."""
+    return os.path.join("out", game, f".done-{stage}")
 
 
 @pytest.fixture(autouse=True)
@@ -97,10 +106,31 @@ def test_ds_chain_order_and_injection(tmp_path, monkeypatch):
     assert _after(render_argv, "--bitrate") == "96"
 
 
-def test_ds_resume_skips_existing_stage(tmp_path, monkeypatch, capsys):
+def test_ds_stage_not_skipped_by_old_output_sentinel_alone(tmp_path, monkeypatch):
+    """Path/directory existence is no longer a skip criterion (#15): a pre-existing
+    output file (e.g. a leftover from an old build, or a crash right after a stage's
+    own mkdir) must not look like "done" -- only a written done-marker does."""
     monkeypatch.chdir(tmp_path)
     os.makedirs("out", exist_ok=True)
-    Path("out/catalog.csv").write_text("", encoding="utf-8")
+    Path("out/catalog.csv").write_text("", encoding="utf-8")  # old-style sentinel; no marker
+
+    mods = _mods("ds")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _ds_outputs(mods)))
+    monkeypatch.setattr(run_mod.data, "packaged", lambda rel: Path(f"/pkg/{rel}"))
+
+    rc = run_mod.run_game("ds", {"ds_install": "X"}, [])
+    assert rc == 0
+
+    called = [m for m, _ in calls]
+    assert called == [mods["catalog"], mods["order"], mods["render"]]
+
+
+def test_ds_stage_skipped_when_done_marker_exists(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    marker = _marker("ds", "catalog")
+    os.makedirs(os.path.dirname(marker), exist_ok=True)
+    Path(marker).write_text("", encoding="utf-8")
 
     mods = _mods("ds")
     calls = []
@@ -115,7 +145,35 @@ def test_ds_resume_skips_existing_stage(tmp_path, monkeypatch, capsys):
     assert called == [mods["order"], mods["render"]]
 
     out = capsys.readouterr().out
-    assert "skip catalog (out/catalog.csv exists — delete it to re-run)" in out
+    assert f"skip catalog ({marker} exists -- delete it to force a re-run)" in out
+    assert "catalog.csv" not in out  # must name the marker, never advise deleting the output
+
+
+def test_ds_marker_not_written_on_failure_and_chain_aborts(tmp_path, monkeypatch):
+    """A stage that returns nonzero must not be marked done, and the chain must
+    stop there (this abort path was previously untested)."""
+    monkeypatch.chdir(tmp_path)
+    mods = _mods("ds")
+    calls = []
+
+    def _import_stage(module_name):
+        def _main(argv):
+            calls.append((module_name, list(argv)))
+            return 3 if module_name == mods["order"] else 0
+        return _main
+
+    monkeypatch.setattr(run_mod, "_import_stage", _import_stage)
+    monkeypatch.setattr(run_mod.data, "packaged", lambda rel: Path(f"/pkg/{rel}"))
+
+    rc = run_mod.run_game("ds", {"ds_install": "X"}, [])
+    assert rc == 3
+
+    called = [m for m, _ in calls]
+    assert called == [mods["catalog"], mods["order"]]  # render never reached
+
+    assert os.path.isfile(_marker("ds", "catalog"))    # succeeded -> marked done
+    assert not os.path.exists(_marker("ds", "order"))  # failed -> no marker
+    assert not os.path.exists(_marker("ds", "render"))  # never ran
 
 
 def test_ds_missing_config_errors(tmp_path, monkeypatch, capsys):
@@ -198,6 +256,49 @@ def test_ds_render_missing_packaged_keepspans_is_soft_failure(tmp_path, monkeypa
     assert "--speech-trim" in out
 
 
+def test_ds_run_help_exits_0_without_running_any_stage(tmp_path, monkeypatch, capsys):
+    """`deciwaves ds run --help` must print real help for the run parser (its own
+    prog name, at minimum) and exit 0 -- and never dispatch a single stage. See #8."""
+    monkeypatch.chdir(tmp_path)
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, {}))
+
+    with pytest.raises(SystemExit) as exc:
+        run_mod.run_game("ds", {"ds_install": "X"}, ["--help"])
+
+    assert exc.value.code == 0
+    assert calls == []
+    assert "deciwaves ds run" in capsys.readouterr().out
+
+
+def test_ds_run_help_after_other_flags_still_exits_0_without_running_any_stage(tmp_path, monkeypatch, capsys):
+    """--help must win no matter where it falls in argv, same as any argparse CLI."""
+    monkeypatch.chdir(tmp_path)
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, {}))
+
+    with pytest.raises(SystemExit) as exc:
+        run_mod.run_game("ds", {"ds_install": "X"}, ["--data-dir", "OTHER", "--help"])
+
+    assert exc.value.code == 0
+    assert calls == []
+    assert "deciwaves ds run" in capsys.readouterr().out
+
+
+def test_ds_run_unknown_flag_exits_2_without_running_any_stage(tmp_path, monkeypatch, capsys):
+    """A typo'd flag must be a usage error naming it (exit 2), not silently
+    dropped into a live multi-hour pipeline. See #8."""
+    monkeypatch.chdir(tmp_path)
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, {}))
+
+    rc = run_mod.run_game("ds", {"ds_install": "X"}, ["--bogus-flag"])
+
+    assert rc == 2
+    assert calls == []
+    assert "--bogus-flag" in capsys.readouterr().err
+
+
 # ---------------------------------------------------------------------------
 # hzd
 # ---------------------------------------------------------------------------
@@ -228,6 +329,46 @@ def test_hzd_chain_order_and_injection(tmp_path, monkeypatch):
         assert _after(argv, "--package") == "PKG"
 
 
+def test_hzd_bind_argv_omits_transcripts_when_sidecar_absent(tmp_path, monkeypatch):
+    """A fresh workspace (no prior asr-transcripts.csv) has nothing to resume from --
+    bind's argv must not include --transcripts."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    mods = _mods("hzd")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _hzd_outputs(mods)))
+
+    rc = run_mod.run_game("hzd", {"hzd_package": "PKG"}, [])
+    assert rc == 0
+
+    bind_argv = dict(calls)[mods["bind"]]
+    assert "--transcripts" not in bind_argv
+
+
+def test_hzd_bind_argv_includes_transcripts_when_sidecar_present(tmp_path, monkeypatch):
+    """A sidecar already sitting at asr_bind's own default --transcripts-out path (left
+    behind by a crashed/interrupted prior bind run) must be passed back in via
+    --transcripts, so a re-run of `hzd run` actually resumes instead of re-transcribing
+    everything from scratch -- making the README's "an interrupted bind picks up where
+    it stopped" claim true for the chained `run` command, not just a manual `hzd bind
+    --transcripts ...` invocation."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    sidecar = Path(run_mod.asr_bind.DEFAULT_TRANSCRIPTS_OUT)
+    sidecar.parent.mkdir(parents=True, exist_ok=True)
+    sidecar.write_text("clip_row,transcript\n0,prior ok\n", encoding="utf-8")
+
+    mods = _mods("hzd")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _hzd_outputs(mods)))
+
+    rc = run_mod.run_game("hzd", {"hzd_package": "PKG"}, [])
+    assert rc == 0
+
+    bind_argv = dict(calls)[mods["bind"]]
+    assert _after(bind_argv, "--transcripts") == run_mod.asr_bind.DEFAULT_TRANSCRIPTS_OUT
+
+
 def test_hzd_bind_gpu_gate_aborts_without_whisperx(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("importlib.util.find_spec", lambda name: None)
@@ -253,19 +394,122 @@ def test_hzd_missing_config_errors(tmp_path, monkeypatch, capsys):
     assert "deciwaves setup" in capsys.readouterr().out
 
 
+def test_hzd_run_help_exits_0_without_running_any_stage(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, {}))
+
+    with pytest.raises(SystemExit) as exc:
+        run_mod.run_game("hzd", {"hzd_package": "PKG"}, ["--help"])
+
+    assert exc.value.code == 0
+    assert calls == []
+    assert "deciwaves hzd run" in capsys.readouterr().out
+
+
+def test_hzd_run_help_after_other_flags_still_exits_0_without_running_any_stage(tmp_path, monkeypatch, capsys):
+    """--help must win no matter where it falls in argv, same as any argparse CLI."""
+    monkeypatch.chdir(tmp_path)
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, {}))
+
+    with pytest.raises(SystemExit) as exc:
+        run_mod.run_game("hzd", {"hzd_package": "PKG"}, ["--package", "OTHER", "--help"])
+
+    assert exc.value.code == 0
+    assert calls == []
+    assert "deciwaves hzd run" in capsys.readouterr().out
+
+
+def test_hzd_run_unknown_flag_exits_2_without_running_any_stage(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, {}))
+
+    rc = run_mod.run_game("hzd", {"hzd_package": "PKG"}, ["--bogus-flag"])
+
+    assert rc == 2
+    assert calls == []
+    assert "--bogus-flag" in capsys.readouterr().err
+
+
 # ---------------------------------------------------------------------------
 # fw
 # ---------------------------------------------------------------------------
 
 def _fw_outputs(mods):
     return {
-        mods["extract"]: "out/fw",
+        # extract's fake must create the real directory shape (out/fw/audio),
+        # not just the shared parent out/fw -- see #6 (regression test below).
+        mods["extract"]: "out/fw/audio",
         mods["asr"]: "out/fw/transcripts.csv",
         mods["subtitle-bind"]: "out/fw/subtitle-manifest-full.csv",
         mods["match"]: "out/fw/story-manifest.csv",
         mods["full-reel"]: "out/fw/full-reel-manifest.csv",
-        mods["render"]: "out/fw/audio",
+        mods["render"]: "out/fw/reels",
     }
+
+
+def test_fw_render_runs_despite_extract_creating_audio_dir(tmp_path, monkeypatch):
+    """Regression for #6: fw render must not be skipped just because fw extract
+    unconditionally creates out/fw/audio. The old resume mechanism skipped a
+    stage on its output path existing, and render's own sentinel used to BE
+    out/fw/audio -- so a chained `fw run` could never reach render. Resume is
+    now per-stage done-markers (#15), so this directory existing must not
+    matter at all.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    gamescript = tmp_path / "gamescript.md"
+    gamescript.write_text("Aloy: Hello.\n", encoding="utf-8")
+
+    mods = _mods("fw")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _fw_outputs(mods)))
+
+    rc = run_mod.run_game("fw", {"fw_package": "PKG"}, ["--gamescript", str(gamescript)])
+    assert rc == 0
+
+    assert os.path.isdir("out/fw/audio")  # extract's real directory shape, present throughout
+    called = [m for m, _ in calls]
+    assert mods["render"] in called
+    assert called == [mods["extract"], mods["asr"], mods["subtitle-bind"],
+                       mods["match"], mods["full-reel"], mods["render"]]
+
+
+def test_fw_run_missing_types_json_aborts_chain_cleanly(tmp_path, monkeypatch, capsys):
+    """`fw run` must surface a missing --types-json at the subtitle-bind stage as
+    a clean, actionable failure -- not an unhandled FileNotFoundError traceback
+    (issue #7). extract/asr are faked (they need a real install); subtitle-bind
+    dispatches to its REAL main() so its own check is what's under test here.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    mods = _mods("fw")
+    calls = []
+    fake_import_stage = _make_fake_import_stage(calls, _fw_outputs(mods))
+
+    def _import_stage(module_name):
+        if module_name == mods["subtitle-bind"]:
+            return real_import_stage(module_name)  # the real subtitle_bind.main
+        return fake_import_stage(module_name)
+
+    monkeypatch.setattr(run_mod, "_import_stage", _import_stage)
+
+    rc = run_mod.run_game("fw", {"fw_package": "PKG"}, [])
+    assert rc == 1
+
+    called = [m for m, _ in calls]
+    assert called == [mods["extract"], mods["asr"]]  # subtitle-bind ran for real, then chain stopped
+
+    captured = capsys.readouterr()
+    assert "--types-json" in captured.out
+    assert "docs/BYO.md" in captured.out
+    assert "vendor/odradek" not in captured.out
+    assert captured.err == ""  # no traceback
+
+    assert not os.path.exists(_marker("fw", "subtitle-bind"))  # failed -> no done-marker
+    assert not os.path.exists(_marker("fw", "match"))          # never reached
 
 
 def test_fw_byo_stop_without_gamescript(tmp_path, monkeypatch, capsys):
@@ -349,3 +593,42 @@ def test_fw_missing_config_errors(tmp_path, monkeypatch, capsys):
     rc = run_mod.run_game("fw", {}, [])
     assert rc == 1
     assert "deciwaves setup" in capsys.readouterr().out
+
+
+def test_fw_run_help_exits_0_without_running_any_stage(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, {}))
+
+    with pytest.raises(SystemExit) as exc:
+        run_mod.run_game("fw", {"fw_package": "PKG"}, ["--help"])
+
+    assert exc.value.code == 0
+    assert calls == []
+    assert "deciwaves fw run" in capsys.readouterr().out
+
+
+def test_fw_run_help_after_other_flags_still_exits_0_without_running_any_stage(tmp_path, monkeypatch, capsys):
+    """--help must win no matter where it falls in argv, same as any argparse CLI."""
+    monkeypatch.chdir(tmp_path)
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, {}))
+
+    with pytest.raises(SystemExit) as exc:
+        run_mod.run_game("fw", {"fw_package": "PKG"}, ["--package", "OTHER", "--help"])
+
+    assert exc.value.code == 0
+    assert calls == []
+    assert "deciwaves fw run" in capsys.readouterr().out
+
+
+def test_fw_run_unknown_flag_exits_2_without_running_any_stage(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, {}))
+
+    rc = run_mod.run_game("fw", {"fw_package": "PKG"}, ["--bogus-flag"])
+
+    assert rc == 2
+    assert calls == []
+    assert "--bogus-flag" in capsys.readouterr().err

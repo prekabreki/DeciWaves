@@ -1,6 +1,7 @@
 import csv
 
 from deciwaves.engine import story_order as so
+from deciwaves.games.ds import episode_map as em
 
 
 def _row(**kw):
@@ -83,6 +84,41 @@ def test_order_cutscene_groups_uses_anchor_then_hint():
     # cs53 anchored between cs03 and cs04; cs11 unanchored -> hint puts it last
     anchors = {"cs03": 400.0, "cs53": 460.0, "cs04": 600.0, "cs11": None}
     assert so.order_cutscene_groups(anchors) == ["cs03", "cs53", "cs04", "cs11"]
+
+
+def test_order_cutscene_groups_default_fallback_orders_by_cs_number():
+    # No transcript (the shipped default): every group is unanchored. Unhinted groups
+    # must fall back to the numeric cs-number embedded in their name (not the old flat
+    # tied sentinel), so the main story orders numerically and lands BEFORE the hinted
+    # extras' explicit ~980+ keys. A group name with no parsable cs-number sorts last.
+    groups = {"cs10": None, "cs2": None, "cs7": None, "cs71": None, "weird_group": None}
+    assert so.order_cutscene_groups(groups) == ["cs2", "cs7", "cs10", "cs71", "weird_group"]
+
+
+def test_order_cutscene_groups_hint_beats_cs_number(monkeypatch):
+    # cs71's real CS_ORDER_HINT (980.0) already sorts after every low cs-number, so a mix
+    # using it can't tell whether the `elif g in em.CS_ORDER_HINT` branch actually fired --
+    # it would pass just from cs_number(71) alone. Monkeypatch a synthetic hint onto a
+    # group whose raw cs-number (5) would otherwise sort it AMONG the main story, and
+    # confirm the hint (990.0) wins instead, pushing it to the tail. This fails if the
+    # `elif g in em.CS_ORDER_HINT` branch is removed (cs05 would fall through to
+    # cs_number(cs05) == 5 and land between cs02 and cs09).
+    monkeypatch.setitem(em.CS_ORDER_HINT, "cs05", 990.0)
+    groups = {"cs02": None, "cs05": None, "cs09": None, "weird_group": None}
+    assert so.order_cutscene_groups(groups) == ["cs02", "cs09", "cs05", "weird_group"]
+
+
+def test_order_cutscene_groups_is_independent_of_input_order():
+    # Same groups, deliberately different insertion/iteration order (standing in for the
+    # hash-randomized set the caller used to build this from) -- output must not change.
+    order_a = {"cs2": None, "cs10": None, "cs7": None, "weird_b": None, "weird_a": None}
+    order_b = {"weird_a": None, "weird_b": None, "cs7": None, "cs10": None, "cs2": None}
+    assert so.order_cutscene_groups(order_a) == so.order_cutscene_groups(order_b)
+    # tied (unparseable) names must still resolve deterministically via the name tiebreak
+    assert so.order_cutscene_groups(order_a)[-2:] == ["weird_a", "weird_b"]
+    # and a set (genuinely hash-order-dependent iteration) feeds through the same way
+    from_set = {g: None for g in {"cs2", "cs10", "cs7"}}
+    assert so.order_cutscene_groups(from_set) == ["cs2", "cs7", "cs10"]
 
 
 def test_cutscene_scenes_ordered_by_anchor_not_csnumber():

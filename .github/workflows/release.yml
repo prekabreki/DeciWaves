@@ -2,14 +2,25 @@ name: release
 on:
   push:
     tags: ["v*"]
+permissions:
+  contents: read
 jobs:
-  pypi:
+  test:
+    # Reuses .github/workflows/test.yml (same pinned checkout/setup-python/setup-ffmpeg
+    # actions and ruff+pytest steps) so a tagged commit that fails the suite never publishes.
+    uses: ./.github/workflows/test.yml
+  publish:
+    needs: test
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.12" }
-      - run: pip install build twine
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+      - run: pip install build==1.5.0 twine==6.2.0
       - run: python -m build
+      # Uses a classic PyPI API token for now (secrets.PYPI_API_TOKEN). Intended follow-up
+      # (owner action): switch to PyPI's OIDC trusted publishing once the `deciwaves`
+      # project exists on PyPI, removing the need for a long-lived API token entirely.
       - run: twine upload dist/*
         env: { TWINE_USERNAME: __token__, TWINE_PASSWORD: "${{ secrets.PYPI_API_TOKEN }}" }

@@ -1,5 +1,15 @@
 # Runtime plan: recover the line → stream binding
 
+> **Historical.** This runtime, memory-instrumentation route was superseded before it was
+> needed. HZD Remastered's shipped voice binding is the offline `(A, B)` structural join +
+> ASR-fallback approach in `docs/asr-binding-plan.md` (see `docs/architecture.md`'s
+> Horizon Zero Dawn Remastered section), not a runtime crack of `hi32`. Forbidden West is
+> the one of the three games that actually ships a streaming-graph positional index (see
+> `docs/architecture.md`'s Horizon Forbidden West section) — HZDR does not, which is why
+> this document explored recovering the binding from engine memory in the first place. The
+> **Status** line, strategies, tooling, and exit gate below are a historical snapshot, not
+> current state or an outstanding task.
+
 **Status:** static routes exhausted (see the oracle and DirectStorage findings below). No on-disk
 table maps a resource to its stream key; HFW's resolver is positional over a `streaming_graph.core`
 that HZDR does not ship. The binding therefore exists only **in engine code / engine RAM at runtime**.

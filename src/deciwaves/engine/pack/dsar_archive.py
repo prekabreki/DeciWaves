@@ -48,6 +48,10 @@ class DsarArchive:
 
     def read(self, offset: int, length: int) -> bytes:
         first = self._first_chunk(offset)
+        if first < 0:
+            raise ValueError(
+                f"no chunk contains offset {offset} (length {length}) in {self.path}"
+            )
         buf = bytearray()
         i = first
         with open(self.path, "rb") as f:
@@ -66,4 +70,10 @@ class DsarArchive:
                 if i >= len(self._chunks):
                     break
         start = offset - self._chunks[first].offset
-        return bytes(buf[start:start + length])
+        result = bytes(buf[start:start + length])
+        if len(result) != length:
+            raise ValueError(
+                f"short read at offset {offset} length {length} in {self.path} "
+                f"(got {len(result)} bytes, likely past EOF)"
+            )
+        return result

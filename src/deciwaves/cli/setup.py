@@ -41,20 +41,37 @@ _TOOLS = (
 
 OODLE_DLL_NAME = "oo2core_7_win64.dll"
 
+DOWNLOAD_TIMEOUT_SECONDS = 30
+
 
 def _default_tools_dir() -> Path:
     root = os.environ.get("LOCALAPPDATA", str(Path.home()))
     return Path(root) / "DeciWaves" / "tools"
 
 
-def _download_and_unpack(url: str, dest_dir: Path) -> None:
+def _short_reason(exc: Exception) -> str:
+    """Collapse an exception to a short, single-line, ASCII-safe reason
+    suitable for a summary table cell -- never a raw traceback."""
+    msg = str(exc).strip() or type(exc).__name__
+    msg = msg.splitlines()[0]
+    msg = msg.encode("ascii", "replace").decode("ascii")
+    if len(msg) > 60:
+        msg = msg[:57] + "..."
+    return msg
+
+
+def _download_and_unpack(url: str, dest_dir: Path, timeout: float = DOWNLOAD_TIMEOUT_SECONDS) -> None:
     """Fetch `url` (a zip) and flatten every file it contains directly into
     dest_dir, discarding whatever subfolder structure the upstream zip used.
     vgmstream/VGAudio ship their exe (plus sibling decoder DLLs) at top level;
     the ffmpeg-builds zip nests everything one `ffmpeg-*/bin/` folder deep --
-    flattening means the caller never has to special-case either shape."""
+    flattening means the caller never has to special-case either shape.
+
+    Raises whatever urllib/zipfile raises on failure (DNS error, HTTP error,
+    timeout, bad zip) -- the caller is responsible for catching this per-tool
+    so one bad download doesn't take down the whole run."""
     dest_dir.mkdir(parents=True, exist_ok=True)
-    with urllib.request.urlopen(url) as resp:
+    with urllib.request.urlopen(url, timeout=timeout) as resp:
         data = resp.read()
     with zipfile.ZipFile(io.BytesIO(data)) as zf:
         for info in zf.infolist():
@@ -77,17 +94,33 @@ def _find_oodle(ds_install: str) -> str:
 
 
 def _fetch_tools(tools_dir: Path, skip_downloads: bool):
-    """Returns [(label, status, path), ...] for the summary table."""
+    """Returns ([(label, status, path), ...], any_failed) for the summary
+    table and exit-code decision. Each tool's download/unpack is isolated:
+    an exception (or a post-unpack missing exe) marks that tool FAILED and
+    the loop moves on to the next tool rather than aborting the whole run.
+    --skip-downloads never downloads and never counts as a failure -- it
+    only reports what's already present ("found"/"MISSING")."""
     rows = []
+    any_failed = False
     for label, url, exe in _TOOLS:
         exe_path = tools_dir / exe
         if skip_downloads:
             status = "found" if exe_path.is_file() else "MISSING"
-        else:
+            rows.append((label, status, str(exe_path)))
+            continue
+        try:
             _download_and_unpack(url, tools_dir)
-            status = "fetched" if exe_path.is_file() else "fetched (exe not found after unpack!)"
+        except Exception as exc:  # fail-soft per tool: record and keep going
+            status = f"FAILED: {label} ({_short_reason(exc)})"
+            any_failed = True
+        else:
+            if exe_path.is_file():
+                status = "fetched"
+            else:
+                status = f"FAILED: {label} (exe not found after unpack)"
+                any_failed = True
         rows.append((label, status, str(exe_path)))
-    return rows
+    return rows, any_failed
 
 
 def _print_summary(tool_rows, ds_install, oodle_dll, hzd_package, fw_package):
@@ -113,7 +146,7 @@ def run_setup(argv) -> int:
     tools_dir = Path(args.tools_dir) if args.tools_dir else _default_tools_dir()
     tools_dir.mkdir(parents=True, exist_ok=True)
 
-    tool_rows = _fetch_tools(tools_dir, args.skip_downloads)
+    tool_rows, tools_failed = _fetch_tools(tools_dir, args.skip_downloads)
 
     oodle_dll = _find_oodle(args.ds_install)
     if args.ds_install and not oodle_dll:
@@ -136,7 +169,7 @@ def run_setup(argv) -> int:
         "oodle_dll": oodle_dll,
     })
     print(f"\nWrote {config.path()}")
-    return 0
+    return 1 if tools_failed else 0
 
 
 def main(argv=None) -> int:

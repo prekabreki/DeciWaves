@@ -7,11 +7,26 @@ import pytest
 
 from deciwaves.cli import setup as s
 
+# Shared stub for a fully-successful download+unpack: writes the exe each
+# tool's URL is expected to produce, so `_fetch_tools` reports "fetched"
+# instead of a missing-exe failure. Tests that want a failure path build
+# their own stub instead of using this one.
+_TOOL_EXES = {
+    s.VGMSTREAM_URL: "vgmstream-cli.exe",
+    s.VGAUDIO_URL: "VGAudioCli.exe",
+    s.FFMPEG_URL: "ffmpeg.exe",
+}
+
+
+def _stub_download_ok(url, dest):
+    dest.mkdir(parents=True, exist_ok=True)
+    (dest / _TOOL_EXES[url]).write_bytes(b"x")
+
 
 def test_setup_writes_config_and_finds_oodle(tmp_path, monkeypatch):
     ds = tmp_path / "DS"; ds.mkdir(); (ds / "oo2core_7_win64.dll").write_bytes(b"x"); (ds / "data").mkdir()
     monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(tmp_path / "cfg"))
-    monkeypatch.setattr(s, "_download_and_unpack", lambda url, dest: None)
+    monkeypatch.setattr(s, "_download_and_unpack", _stub_download_ok)
     rc = s.run_setup(["--ds-install", str(ds), "--tools-dir", str(tmp_path / "tools")])
     assert rc == 0
     cfg = json.loads((tmp_path / "cfg" / "config.json").read_text())
@@ -21,7 +36,7 @@ def test_setup_writes_config_and_finds_oodle(tmp_path, monkeypatch):
 
 def test_setup_warns_but_succeeds_without_any_game(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(tmp_path / "cfg"))
-    monkeypatch.setattr(s, "_download_and_unpack", lambda url, dest: None)
+    monkeypatch.setattr(s, "_download_and_unpack", _stub_download_ok)
     assert s.run_setup(["--tools-dir", str(tmp_path / "t")]) == 0
     assert "no game install configured" in capsys.readouterr().out.lower()
 
@@ -29,7 +44,7 @@ def test_setup_warns_but_succeeds_without_any_game(tmp_path, monkeypatch, capsys
 def test_setup_warns_when_oodle_missing_under_ds_install(tmp_path, monkeypatch, capsys):
     ds = tmp_path / "DS_no_oodle"; ds.mkdir()  # no oo2core_7_win64.dll inside
     monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(tmp_path / "cfg"))
-    monkeypatch.setattr(s, "_download_and_unpack", lambda url, dest: None)
+    monkeypatch.setattr(s, "_download_and_unpack", _stub_download_ok)
     rc = s.run_setup(["--ds-install", str(ds), "--tools-dir", str(tmp_path / "tools")])
     assert rc == 0
     out = capsys.readouterr().out.lower()
@@ -44,7 +59,7 @@ def test_setup_saves_hzd_and_fw_package_paths(tmp_path, monkeypatch, capsys):
     hzd = tmp_path / "hzd.package"
     fw = tmp_path / "fw.package"
     monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(tmp_path / "cfg"))
-    monkeypatch.setattr(s, "_download_and_unpack", lambda url, dest: None)
+    monkeypatch.setattr(s, "_download_and_unpack", _stub_download_ok)
     rc = s.run_setup([
         "--tools-dir", str(tmp_path / "tools"),
         "--hzd-package", str(hzd),
@@ -77,7 +92,7 @@ def test_skip_downloads_never_calls_download(tmp_path, monkeypatch):
 def test_default_tools_dir_uses_localappdata(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "AppData" / "Local"))
     monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(tmp_path / "cfg"))
-    monkeypatch.setattr(s, "_download_and_unpack", lambda url, dest: None)
+    monkeypatch.setattr(s, "_download_and_unpack", _stub_download_ok)
     rc = s.run_setup([])
     assert rc == 0
     cfg = json.loads((tmp_path / "cfg" / "config.json").read_text())
@@ -92,7 +107,7 @@ def test_download_and_unpack_flattens_nested_zip(tmp_path, monkeypatch):
         zf.writestr("vgmstream-win64/docs/README.txt", b"read me")
     zip_bytes = buf.getvalue()
 
-    monkeypatch.setattr(urllib.request, "urlopen", lambda url: io.BytesIO(zip_bytes))
+    monkeypatch.setattr(urllib.request, "urlopen", lambda url, timeout=None: io.BytesIO(zip_bytes))
 
     dest = tmp_path / "tools"
     s._download_and_unpack("https://example.invalid/vgmstream-win64.zip", dest)
@@ -107,6 +122,90 @@ def test_download_and_unpack_flattens_nested_zip(tmp_path, monkeypatch):
 
 def test_find_oodle_empty_when_no_ds_install():
     assert s._find_oodle("") == ""
+
+
+def test_download_failure_returns_nonzero_and_reports_failed_row_and_continues(tmp_path, monkeypatch, capsys):
+    calls = []
+
+    def _flaky(url, dest):
+        calls.append(url)
+        if url == s.VGMSTREAM_URL:
+            raise TimeoutError("timed out")
+        # remaining tools still get attempted and succeed
+        _stub_download_ok(url, dest)
+
+    monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.setattr(s, "_download_and_unpack", _flaky)
+    rc = s.run_setup(["--tools-dir", str(tmp_path / "tools")])
+
+    assert rc == 1
+    # every tool was attempted despite the first one failing
+    assert calls == [s.VGMSTREAM_URL, s.VGAUDIO_URL, s.FFMPEG_URL]
+    out = capsys.readouterr().out
+    assert "FAILED: vgmstream" in out
+    assert "timed out" in out
+    # no raw traceback leaked into the captured output
+    assert "Traceback (most recent call last)" not in out
+
+
+def test_config_still_written_correctly_when_one_tool_fails(tmp_path, monkeypatch):
+    # A partial-failure run (one tool's download blows up) must still persist
+    # the rest of the config -- tools_dir, ds_install, oodle_dll -- exactly as
+    # a fully-successful run would. The exit code reports the failure; the
+    # config write is unconditional.
+    ds = tmp_path / "DS"; ds.mkdir(); (ds / "oo2core_7_win64.dll").write_bytes(b"x"); (ds / "data").mkdir()
+
+    def _flaky(url, dest):
+        if url == s.VGAUDIO_URL:
+            raise TimeoutError("timed out")
+        _stub_download_ok(url, dest)
+
+    monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.setattr(s, "_download_and_unpack", _flaky)
+    rc = s.run_setup(["--ds-install", str(ds), "--tools-dir", str(tmp_path / "tools")])
+
+    assert rc == 1
+    cfg = json.loads((tmp_path / "cfg" / "config.json").read_text())
+    assert cfg["tools_dir"] == str(tmp_path / "tools")
+    assert cfg["ds_install"] == str(ds)
+    assert cfg["oodle_dll"].endswith("oo2core_7_win64.dll")
+
+
+def test_unpack_succeeds_but_exe_missing_returns_nonzero(tmp_path, monkeypatch, capsys):
+    # _download_and_unpack "succeeds" (no exception) but never drops the exe --
+    # simulates an upstream zip whose layout changed.
+    monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.setattr(s, "_download_and_unpack", lambda url, dest: None)
+    rc = s.run_setup(["--tools-dir", str(tmp_path / "tools")])
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "FAILED" in out
+    assert "not found after unpack" in out.lower()
+
+
+def test_all_success_still_returns_zero(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.setattr(s, "_download_and_unpack", _stub_download_ok)
+    rc = s.run_setup(["--tools-dir", str(tmp_path / "tools")])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "FAILED" not in out
+
+
+def test_download_and_unpack_passes_timeout_to_urlopen(tmp_path, monkeypatch):
+    captured = {}
+
+    def _fake_urlopen(url, timeout=None):
+        captured["timeout"] = timeout
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("vgmstream-cli.exe", b"exe-bytes")
+        return io.BytesIO(buf.getvalue())
+
+    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
+    s._download_and_unpack("https://example.invalid/vgmstream-win64.zip", tmp_path / "tools")
+    assert captured["timeout"] is not None
+    assert captured["timeout"] > 0
 
 
 @pytest.mark.parametrize("url", [s.VGMSTREAM_URL, s.VGAUDIO_URL, s.FFMPEG_URL])

@@ -16,7 +16,8 @@ import wave
 
 # Resolution order: explicit env override -> PATH -> bare name (fails loudly at
 # call time if truly absent). No more repo-relative vendor/ default -- tool setup
-# is the caller's job (see docs/BYO.md); Task 6's CLI prepends a tools dir to PATH.
+# is the caller's job (see README's Install/Troubleshooting sections); Task 6's
+# CLI prepends a tools dir to PATH.
 VGMSTREAM = (os.environ.get("DECIWAVES_VGMSTREAM")
              or shutil.which("vgmstream-cli") or "vgmstream-cli")
 # resolved at import time — the CLI applies config env before importing stage modules

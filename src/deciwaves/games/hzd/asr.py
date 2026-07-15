@@ -1,4 +1,4 @@
-"""WhisperX transcription wrapper for HZDR clips (ASR content-binding pass). Heavy GPU deps — see requirements-asr.txt."""
+"""WhisperX transcription wrapper for HZDR clips (ASR content-binding pass). Heavy GPU deps — install with `pip install deciwaves[asr]` (plus a CUDA-matched torch build)."""
 from __future__ import annotations
 from dataclasses import dataclass
 

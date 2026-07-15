@@ -7,6 +7,23 @@ def test_cs_group_extracts_group():
     assert em.cs_group("lines_m00010") is None
 
 
+def test_cs_number_extracts_numeric_ordinal():
+    assert em.cs_number("cs07") == 7
+    assert em.cs_number("cs00") == 0
+    assert em.cs_number("cs71") == 71
+
+
+def test_cs_number_lexicographic_trap():
+    # "cs10" < "cs9" as strings, but 10 > 9 numerically -- the sort key must use the
+    # latter or multi-digit groups silently sort before single-digit ones.
+    assert em.cs_number("cs10") > em.cs_number("cs9")
+
+
+def test_cs_number_unparseable_returns_none():
+    assert em.cs_number("csXX") is None
+    assert em.cs_number("mystery_group") is None
+
+
 def test_non_story_cs_groups_are_the_extra_and_battlefield_titles():
     # The main-story cull excludes exactly the Extra/Battlefield cutscene groups,
     # and never a real story episode.
@@ -46,3 +63,11 @@ def test_radio_proportional_split():
 def test_every_cutscene_group_has_a_title():
     for g in ("cs00", "cs10", "cs11", "cs53", "cs71"):
         assert g in em.CS_TITLES
+
+
+def test_non_story_cs_groups_all_have_an_order_hint():
+    # Every NON_STORY_CS_GROUPS group must carry a CS_ORDER_HINT entry -- if one is ever
+    # removed or typo'd, that group silently falls back to cs_number(group) ordering and
+    # can land mid-story instead of at the curated ~980+ tail (see CS_ORDER_HINT comment).
+    missing = em.NON_STORY_CS_GROUPS - em.CS_ORDER_HINT.keys()
+    assert missing == set()

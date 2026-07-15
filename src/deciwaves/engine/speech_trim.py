@@ -3,7 +3,8 @@
 Given WhisperX speech segments for a cutscene whole-scene track, produce the
 padded/merged intervals to KEEP (dropping grunt-after-grunt / dead-air between
 them), or flag the whole track for dropping when it carries essentially no
-dialogue. See docs/superpowers/specs/2026-07-06-ds-cutscene-speech-trim-design.md.
+dialogue. See docs/architecture.md's "Death Stranding: Director's Cut" section
+for how this fits into the cutscene-audio pipeline.
 """
 from __future__ import annotations
 

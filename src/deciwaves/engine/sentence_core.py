@@ -8,6 +8,7 @@ import deciwaves._vendor.pydecima.reader as reader
 from deciwaves._vendor.pydecima.resources.SentenceGroupResource import SentenceGroupResource
 from deciwaves._vendor.pydecima.resources.LocalizedTextResource import LocalizedTextResource
 from deciwaves._vendor.pydecima.resources.LocalizedSimpleSoundResource import LocalizedSimpleSoundResource
+from deciwaves.engine.text_lang import is_plausibly_english
 
 
 @dataclass
@@ -48,7 +49,14 @@ def parse_sentences(core_bytes: bytes, on_line_error=None) -> list[Line]:
                 if sent.text.type != 0:
                     t = sent.text.follow(objs)
                     if isinstance(t, LocalizedTextResource):
-                        subtitle = t.language[0] if t.language else ""
+                        candidate = t.language[0] if t.language else ""
+                        # Issue #3: the vendored scanner skips empty language
+                        # slots, so an empty English slot shifts index 0 onto
+                        # the first non-empty language (usually Japanese).
+                        # Never surface wrong-language text as an "English"
+                        # subtitle -- emit empty instead.
+                        if candidate and is_plausibly_english(candidate):
+                            subtitle = candidate
                 wem = ""
                 if sent.sound.type != 0:
                     s = sent.sound.follow(objs)

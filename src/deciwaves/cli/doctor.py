@@ -50,7 +50,9 @@ def check_tool(display: str, exe: str, env_var: str | None, tools_dir: str) -> t
 
 # --- Oodle DLL -----------------------------------------------------------
 
-def check_oodle(oodle_dll: str) -> tuple[bool, str]:
+def check_oodle(oodle_dll: str, ds_install: str = "") -> tuple[bool, str]:
+    if not ds_install:
+        return True, "[--] Oodle DLL: not needed (DS not configured)"
     if oodle_dll and Path(oodle_dll).is_file():
         return True, f"[ok] Oodle DLL: {oodle_dll}"
     return False, ("[--] Oodle DLL: not found. "
@@ -124,7 +126,7 @@ def run_doctor(argv=None) -> int:
         check_tool("vgmstream-cli", "vgmstream-cli", "DECIWAVES_VGMSTREAM", tools_dir),
         check_tool("VGAudioCli", "VGAudioCli", "DECIWAVES_VGAUDIO", tools_dir),
         check_tool("ffmpeg", "ffmpeg", None, tools_dir),
-        check_oodle(cfg.get("oodle_dll", "")),
+        check_oodle(cfg.get("oodle_dll", ""), cfg.get("ds_install", "")),
         check_ds_install(cfg.get("ds_install", "")),
         check_hzd_package(cfg.get("hzd_package", "")),
         check_fw_package(cfg.get("fw_package", "")),
