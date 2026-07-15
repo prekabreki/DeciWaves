@@ -51,7 +51,9 @@ def check_tool(display: str, exe: str, env_var: str | None, tools_dir: str) -> t
 # --- Oodle DLL -----------------------------------------------------------
 
 def check_oodle(oodle_dll: str) -> tuple[bool, str]:
-    if oodle_dll and Path(oodle_dll).is_file():
+    if not oodle_dll:
+        return True, "[--] Oodle DLL: not needed (DS not configured)"
+    if Path(oodle_dll).is_file():
         return True, f"[ok] Oodle DLL: {oodle_dll}"
     return False, ("[--] Oodle DLL: not found. "
                     "Fix: run `deciwaves setup --ds-install <game root>` "

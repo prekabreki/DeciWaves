@@ -60,6 +60,14 @@ def test_check_oodle_missing(tmp_path):
     assert "deciwaves setup" in msg
 
 
+def test_check_oodle_not_configured():
+    # When DS is not configured, Oodle is "not needed" and must not fail the exit code
+    ok, msg = doctor.check_oodle("")
+    assert ok  # must not fail
+    assert "not needed" in msg.lower() or "not configured" in msg.lower()
+    assert msg.startswith("[--]")
+
+
 # --- DS / HZD / FW game checks: unconfigured never fails exit code ----------
 
 def test_check_ds_install_not_configured():
@@ -171,6 +179,23 @@ def test_run_doctor_exit_0_when_all_found(tmp_path, monkeypatch, capsys):
     # hzd_package / fw_package intentionally left unconfigured -- must not fail
     rc = doctor.run_doctor([])
     assert rc == 0
+
+
+def test_run_doctor_exit_0_with_hzd_fw_only(tmp_path, monkeypatch, capsys):
+    # Healthy machine with only HZD/FW configured, no DS: must exit 0 (not 1)
+    monkeypatch.setattr(doctor.shutil, "which", lambda name: str(tmp_path / name))
+    for var in ("DECIWAVES_VGMSTREAM", "DECIWAVES_VGAUDIO"):
+        monkeypatch.delenv(var, raising=False)
+    hzd = tmp_path / "hzd"
+    hzd.mkdir()
+    fw = tmp_path / "fw"
+    fw.mkdir()
+    (fw / "streaming_graph.core").write_bytes(b"x")
+    # DS intentionally not configured: ds_install and oodle_dll both empty
+    _write_config(tmp_path, monkeypatch, tools_dir=str(tmp_path),
+                  hzd_package=str(hzd), fw_package=str(fw))
+    rc = doctor.run_doctor([])
+    assert rc == 0, "doctor should exit 0 when only HZD/FW configured (DS not owned)"
 
 
 def test_run_doctor_config_roundtrips_through_env_override(tmp_path, monkeypatch):
