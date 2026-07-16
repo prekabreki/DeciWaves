@@ -70,6 +70,13 @@ def build_woven_rows(matched_rows, clip_rows, transcripts_by_id,
                      if c["line_id"] == r["line_id"]), 0)
         items.append((pos, g, lssr, dict(r)))
 
+    # group -> its scene's quest (first matched row for that group wins, same
+    # as the previous per-clip `next(...)` scan's semantics), built once
+    # instead of re-scanning matched_rows for every unmatched clip.
+    group_quest: dict[int, str] = {}
+    for m in matched_rows:
+        group_quest.setdefault(_group(m["line_id"]), matched_by_id[m["line_id"]]["quest"])
+
     for g, pos in scene_pos.items():       # weave unmatched scene clips
         for c in clips_by_group.get(g, []):
             if c["line_id"] in matched_by_id:
@@ -86,12 +93,10 @@ def build_woven_rows(matched_rows, clip_rows, transcripts_by_id,
                 if not label:
                     continue
                 score = t.get("speech_ratio", "")
-            anchor = matched_by_id[next(m["line_id"] for m in matched_rows
-                                        if _group(m["line_id"]) == g)]
             items.append((pos, g, int(c["lssr_index"]), {
                 "line_id": c["line_id"], "wav": c["wav"], "speaker": "",
                 "subtitle": label, "gamescript_index": "",
-                "quest": anchor["quest"], "tier": "W", "score": score,
+                "quest": group_quest[g], "tier": "W", "score": score,
                 "transcript": asr}))
 
     items.sort(key=lambda x: (x[0], x[1], x[2]))
