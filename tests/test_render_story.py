@@ -1,5 +1,4 @@
 import os
-import shutil
 import subprocess
 import wave
 
@@ -8,6 +7,7 @@ import pytest
 from deciwaves.engine import audio_clip as ac
 from deciwaves.engine import render as rs
 from deciwaves.games.ds.story_order import Segment, write_playlist
+from conftest import needs_ffmpeg  # noqa: F401
 
 
 def _seg(is_side, line_id, scene="sq_cs00_s00100", category="cutscene", episode=0):
@@ -22,11 +22,6 @@ def _write_wav(path, nchannels, seconds, framerate=48000):
         w.setsampwidth(2)
         w.setframerate(framerate)
         w.writeframes(b"\x00\x00" * nchannels * int(seconds * framerate))
-
-
-needs_ffmpeg = pytest.mark.skipif(
-    shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None,
-    reason="ffmpeg/ffprobe not installed")
 
 
 @needs_ffmpeg
@@ -299,6 +294,27 @@ def test_render_main_all_decode_ok_but_no_segments_returns_0(tmp_path, monkeypat
     assert "render: decoded 0 clips, 0 failed" in out
 
 
+def test_render_main_explicit_missing_speech_trim_path_errors_loudly(tmp_path, monkeypatch, capsys):
+    """An explicitly-passed --speech-trim path that doesn't exist must fail loudly
+    (nonzero exit code, actionable message) instead of silently behaving as if
+    --speech-trim were never passed at all -- a typo'd explicit path and "feature
+    simply not requested" must not look the same. (load_keepspans() itself still
+    returns {} for a missing path -- that's the correct default-not-given
+    behavior, unchanged -- this is main()'s own explicit-flag check, one level up.)"""
+    monkeypatch.chdir(tmp_path)
+    playlist = tmp_path / "playlist.csv"
+    write_playlist([], str(playlist))
+    errors = tmp_path / "render-errors.log"
+    missing = tmp_path / "does-not-exist-keepspans.csv"
+
+    rc = rs.main(_render_argv(tmp_path, playlist, errors,
+                              extra=["--speech-trim", str(missing)]))
+
+    assert rc != 0
+    out = capsys.readouterr().out
+    assert str(missing) in out
+
+
 @needs_ffmpeg
 def test_render_main_partial_success_returns_0_with_summary(tmp_path, monkeypatch, capsys):
     """One clip decodes, one fails: partial success keeps returning 0, but the
@@ -394,7 +410,7 @@ def test_accumulate_episode_seconds_logs_and_skips_failures(tmp_path):
     assert set(results) == {"good"}
     assert ep_secs[0] == pytest.approx(1.0)   # only the good clip contributed
     err_text = errors.read_text(encoding="utf-8")
-    assert "bad\tbad\tkaboom" in err_text
+    assert "bad\tbad\tBoom: kaboom" in err_text
 
 
 def test_accumulate_episode_seconds_uncaught_exception_type_propagates(tmp_path):

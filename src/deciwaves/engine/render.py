@@ -65,7 +65,12 @@ def pack_episodes(ep_durations, budget=BUDGET_SECONDS):
 _CS_GROUP_RE = re.compile(r"sq_(cs\d+)_")
 
 
-def main_story_only(segs, non_story_cs_groups=frozenset()):
+def _cs_group_of(scene):
+    m = _CS_GROUP_RE.match(scene)
+    return m.group(1) if m else None
+
+
+def main_story_only(segs, non_story_cs_groups=frozenset(), group_of=_cs_group_of):
     """Keep only spine segments (is_side == 0). The playlist tags cutscene +
     mission as the narrative spine and everything else (prepper terminals, radio,
     allowlisted NPCs) as side content; this drops the side content for a
@@ -74,14 +79,20 @@ def main_story_only(segs, non_story_cs_groups=frozenset()):
     `non_story_cs_groups` additionally culls cutscene tracks whose cutscene group
     (e.g. 'cs71') is non-narrative -- DS Extra/Battlefield set-pieces, item-preview
     announcements, private-room BB chatter (see games.ds.episode_map). The cull is
-    scoped to the cutscene category only. Empty set (default) = spine unchanged."""
+    scoped to the cutscene category only. Empty set (default) = spine unchanged.
+
+    `group_of(scene) -> group_id | None` resolves a scene string to its cutscene
+    group; defaults to this module's own `_CS_GROUP_RE` (identical to
+    `games.ds.episode_map.cs_group`) so a caller with its own group-resolution
+    logic (e.g. DS's own `episode_map.cs_group`) can pass it in instead of this
+    module keeping a second, independently-maintained copy of the same regex."""
     out = []
     for s in segs:
         if s.is_side != 0:
             continue
         if s.category == "cutscene" and non_story_cs_groups:
-            m = _CS_GROUP_RE.match(s.scene)
-            if m and m.group(1) in non_story_cs_groups:
+            g = group_of(s.scene)
+            if g is not None and g in non_story_cs_groups:
                 continue
         out.append(s)
     return out
@@ -192,8 +203,8 @@ def accumulate_episode_seconds(segs, dur_of, *, gap_key, err_key, errors_path,
 
     `dur_of(seg) -> (payload, duration_seconds)` does the game-specific decode/measure
     work. Raising anything in `catch` fails that one segment soft: logged to
-    `errors_path` as ``<line_id>\\t<err_key(seg)>\\t<exc>``, then skipped -- never
-    aborting the whole render.
+    `errors_path` as ``<line_id>\\t<err_key(seg)>\\t<exc type name>: <exc>``, then
+    skipped -- never aborting the whole render.
 
     `gap_key(seg)` is the "same scene" key (e.g. ``lambda s: s.scene``,
     ``lambda s: s.quest``) used to price the silence gap ahead of each segment within
@@ -238,7 +249,7 @@ def accumulate_episode_seconds(segs, dur_of, *, gap_key, err_key, errors_path,
                 if not isinstance(exc, catch):
                     raise exc
                 n_failed += 1
-                ferr.write(f"{s.line_id}\t{err_key(s)}\t{exc}\n")
+                ferr.write(f"{s.line_id}\t{err_key(s)}\t{type(exc).__name__}: {exc}\n")
                 continue
             payload, dur = payload_dur
             results[s.line_id] = (payload, dur)
@@ -364,13 +375,19 @@ def main(argv=None):
     os.makedirs(args.out_dir, exist_ok=True)
     segs = story_order.read_playlist(args.playlist)
     if args.main_story:
-        kept = main_story_only(segs, non_story_cs_groups=em.NON_STORY_CS_GROUPS)
+        kept = main_story_only(segs, non_story_cs_groups=em.NON_STORY_CS_GROUPS,
+                               group_of=em.cs_group)
         print(f"main-story filter: kept {len(kept)}/{len(segs)} segments "
               f"(dropped {len(segs) - len(kept)} side + non-story cutscene groups "
               f"{sorted(em.NON_STORY_CS_GROUPS)})")
         segs = kept
     stem = file_stem(args.main_story)
 
+    if args.speech_trim and not os.path.isfile(args.speech_trim):
+        print(f"render: --speech-trim path not found: {args.speech_trim} "
+              f"(pass a real cutscene-keepspans.csv, or omit --speech-trim to "
+              f"disable trimming)")
+        return 1
     keepspans = load_keepspans(args.speech_trim) if args.speech_trim else {}
     if keepspans:
         n_drop = sum(1 for s in segs if keepspans.get(s.stream_path, (None, False))[1])
