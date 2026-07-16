@@ -27,6 +27,7 @@ import re
 import statistics
 
 from deciwaves.games.fw.manifest import MANIFEST_COLS
+from deciwaves.games.fw.subtitle_bind import DEFAULT_OUT as _SUBTITLE_MANIFEST
 
 _LINE_RE = re.compile(r"g(\d+)_(\d+)")
 
@@ -103,7 +104,7 @@ def _load_csv(path):
 
 def main(argv=None):  # pragma: no cover - integration glue
     ap = argparse.ArgumentParser(description="FW full 16.7h subtitled reel assembler")
-    ap.add_argument("--subtitles", default="out/fw/subtitle-manifest-full.csv")
+    ap.add_argument("--subtitles", default=_SUBTITLE_MANIFEST)
     ap.add_argument("--anchors", default="out/fw/story-manifest.csv")
     ap.add_argument("--clip-index", default="out/fw/clip-index.csv")
     ap.add_argument("--out", default="out/fw/full-reel-manifest.csv")

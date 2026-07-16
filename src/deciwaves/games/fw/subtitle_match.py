@@ -136,10 +136,11 @@ def main(argv=None):  # pragma: no cover - integration glue
     from collections import Counter
 
     from deciwaves.games.fw.gamescript import parse_file
+    from deciwaves.games.fw.subtitle_bind import DEFAULT_OUT as _SUBTITLE_MANIFEST
 
     ap = argparse.ArgumentParser(
         description="FW exact-subtitle -> gamescript story matcher")
-    ap.add_argument("--manifest", default="out/fw/subtitle-manifest-full.csv",
+    ap.add_argument("--manifest", default=_SUBTITLE_MANIFEST,
                     help="subtitle_bind output (exact in-game subtitles)")
     ap.add_argument("--gamescript", default="docs/forbidden_west_gamescript.md")
     ap.add_argument("--out", default="out/fw/story-manifest.csv")

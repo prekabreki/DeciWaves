@@ -23,6 +23,7 @@ import re
 import statistics
 
 from deciwaves.games.fw.manifest import MANIFEST_COLS
+from deciwaves.games.fw.subtitle_bind import DEFAULT_OUT as _SUBTITLE_MANIFEST
 
 _GROUP_RE = re.compile(r"g(\d+)_")
 
@@ -112,7 +113,7 @@ def main(argv=None):
                     help="matched anchors (subtitle_match output)")
     ap.add_argument("--clip-index", default="out/fw/clip-index.csv")
     ap.add_argument("--transcripts", default="out/fw/transcripts.csv")
-    ap.add_argument("--subtitles", default="out/fw/subtitle-manifest-full.csv",
+    ap.add_argument("--subtitles", default=_SUBTITLE_MANIFEST,
                     help="exact in-game subtitles (subtitle_bind output); when set, "
                          "woven scene clips use exact subtitles, not ASR")
     ap.add_argument("--out", default="out/fw/woven-manifest.csv")

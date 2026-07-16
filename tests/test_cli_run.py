@@ -604,7 +604,7 @@ def test_fw_gamescript_path_missing_exits_nonzero_and_names_path(tmp_path, monke
     assert bad_path in out
 
 
-def test_fw_full_chain_with_gamescript(tmp_path, monkeypatch):
+def test_fw_full_chain_with_gamescript(tmp_path, monkeypatch, parsed_stage_args):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
     gamescript = tmp_path / "gamescript.md"
@@ -625,10 +625,16 @@ def test_fw_full_chain_with_gamescript(tmp_path, monkeypatch):
     assert _after(match_argv, "--gamescript") == str(gamescript)
 
     render_argv = calls[-1][1]
-    assert _after(render_argv, "--tiers") == "1,2,S"
     assert _after(render_argv, "--stem") == "fw_story_full"
     assert "--uniform-mono" in render_argv
-    assert _after(render_argv, "--manifest") == "out/fw/full-reel-manifest.csv"
+    # --manifest/--tiers are no longer hand-wired here (issue #17): render's
+    # own defaults already match the full-reel stage's output and ship set,
+    # so this resolves render_argv through render's REAL parser rather than
+    # asserting a literal that would just be a second copy of the default.
+    from deciwaves.games.fw import render as render_mod
+    ns = parsed_stage_args(render_mod.main, render_argv)
+    assert ns.manifest == render_mod.DEFAULT_MANIFEST
+    assert ns.tiers == render_mod.DEFAULT_TIERS
 
 
 def test_fw_extract_rerun_invalidates_downstream_across_gamescript_gate(tmp_path, monkeypatch):
