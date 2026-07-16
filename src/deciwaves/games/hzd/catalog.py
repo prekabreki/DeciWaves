@@ -7,6 +7,11 @@ HZD differs from the DS catalog (games.ds.catalog) in three ways:
 * Speaker codes are already human-readable (localized/voices/<name>), so the
   display name is derived from the code rather than followed through simpletext.
 
+Each run also writes ``--cores-out`` (default ``out/hzd/catalog-cores.txt``): the
+resolved, dialogue-only core-path list (via ``engine.catalog_io.write_core_paths_sidecar``).
+``games.hzd.wem_metadata`` loads it back (``--cores``) instead of repeating this same
+full-pack content scan (issue #31).
+
 Invoke as a module (src/ must be on PYTHONPATH)::
 
     PYTHONPATH=src python -m deciwaves.games.hzd.catalog --package <...\\LocalCacheDX12\\package>
@@ -17,7 +22,9 @@ import csv
 import os
 import sys
 
-from deciwaves.engine.catalog_io import CSV_COLUMNS, done_core_paths, processed_core_paths
+from deciwaves.engine.catalog_io import (
+    CSV_COLUMNS, done_core_paths, processed_core_paths, write_core_paths_sidecar,
+)
 from deciwaves.games.hzd.sentence_fw import parse_sentences_fw
 from deciwaves.games.hzd.profile import HZD_ANCHORED_PREFIXES, HZD_FAMILY_PREFIXES
 
@@ -76,6 +83,10 @@ def main(argv=None):
     ap.add_argument("--out", default="out/hzd/catalog.csv")
     ap.add_argument("--errors", default="out/hzd/catalog-errors.log")
     ap.add_argument("--processed", default="out/hzd/catalog-processed.txt")
+    ap.add_argument("--cores-out", default="out/hzd/catalog-cores.txt",
+                    help="sidecar of this run's dialogue sentence-core paths (post "
+                         "select_sentence_cores filtering); wem-metadata reads this "
+                         "back (--cores) instead of repeating the content scan below")
     ap.add_argument("--sample-cap", type=int, default=0,
                     help="0 = scan the whole pack; >0 caps records scanned during harvest")
     args = ap.parse_args(argv)
@@ -89,6 +100,9 @@ def main(argv=None):
     print("harvesting sentence-core paths (content scan)...", flush=True)
     harvested = harvest_sentence_cores(fw, sample_cap=args.sample_cap or None)
     paths = select_sentence_cores(harvested)
+    # Persist this run's resolved dialogue-core list so wem-metadata (--cores) can
+    # reuse it instead of repeating this same full-pack scan (issue #31).
+    write_core_paths_sidecar(args.cores_out, paths)
     done = done_core_paths(args.out) | processed_core_paths(args.processed)
     todo = [p for p in paths if p not in done]
     print(f"{len(paths)} dialogue cores; {len(done)} done; {len(todo)} to do")
