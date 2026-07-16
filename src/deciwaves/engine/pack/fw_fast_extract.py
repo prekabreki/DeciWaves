@@ -30,6 +30,22 @@ from deciwaves.engine.pack.fw_rtti import type_hash
 # Dubbed-audio languages per LSSR; English occupies block offset 0.
 LANGS = 12
 
+
+def arith_clean_lssr_count(type_table_slice, lssr_hash: int, locator_count: int) -> int | None:
+    """Return the number of LSSRs in a streaming group if it is *arithmetically
+    clean* -- its locator slice holds exactly ``LANGS`` locators per LSSR --
+    else ``None``.
+
+    Shared by :func:`iter_english_lines` (this module) and
+    ``games.fw.subtitle_bind.scan_arith_clean_groups``, which previously
+    duplicated this exact check verbatim (only ``LANGS`` itself had been
+    unified before -- issue #51 item 8).
+    """
+    n = int((type_table_slice == lssr_hash).sum())
+    if n == 0 or locator_count != LANGS * n:
+        return None
+    return n
+
 # An English voice stream: a path segment named ``en`` directly before the
 # ``package.NN.MM.core.stream`` file. Matches the base game's two parts
 # (``en/package.01.00`` + ``en/package.01.01``) AND the DLC
@@ -82,8 +98,8 @@ def iter_english_lines(graph: StreamingGraph,
     file_index = graph.locators.file_index  # numpy view over all locators
     for grp in graph.groups:
         tt = graph.type_table[grp.type_start:grp.type_start + grp.type_count]
-        n = int((tt == lssr).sum())
-        if n == 0 or grp.locator_count != LANGS * n:
+        n = arith_clean_lssr_count(tt, lssr, grp.locator_count)
+        if n is None:
             continue  # not arith-clean -> needs the full walk
         base = grp.locator_start
         for k in range(n):
