@@ -12,6 +12,15 @@ resolved, dialogue-only core-path list (via ``engine.catalog_io.write_core_paths
 ``games.hzd.wem_metadata`` loads it back (``--cores``) instead of repeating this same
 full-pack content scan (issue #31).
 
+``load_catalog_dict`` (issue #47) is the shared ``catalog.csv -> {line_id: row}``
+loading path for downstream stages (``games.hzd.asr_bind``, ``games.hzd.render``) --
+use it instead of a bare ``{r["line_id"]: r for r in ...}`` dict comprehension, which
+silently keeps only the last row on a line_id collision. Real collisions should be ~0
+now that ``games.hzd.sentence_fw``'s ``sentence#N`` fallback ids are namespaced per
+core; this is the loud guard that proves it (and catches a regression). A workspace
+whose catalog.csv predates issue #47 may still contain un-namespaced fallback ids --
+regenerate it (re-run `hzd catalog`) if this warns.
+
 Invoke as a module (src/ must be on PYTHONPATH)::
 
     PYTHONPATH=src python -m deciwaves.games.hzd.catalog --package <...\\LocalCacheDX12\\package>
@@ -37,6 +46,35 @@ _SENTENCES_SUFFIX = "/sentences"
 def select_sentence_cores(harvested_paths) -> list[str]:
     """Dialogue sentence cores only (drop voice ``/simpletext`` cores), sorted."""
     return sorted(p for p in harvested_paths if p.endswith(_SENTENCES_SUFFIX))
+
+
+def load_catalog_dict(csv_path: str) -> dict:
+    """Load ``catalog.csv`` keyed by ``line_id``, for stages that need per-line
+    metadata by id (``games.hzd.asr_bind``, ``games.hzd.render``) -- the ONE shared
+    loading path so both stay in sync (issue #47).
+
+    A ``line_id`` collision (two distinct rows sharing the same id -- e.g. a pre-#47
+    workspace's un-namespaced ``sentence#N`` fallback ids from two different cores)
+    resolves the same way a plain dict comprehension always did (last row wins), but is
+    now COUNTED and reported loudly instead of silently swallowed -- since namespacing
+    (see ``games.hzd.sentence_fw._fallback_line_id``) should make real collisions ~0,
+    any reported here is either a stale (pre-#47) workspace or a genuine regression.
+    """
+    with open(csv_path, newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    catalog: dict = {}
+    collisions = 0
+    for r in rows:
+        lid = r["line_id"]
+        if lid in catalog:
+            collisions += 1
+        catalog[lid] = r
+    if collisions:
+        print(f"WARNING: {csv_path}: {collisions} line_id collision(s) on load -- "
+              f"some rows were silently overwritten (last write wins). If this "
+              f"workspace predates issue #47 it may hold un-namespaced sentence#N "
+              f"fallback ids; regenerate it (re-run `hzd catalog` onward) to fix.")
+    return catalog
 
 
 def classify_hzd(core_path: str, family_prefixes: dict | None = None) -> tuple[str, str]:
@@ -150,7 +188,8 @@ def main(argv=None):
             try:
                 core_bytes = fw.read_core(core_path)
                 rows = parse_sentences_fw(
-                    core_bytes, on_line_error=lambda i, e: line_errs.append((i, e)))
+                    core_bytes, on_line_error=lambda i, e: line_errs.append((i, e)),
+                    core_path=core_path)
             except Exception as exc:  # fail-soft per core
                 cores_failed += 1
                 ferr.write(f"{core_path}\t{type(exc).__name__}: {exc}\n"); ferr.flush()

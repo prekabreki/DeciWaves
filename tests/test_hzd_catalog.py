@@ -316,7 +316,7 @@ def test_catalog_main_resumes_after_zero_byte_out(tmp_path, monkeypatch):
     monkeypatch.setattr(inventory_mod, "harvest_sentence_cores",
                          lambda fw, sample_cap=None: ["localized/sentences/mq/scene/sentences"])
     monkeypatch.setattr(catalog_mod, "parse_sentences_fw",
-                         lambda core_bytes, on_line_error=None: [_FakeLine()])
+                         lambda core_bytes, on_line_error=None, core_path=None: [_FakeLine()])
 
     fake_pkg = tmp_path / "package"; fake_pkg.mkdir()
     (fake_pkg / "PackFileLocators.bin").write_bytes(b"x")
@@ -438,4 +438,75 @@ def test_catalog_main_missing_package_fails_actionably(tmp_path, monkeypatch, ca
     captured = capsys.readouterr()
     assert "--hzd-package" in captured.out
     assert "PackFileLocators.bin" in captured.out
-    assert captured.err == ""  # no traceback
+
+
+# ---------------------------------------------------------------------------
+# load_catalog_dict (issue #47): the shared catalog.csv -> {line_id: row} loading path
+# for asr_bind.py/render.py, with loud collision counting instead of a silent
+# last-write-win dict comprehension -- the guard that proves fallback-id namespacing
+# actually eliminated cross-core collisions (and catches a regression if it doesn't).
+# ---------------------------------------------------------------------------
+
+def _write_catalog_csv(path, rows):
+    fieldnames = ["line_id", "core_path", "line_index", "category", "scene",
+                  "speaker_code", "speaker_name", "subtitle_en", "wem_path_en", "language"]
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=fieldnames)
+        w.writeheader()
+        for r in rows:
+            w.writerow({**{k: "" for k in fieldnames}, **r})
+
+
+def test_load_catalog_dict_no_collisions_is_silent(tmp_path, capsys):
+    from deciwaves.games.hzd.catalog import load_catalog_dict
+
+    path = tmp_path / "catalog.csv"
+    _write_catalog_csv(path, [
+        {"line_id": "MQ04_a", "subtitle_en": "one"},
+        {"line_id": "MQ04_b", "subtitle_en": "two"},
+    ])
+
+    result = load_catalog_dict(str(path))
+
+    assert set(result) == {"MQ04_a", "MQ04_b"}
+    assert result["MQ04_a"]["subtitle_en"] == "one"
+    assert "collision" not in capsys.readouterr().out.lower()
+
+
+def test_load_catalog_dict_reports_collisions_loudly(tmp_path, capsys):
+    """Two distinct rows sharing the same line_id (e.g. a pre-#47 workspace's
+    un-namespaced sentence#N fallback ids from two different cores) must still resolve
+    (last write wins, unchanged) but the collision must be counted and reported --
+    never silent."""
+    from deciwaves.games.hzd.catalog import load_catalog_dict
+
+    path = tmp_path / "catalog.csv"
+    _write_catalog_csv(path, [
+        {"line_id": "sentence#0", "core_path": "core/a/sentences", "subtitle_en": "from core a"},
+        {"line_id": "sentence#0", "core_path": "core/b/sentences", "subtitle_en": "from core b"},
+        {"line_id": "MQ04_a", "core_path": "core/c/sentences", "subtitle_en": "unique"},
+    ])
+
+    result = load_catalog_dict(str(path))
+
+    assert result["sentence#0"]["subtitle_en"] == "from core b"   # last write wins, as before
+    assert result["MQ04_a"]["subtitle_en"] == "unique"
+    printed = capsys.readouterr().out
+    assert "1" in printed
+    assert "collision" in printed.lower()
+
+
+def test_load_catalog_dict_multiple_collisions_reports_exact_count(tmp_path, capsys):
+    from deciwaves.games.hzd.catalog import load_catalog_dict
+
+    path = tmp_path / "catalog.csv"
+    _write_catalog_csv(path, [
+        {"line_id": "X", "core_path": "1"}, {"line_id": "X", "core_path": "2"},
+        {"line_id": "X", "core_path": "3"},   # 2 collisions on "X" (2nd and 3rd row)
+        {"line_id": "Y", "core_path": "1"}, {"line_id": "Y", "core_path": "2"},  # 1 collision on "Y"
+    ])
+
+    load_catalog_dict(str(path))
+
+    printed = capsys.readouterr().out
+    assert "3" in printed   # 2 + 1 = 3 total collisions

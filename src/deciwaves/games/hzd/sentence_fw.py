@@ -20,8 +20,22 @@ Per object (each body begins with the object's 16-byte GUID):
   language, **English at index 0**.
 * LocalizedSimpleSoundResource (0x4AFD36F67D7E8C76): keyed by ``SENTENCE_<uuid>``;
   carries no literal ``.wem`` path (HZD audio is resolved separately, Phase 5/6).
+
+Fallback line-id namespacing (issue #47): a SentenceResource with no internal name gets
+a ``<core-hash8>#sentence#N`` id instead of a proper name-derived one (see
+``_fallback_line_id`` below -- the ONE place every parse function here generates it, so
+``parse_sentences_fw``/``parse_sentence_ids``/``parse_sentence_media`` never disagree on
+a given (core_path, N)'s fallback id). Pre-#47, this was a bare ``sentence#N`` with no
+core-path hash, unique only *within* one core -- two different cores' Nth unnamed line
+collided on the exact same id, and downstream dict-keyed-by-line_id consumers (see
+``games.hzd.catalog.load_catalog_dict``) silently kept only the last one written.
+Workspaces whose catalog/wem-metadata/manifest CSVs predate issue #47 may still contain
+the old bare form; regenerate those stage outputs (re-run ``hzd catalog`` onward) to
+pick up the namespaced ids -- ``load_catalog_dict`` reports a loud collision count on
+load, so a stale workspace's mixed/colliding ids won't pass silently.
 """
 from __future__ import annotations
+import hashlib
 import re
 import struct
 from dataclasses import dataclass
@@ -35,6 +49,21 @@ LOCALIZED_SIMPLE_SOUND_RESOURCE = 0x4AFD36F67D7E8C76
 _VOICE_PREFIX = b"localized/voices/"
 # SENTENCE_<dashed-uuid> string keying a LocalizedSimpleSoundResource to its sentence.
 _SENTENCE_UUID_RE = re.compile(rb"SENTENCE_([0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})")
+
+
+def _fallback_line_id(core_path: str, i: int) -> str:
+    """The ONE shared fallback-id generator (issue #47): every parse function in this
+    module calls this instead of re-deriving its own ``sentence#N`` string, so they can
+    never drift on the same (core_path, i) pair.
+
+    Namespaced by an 8-hex-char sha256 prefix of *core_path* -- short and deterministic
+    across runs/processes (unlike Python's randomized ``hash()``), so two different
+    cores' Nth unnamed line no longer collide on the same fallback id. This is a cheap
+    hash, not a uniqueness guarantee; ``games.hzd.catalog.load_catalog_dict`` counts and
+    loudly reports any collision that slips through anyway.
+    """
+    core_hash8 = hashlib.sha256(core_path.encode("utf-8")).hexdigest()[:8]
+    return f"{core_hash8}#sentence#{i}"
 
 
 def _rtti_walk(buf: bytes) -> list[tuple[int, bytes]]:
@@ -88,7 +117,12 @@ def _read_voice(sent_body: bytes) -> str:
     return ""
 
 
-def parse_sentences_fw(core_bytes: bytes, on_line_error=None) -> list[Line]:
+def parse_sentences_fw(core_bytes: bytes, on_line_error=None, core_path: str = "") -> list[Line]:
+    """``core_path`` (issue #47): the core's virtual path, used only to namespace a
+    NO-name line's fallback id (``_fallback_line_id``) -- defaults to ``""`` for callers
+    that don't care about cross-core uniqueness (e.g. direct unit tests of the parse
+    logic in isolation); real stages (``games.hzd.catalog``) always pass the real path.
+    """
     objs = _rtti_walk(core_bytes)
 
     # First pass: index LocalizedTextResources by their GUID -> English subtitle.
@@ -113,7 +147,7 @@ def parse_sentences_fw(core_bytes: bytes, on_line_error=None) -> list[Line]:
                 if guid in body:
                     subtitle = english
                     break
-            line_id = name or f"sentence#{i}"
+            line_id = name or _fallback_line_id(core_path, i)
             # wem_path_en deferred: HZD audio resolves via SENTENCE uuid (Phase 5/6).
             lines.append(Line(line_id, i, speaker, subtitle, ""))
         except Exception as exc:  # fail-soft per line, like the DS parser
@@ -183,14 +217,18 @@ def _read_media_ab(sound_body: bytes):
         start = h + 1
 
 
-def parse_sentence_media(core_bytes: bytes, on_line_error=None) -> list[LineMedia]:
+def parse_sentence_media(core_bytes: bytes, on_line_error=None, core_path: str = "") -> list[LineMedia]:
     """One LineMedia per SentenceResource, in file order, with ATRAC9 A/B fields.
 
     Joins by sentence uuid (same linkage as parse_sentence_ids) rather than by list
     position, so an orphan sound resource — one whose uuid has no matching sentence —
     cannot silently shift A/B values onto the wrong line.
+
+    ``core_path`` is forwarded to ``parse_sentence_ids`` unchanged (issue #47) so a
+    no-name line's fallback id matches exactly what ``games.hzd.catalog`` wrote for the
+    same core -- the two stages' CSVs join on line_id.
     """
-    ids = parse_sentence_ids(core_bytes, on_line_error=on_line_error)
+    ids = parse_sentence_ids(core_bytes, on_line_error=on_line_error, core_path=core_path)
 
     # Build uuid -> sound-body index (same walk as parse_sentence_ids, reusing the
     # existing _SENTENCE_UUID_RE constant and _dashed_uuid_to_raw helper).
@@ -223,8 +261,11 @@ def parse_sentence_media(core_bytes: bytes, on_line_error=None) -> list[LineMedi
     return out
 
 
-def parse_sentence_ids(core_bytes: bytes, on_line_error=None) -> list[LineIds]:
+def parse_sentence_ids(core_bytes: bytes, on_line_error=None, core_path: str = "") -> list[LineIds]:
     """One LineIds per SentenceResource, in file order, joined to its sound GUID.
+
+    ``core_path`` namespaces a no-name line's fallback id (see ``_fallback_line_id``,
+    issue #47); defaults to ``""`` for callers that don't need cross-core uniqueness.
 
     Linkage (verified on the oracle MQ010_cut_Prologue_Dial_225):
     * SentenceResource (0x632B...) body[:16] == its SENTENCE uuid (raw on-disk).
@@ -264,7 +305,7 @@ def parse_sentence_ids(core_bytes: bytes, on_line_error=None) -> list[LineIds]:
                 continue
             sentence_uuid = body[:16]
             name = _read_name(body)
-            line_id = name or f"sentence#{i}"
+            line_id = name or _fallback_line_id(core_path, i)
             sound_guid = guid_by_uuid.get(sentence_uuid)
             if sound_guid is None:
                 if on_line_error:

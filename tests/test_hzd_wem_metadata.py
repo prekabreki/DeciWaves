@@ -95,7 +95,7 @@ def test_uses_cores_sidecar_and_never_rescans(tmp_path, monkeypatch):
     _forbid_rescan(monkeypatch)
     monkeypatch.setattr(
         wem_metadata, "parse_sentence_media",
-        lambda core_bytes, on_line_error=None: [LineMedia("L1", 0, 100, 530)])
+        lambda core_bytes, on_line_error=None, core_path=None: [LineMedia("L1", 0, 100, 530)])
 
     catalog = tmp_path / "catalog.csv"
     _write_minimal_catalog(catalog, ["L1"])
@@ -120,7 +120,7 @@ def test_main_accepts_bare_filename_out(tmp_path, monkeypatch):
     _forbid_rescan(monkeypatch)
     monkeypatch.setattr(
         wem_metadata, "parse_sentence_media",
-        lambda core_bytes, on_line_error=None: [LineMedia("L1", 0, 100, 530)])
+        lambda core_bytes, on_line_error=None, core_path=None: [LineMedia("L1", 0, 100, 530)])
 
     catalog = tmp_path / "catalog.csv"
     _write_minimal_catalog(catalog, ["L1"])
@@ -153,7 +153,7 @@ def test_falls_back_to_rescan_and_still_excludes_simpletext_when_sidecar_missing
     monkeypatch.setattr(wem_metadata, "harvest_sentence_cores", _fake_harvest)
     monkeypatch.setattr(
         wem_metadata, "parse_sentence_media",
-        lambda core_bytes, on_line_error=None: [LineMedia("L1", 0, 100, 530)])
+        lambda core_bytes, on_line_error=None, core_path=None: [LineMedia("L1", 0, 100, 530)])
 
     missing_sidecar = tmp_path / "no-such-cores.txt"
     catalog = tmp_path / "catalog.csv"
@@ -187,7 +187,7 @@ def test_matching_locators_header_trusts_sidecar_silently(tmp_path, monkeypatch,
     _forbid_rescan(monkeypatch)
     monkeypatch.setattr(
         wem_metadata, "parse_sentence_media",
-        lambda core_bytes, on_line_error=None: [LineMedia("L1", 0, 100, 530)])
+        lambda core_bytes, on_line_error=None, core_path=None: [LineMedia("L1", 0, 100, 530)])
 
     catalog = tmp_path / "catalog.csv"
     _write_minimal_catalog(catalog, ["L1"])
@@ -217,7 +217,7 @@ def test_mismatched_locators_header_warns_ignores_and_regenerates(tmp_path, monk
     monkeypatch.setattr(wem_metadata, "harvest_sentence_cores", lambda fw, sample_cap=None: harvested)
     monkeypatch.setattr(
         wem_metadata, "parse_sentence_media",
-        lambda core_bytes, on_line_error=None: [LineMedia("L1", 0, 100, 530)])
+        lambda core_bytes, on_line_error=None, core_path=None: [LineMedia("L1", 0, 100, 530)])
 
     catalog = tmp_path / "catalog.csv"
     _write_minimal_catalog(catalog, ["L1"])
@@ -255,7 +255,7 @@ def test_mismatched_header_with_sample_cap_does_not_overwrite_sidecar(tmp_path, 
     monkeypatch.setattr(wem_metadata, "harvest_sentence_cores", lambda fw, sample_cap=None: harvested)
     monkeypatch.setattr(
         wem_metadata, "parse_sentence_media",
-        lambda core_bytes, on_line_error=None: [LineMedia("L1", 0, 100, 530)])
+        lambda core_bytes, on_line_error=None, core_path=None: [LineMedia("L1", 0, 100, 530)])
 
     catalog = tmp_path / "catalog.csv"
     _write_minimal_catalog(catalog, ["L1"])
@@ -283,7 +283,7 @@ def test_legacy_sidecar_with_no_header_is_trusted_with_one_warning(tmp_path, mon
     _forbid_rescan(monkeypatch)
     monkeypatch.setattr(
         wem_metadata, "parse_sentence_media",
-        lambda core_bytes, on_line_error=None: [LineMedia("L1", 0, 100, 530)])
+        lambda core_bytes, on_line_error=None, core_path=None: [LineMedia("L1", 0, 100, 530)])
 
     catalog = tmp_path / "catalog.csv"
     _write_minimal_catalog(catalog, ["L1"])
@@ -318,7 +318,7 @@ def test_records_core_read_error_and_continues_with_other_cores(tmp_path, monkey
     _forbid_rescan(monkeypatch)
     monkeypatch.setattr(
         wem_metadata, "parse_sentence_media",
-        lambda core_bytes, on_line_error=None: [LineMedia("L1", 0, 100, 530)])
+        lambda core_bytes, on_line_error=None, core_path=None: [LineMedia("L1", 0, 100, 530)])
 
     catalog = tmp_path / "catalog.csv"
     _write_minimal_catalog(catalog, ["L1"])
@@ -342,7 +342,7 @@ def test_records_line_level_parse_error(tmp_path, monkeypatch):
     _patch_profile(monkeypatch, reader)
     _forbid_rescan(monkeypatch)
 
-    def _fake_parse(core_bytes, on_line_error=None):
+    def _fake_parse(core_bytes, on_line_error=None, core_path=None):
         if on_line_error:
             on_line_error("L_broken", "no sound body for sentence uuid")
         return []
