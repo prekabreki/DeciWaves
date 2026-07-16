@@ -142,10 +142,11 @@ guided interactive flow (see below).
   `%LOCALAPPDATA%/DeciWaves/config.json` (overridable via `DECIWAVES_CONFIG_DIR`).
   Before dispatching to any stage, `main()` calls `_apply_config_env()`, which prepends
   the saved `tools_dir` onto `PATH` and sets `DECIWAVES_VGMSTREAM` / `DECIWAVES_VGAUDIO`
-  when the corresponding executables are found there. This has to happen *before* the
-  stage module is imported: `engine/audio_clip.py`, `games/fw/extract.py`, and
-  `games/hzd/atrac9.py` all read those environment variables to resolve their tool-path
-  constants at import time, not lazily.
+  when the corresponding executables are found there. `engine/audio_clip.py`,
+  `games/fw/extract.py`, and `games/hzd/atrac9.py` all read those environment variables
+  via `engine/tool_paths.py`'s `resolve(env_var, exe)` at the moment the decoder
+  subprocess is actually spawned, so stage-module import order relative to
+  `_apply_config_env()` doesn't matter.
 - **`setup`.** `deciwaves setup` (`deciwaves/cli/setup.py`) fetches `vgmstream-cli`,
   `VGAudioCli`, and `ffmpeg` into a tools directory (default
   `%LOCALAPPDATA%\DeciWaves\tools`), locates `oo2core_7_win64.dll` under a supplied

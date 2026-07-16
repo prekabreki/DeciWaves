@@ -23,10 +23,10 @@ from pathlib import Path
 from deciwaves.cli import config
 
 # --- tool resolution ---------------------------------------------------
-# Mirrors the resolution order the engine modules use at import time
-# (engine/audio_clip.py:VGMSTREAM, games/fw/extract.py:VGAUDIO,
-# games/hzd/atrac9.py:VGAUDIO, and main.py's ffmpeg-via-PATH usage in
-# engine/audio_clip.py's silence detection): explicit env var override,
+# Mirrors the resolution order engine.tool_paths.resolve() uses at
+# subprocess-spawn time (engine/audio_clip.py, games/fw/extract.py,
+# games/hzd/atrac9.py), plus main.py's ffmpeg-via-PATH usage in
+# engine/audio_clip.py's silence detection: explicit env var override,
 # then a copy in the configured tools_dir, then bare name on PATH.
 
 

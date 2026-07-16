@@ -98,10 +98,9 @@ def main(argv=None) -> int:
             raise
         return e.code
 
-    cfg = _apply_config_env()  # must run before any stage module import -- see
-    # engine/audio_clip.py, games/fw/extract.py, games/hzd/atrac9.py: their tool
-    # path constants (VGMSTREAM/VGAUDIO) are resolved at import time from the env
-    # this call sets up.
+    cfg = _apply_config_env()  # sets DECIWAVES_VGMSTREAM/DECIWAVES_VGAUDIO (and
+    # PATH) from saved config; engine.tool_paths.resolve() reads them when the
+    # decoder subprocess is actually spawned, not at stage-module import time.
     if args.cmd is None:
         from deciwaves.cli.guided import run_guided; return run_guided(cfg)
     if args.cmd == "setup":
