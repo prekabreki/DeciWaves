@@ -121,11 +121,6 @@ class _Cursor:
         self.pos += 1
         return v
 
-    def u16(self) -> int:
-        v = struct.unpack_from("<H", self.data, self.pos)[0]
-        self.pos += 2
-        return v
-
     def u32(self) -> int:
         v = struct.unpack_from("<I", self.data, self.pos)[0]
         self.pos += 4

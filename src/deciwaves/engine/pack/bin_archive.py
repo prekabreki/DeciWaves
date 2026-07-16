@@ -146,10 +146,8 @@ class BinArchive:
     def __init__(self, path: str):
         self.path = path
         self.encrypted = False
-        self.max_chunk_size = 0
         self.file_table: list[FileEntry] = []
         self.chunk_table = []  # populated lazily for extraction
-        self._raw_header = None
 
     def open_index(self):
         """Parse + decrypt header and file table (enough to look up entries by hash)."""
@@ -166,7 +164,6 @@ class BinArchive:
                 _decrypt_block(key + 1, hv, 4)
             file_table_count = hv[4] | (hv[5] << 32)
             self.chunk_table_count = hv[6]
-            self.max_chunk_size = hv[7]
             # file table: count * 0x20
             tbl = f.read(file_table_count * 0x20)
             for i in range(file_table_count):
