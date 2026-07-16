@@ -13,6 +13,7 @@ import struct
 import hashlib
 import ctypes
 import threading
+from bisect import bisect_left
 from dataclasses import dataclass
 
 MASK64 = 0xFFFFFFFFFFFFFFFF
@@ -157,6 +158,7 @@ class BinArchive:
         self.encrypted = False
         self.file_table: list[FileEntry] = []
         self.chunk_table = []  # populated lazily for extraction
+        self._offsets: list[int] = []  # parallel uncompressed offsets, for bisect lookup
 
     def open_index(self):
         """Parse + decrypt header and file table (enough to look up entries by hash)."""
@@ -200,15 +202,18 @@ class BinArchive:
                     compressed_offset=c[4] | (c[5] << 32),
                     compressed_size=c[6],
                     key_block=struct.pack('<IIII', c[0], c[1], c[2], ck)))
+            # parallel offsets list for O(log n) floor-lookup (mirrors DsarArchive)
+            self._offsets = [c.uncompressed_offset for c in self.chunk_table]
 
     def _find_chunk(self, offset: int) -> int:
-        ct = self.chunk_table
-        for i in range(len(ct)):
-            if i + 1 >= len(ct):
-                return i
-            if ct[i].uncompressed_offset <= offset <= ct[i + 1].uncompressed_offset:
-                return i
-        return len(ct) - 1
+        # bisect replacement for the old O(n) per-read linear scan. The old scan
+        # used an *inclusive* upper bound (`ct[i].off <= offset <= ct[i+1].off`),
+        # so an offset landing exactly on chunk i+1's start resolves to chunk i:
+        # that is bisect_left-1 semantics, NOT DsarArchive's bisect_right-1 (the
+        # inclusive upper bound is why this one differs). `max(0, ...)` clamps the
+        # (unreachable, since chunk 0 starts at offset 0) below-first-chunk case
+        # and matches the old scan's clamp-to-last for offsets past the end.
+        return max(0, bisect_left(self._offsets, offset) - 1)
 
     def extract(self, entry: FileEntry, oodle_dll: str) -> bytes:
         first = self._find_chunk(entry.offset)
