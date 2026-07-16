@@ -4,6 +4,7 @@ must be logged and skipped, not abort the whole index."""
 import csv
 
 from deciwaves.engine.pack.fw_locators import Entry
+from deciwaves.games.hzd import clip_index as clip_index_mod
 from deciwaves.games.hzd.clip_index import ARCHIVE, COLUMNS, build_clip_index
 
 
@@ -97,3 +98,22 @@ def test_build_clip_index_no_failures_no_skips(tmp_path):
     assert skipped == 0
     rows = list(csv.reader(open(out, newline="")))
     assert len(rows) == 3   # header + 2 clips
+
+
+# ---------------------------------------------------------------------------
+# main(): a bad --package (issue #49, mirrors #34's hzd_catalog check) must fail
+# actionably, not with a raw FileNotFoundError traceback from fw_locators.
+# ---------------------------------------------------------------------------
+
+def test_clip_index_main_missing_package_fails_actionably(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    bad_package = tmp_path / "install_root"  # exists, but no PackFileLocators.bin
+    bad_package.mkdir()
+
+    rc = clip_index_mod.main(["--package", str(bad_package)])
+
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "--hzd-package" in captured.out
+    assert "PackFileLocators.bin" in captured.out
+    assert captured.err == ""  # no traceback

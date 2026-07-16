@@ -12,6 +12,15 @@ resolved, dialogue-only core-path list (via ``engine.catalog_io.write_core_paths
 ``games.hzd.wem_metadata`` loads it back (``--cores``) instead of repeating this same
 full-pack content scan (issue #31).
 
+``load_catalog_dict`` (issue #47) is the shared ``catalog.csv -> {line_id: row}``
+loading path for downstream stages (``games.hzd.asr_bind``, ``games.hzd.render``) --
+use it instead of a bare ``{r["line_id"]: r for r in ...}`` dict comprehension, which
+silently keeps only the last row on a line_id collision. Real collisions should be ~0
+now that ``games.hzd.sentence_fw``'s ``sentence#N`` fallback ids are namespaced per
+core; this is the loud guard that proves it (and catches a regression). A workspace
+whose catalog.csv predates issue #47 may still contain un-namespaced fallback ids --
+regenerate it (re-run `hzd catalog`) if this warns.
+
 Invoke as a module (src/ must be on PYTHONPATH)::
 
     PYTHONPATH=src python -m deciwaves.games.hzd.catalog --package <...\\LocalCacheDX12\\package>
@@ -20,21 +29,75 @@ from __future__ import annotations
 import argparse
 import csv
 import os
+import re
 import sys
 
 from deciwaves.engine.catalog_io import (
     CSV_COLUMNS, processed_core_paths, prune_incomplete_rows, write_core_paths_sidecar,
 )
 from deciwaves.games.hzd.sentence_fw import parse_sentences_fw
-from deciwaves.games.hzd.profile import HZD_ANCHORED_PREFIXES, HZD_FAMILY_PREFIXES
+from deciwaves.games.hzd.profile import (
+    HZD_ANCHORED_PREFIXES, HZD_FAMILY_PREFIXES, cores_sidecar_header,
+)
 
 _SENTENCES_PREFIX = "localized/sentences/"
 _SENTENCES_SUFFIX = "/sentences"
+
+# Bare pre-#47 fallback id (no core-hash8 prefix) -- see load_catalog_dict below.
+_BARE_FALLBACK_ID_RE = re.compile(r"^sentence#\d+$")
 
 
 def select_sentence_cores(harvested_paths) -> list[str]:
     """Dialogue sentence cores only (drop voice ``/simpletext`` cores), sorted."""
     return sorted(p for p in harvested_paths if p.endswith(_SENTENCES_SUFFIX))
+
+
+def load_catalog_dict(csv_path: str) -> dict:
+    """Load ``catalog.csv`` keyed by ``line_id``, for stages that need per-line
+    metadata by id (``games.hzd.asr_bind``, ``games.hzd.render``) -- the ONE shared
+    loading path so both stay in sync (issue #47).
+
+    A ``line_id`` collision (two distinct rows sharing the same id -- e.g. a pre-#47
+    workspace's un-namespaced ``sentence#N`` fallback ids from two different cores)
+    resolves the same way a plain dict comprehension always did (last row wins), but is
+    now COUNTED and reported loudly instead of silently swallowed -- since namespacing
+    (see ``games.hzd.sentence_fw._fallback_line_id``) should make real collisions ~0,
+    any reported here is either a stale (pre-#47) workspace or a genuine regression.
+
+    Separately, also counts and loudly reports any BARE ``sentence#N`` id (no
+    core-hash8 prefix) -- catalog.csv resumes append-only, so a HALF-resumed pre-#47
+    workspace can hold old bare ids for already-processed cores while
+    ``wem_metadata.csv`` (rewritten fully every run) has the new namespaced form for
+    the same lines. The line_id collision counter above never fires on that surface
+    (there's no collision WITHIN catalog.csv), yet the join between the two CSVs on
+    line_id silently misses for those rows -- an unnamed line from an already-processed
+    core can drop out of the reel with no error at all. This is the loud guard on that
+    failure mode; regenerating catalog.csv AND wem-metadata.csv together clears it.
+    """
+    with open(csv_path, newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    catalog: dict = {}
+    collisions = 0
+    bare_fallback_ids = 0
+    for r in rows:
+        lid = r["line_id"]
+        if _BARE_FALLBACK_ID_RE.match(lid):
+            bare_fallback_ids += 1
+        if lid in catalog:
+            collisions += 1
+        catalog[lid] = r
+    if collisions:
+        print(f"WARNING: {csv_path}: {collisions} line_id collision(s) on load -- "
+              f"some rows were silently overwritten (last write wins). If this "
+              f"workspace predates issue #47 it may hold un-namespaced sentence#N "
+              f"fallback ids; regenerate it (re-run `hzd catalog` onward) to fix.")
+    if bare_fallback_ids:
+        print(f"WARNING: {csv_path}: {bare_fallback_ids} pre-#47 un-namespaced "
+              f"sentence#N fallback line_id(s) detected -- catalog.csv and "
+              f"wem-metadata.csv must be regenerated TOGETHER (re-run `hzd catalog` "
+              f"then `hzd wem-metadata`), or unnamed lines from already-processed "
+              f"cores may silently drop out of the reel.")
+    return catalog
 
 
 def classify_hzd(core_path: str, family_prefixes: dict | None = None) -> tuple[str, str]:
@@ -116,7 +179,9 @@ def main(argv=None):
     if args.sample_cap > 0:
         print(f"sample-cap active: catalog-cores sidecar left untouched ({args.cores_out})")
     else:
-        write_core_paths_sidecar(args.cores_out, paths)
+        # Header = a locators-file fingerprint (issue #45): lets wem_metadata detect a
+        # sidecar harvested from a since-patched pack instead of trusting it forever.
+        write_core_paths_sidecar(args.cores_out, paths, header=cores_sidecar_header(args.package))
     # The processed sidecar is the SOLE resume authority (issue #21): a core's sidecar
     # line is only written after all of its rows are in the CSV, so a mid-core crash
     # can leave partial CSV rows for a core the sidecar never confirmed. Drop those
@@ -146,7 +211,8 @@ def main(argv=None):
             try:
                 core_bytes = fw.read_core(core_path)
                 rows = parse_sentences_fw(
-                    core_bytes, on_line_error=lambda i, e: line_errs.append((i, e)))
+                    core_bytes, on_line_error=lambda i, e: line_errs.append((i, e)),
+                    core_path=core_path)
             except Exception as exc:  # fail-soft per core
                 cores_failed += 1
                 ferr.write(f"{core_path}\t{type(exc).__name__}: {exc}\n"); ferr.flush()

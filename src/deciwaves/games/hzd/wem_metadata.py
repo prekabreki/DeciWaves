@@ -8,10 +8,20 @@ If that sidecar is missing (e.g. this stage is run standalone, without a prior
 `hzd catalog`), it falls back to rescanning the pack itself via
 ``inventory.harvest_sentence_cores`` + ``catalog.select_sentence_cores`` -- the same
 filter catalog applies -- so `/simpletext` cores (which cannot contain sentences) are
-never handed to the sentence-media parser either way. Like the other resume sidecars
-in this pipeline (``catalog-processed.txt``, the asr-bind transcript checkpoint),
-staleness isn't detected: a present-but-outdated sidecar (e.g. after a game patch
-changed the pack) is trusted as-is -- delete it or re-run `hzd catalog` to refresh it.
+never handed to the sentence-media parser either way.
+
+Staleness detection against the live pack (issue #45): the sidecar carries a
+``games.hzd.profile.cores_sidecar_header`` comment line -- a ``PackFileLocators.bin``
+size:mtime_ns fingerprint stamped by `hzd catalog` at write time. On load:
+* Header present and matching the live pack -> trusted silently (as before).
+* Header present but MISMATCHED (a patch since rewrote the locator index) -> a loud
+  one-line warning naming the sidecar, the sidecar is ignored, and the pack is
+  re-harvested from scratch -- overwriting the sidecar with a fresh header (unless
+  ``--sample-cap`` truncated this run's harvest, in which case the shared sidecar is
+  left untouched rather than poisoned with a partial list, mirroring `hzd catalog`'s
+  own sample-cap guard).
+* No header at all (a sidecar written before issue #45) -> staleness can't be checked;
+  warn once and TRUST it as-is, so no pre-existing workspace is forced to regenerate.
 
 Per-core and per-line parse failures are recorded to ``--errors`` (mirroring
 `hzd catalog`'s own errors file) rather than silently dropped -- this is the same
@@ -23,8 +33,10 @@ import argparse
 import csv
 import os
 
-from deciwaves.engine.catalog_io import read_core_paths_sidecar
-from deciwaves.games.hzd.profile import build_profile
+from deciwaves.engine.catalog_io import (
+    read_core_paths_sidecar, read_core_paths_sidecar_header, write_core_paths_sidecar,
+)
+from deciwaves.games.hzd.profile import build_profile, cores_sidecar_header
 from deciwaves.games.hzd.inventory import harvest_sentence_cores
 from deciwaves.games.hzd.catalog import select_sentence_cores
 from deciwaves.games.hzd.sentence_fw import parse_sentence_media
@@ -79,8 +91,10 @@ def main(argv=None):
                          "rescanning the pack (--sample-cap applies to that fallback only)")
     ap.add_argument("--errors", default="out/hzd/wem-metadata-errors.log")
     ap.add_argument("--sample-cap", type=int, default=0,
-                    help="0 = scan the whole pack; >0 caps records scanned during the "
-                         "rescan fallback (ignored when --cores sidecar is found)")
+                    help="0 = scan the whole pack; >0 caps records scanned during a "
+                         "rescan (the missing-sidecar fallback, or a stale-sidecar "
+                         "regeneration -- ignored when --cores sidecar is found AND "
+                         "trusted)")
     a = ap.parse_args(argv)
 
     profile = build_profile(a.package)
@@ -88,12 +102,40 @@ def main(argv=None):
 
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
 
+    # Staleness check (issue #45): a header-carrying sidecar is compared against the
+    # live pack's locators fingerprint; see the module docstring for the 3 outcomes.
     paths = read_core_paths_sidecar(a.cores)
+    stale = False
+    if paths is not None:
+        header = read_core_paths_sidecar_header(a.cores)
+        if header is None:
+            print(f"WARNING: {a.cores} has no locators fingerprint header (written "
+                  f"before issue #45) -- staleness can't be checked against the live "
+                  f"pack; trusting it as-is. Re-run `hzd catalog` to add one.")
+        else:
+            expected = cores_sidecar_header(a.package)
+            if header != expected:
+                print(f"WARNING: {a.cores} is STALE (locators fingerprint changed -- "
+                      f"sidecar has {header!r}, pack now has {expected!r}, likely a "
+                      f"game patch) -- ignoring it and re-harvesting the pack from "
+                      f"scratch.")
+                paths = None
+                stale = True
+
     if paths is None:
-        print(f"wem-metadata: no core-path sidecar at {a.cores} -- rescanning the pack "
-              f"(run `hzd catalog` first to skip this full-pack scan)", flush=True)
+        if not stale:
+            print(f"wem-metadata: no core-path sidecar at {a.cores} -- rescanning the pack "
+                  f"(run `hzd catalog` first to skip this full-pack scan)", flush=True)
         harvested = harvest_sentence_cores(fw, sample_cap=a.sample_cap or None)
         paths = select_sentence_cores(harvested)
+        if stale:
+            if a.sample_cap:
+                print(f"sample-cap active: stale {a.cores} left untouched, not "
+                      f"overwritten with this run's capped/truncated re-harvest "
+                      f"(re-run with --sample-cap 0 to refresh it)")
+            else:
+                write_core_paths_sidecar(a.cores, paths, header=cores_sidecar_header(a.package))
+                print(f"wem-metadata: refreshed {a.cores} with {len(paths)} core(s)")
 
     cores_failed = 0
     lines_written = 0
@@ -106,7 +148,8 @@ def main(argv=None):
             try:
                 core_bytes = fw.read_core(core_path)
                 media = parse_sentence_media(
-                    core_bytes, on_line_error=lambda i, e: line_errs.append((i, e)))
+                    core_bytes, on_line_error=lambda i, e: line_errs.append((i, e)),
+                    core_path=core_path)
             except Exception as exc:  # fail-soft per core, like catalog.py
                 cores_failed += 1
                 ferr.write(f"{core_path}\t{type(exc).__name__}: {exc}\n"); ferr.flush()

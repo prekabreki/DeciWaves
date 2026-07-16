@@ -143,3 +143,71 @@ def test_parse_sentence_ids_no_sound_resource_reports_error():
     assert ids == []
     assert len(errors) == 1
     assert errors[0][0] == 0
+
+
+# ---------------------------------------------------------------------------
+# Fallback `sentence#N` line-id namespacing (issue #47): a SentenceResource with no
+# internal name gets `sentence#N`, unique only within its own core pre-#47 -- two
+# different cores' Nth unnamed line collided on the exact same fallback id, and
+# downstream dict-keyed-by-line_id consumers silently kept only the last one.
+# ---------------------------------------------------------------------------
+
+def _unnamed_line_core_bytes():
+    """A single SentenceResource with an EMPTY internal name -- `_read_name` returns ""
+    for a 0-length name field, so `line_id` falls through to the `sentence#N` path."""
+    return b"".join([
+        _wrap(SENTENCE_RESOURCE, _sentence_body(SENTENCE_UUID, "", TEXT_GUID, VOICE_PATH)),
+        _wrap(LOCALIZED_TEXT_RESOURCE, _text_body(TEXT_GUID, ENGLISH_TEXT)),
+        _wrap(LOCALIZED_SIMPLE_SOUND_RESOURCE, _sound_body(SOUND_GUID, SENTENCE_UUID)),
+    ])
+
+
+def test_fallback_id_named_lines_are_untouched_by_core_path():
+    """A proper (non-fallback) id must never be namespaced -- only the sentence#N
+    fallback path is core_path-dependent."""
+    lines_a = parse_sentences_fw(_one_line_core_bytes(), core_path="core/a/sentences")
+    lines_b = parse_sentences_fw(_one_line_core_bytes(), core_path="core/b/sentences")
+    assert lines_a[0].line_id == lines_b[0].line_id == NAME
+
+
+def test_fallback_id_differs_across_cores_for_the_same_index():
+    """The actual bug (issue #47): index 0's fallback id in two DIFFERENT cores must no
+    longer collide once each is namespaced by its own core_path."""
+    id_a = parse_sentences_fw(_unnamed_line_core_bytes(), core_path="localized/sentences/a/sentences")
+    id_b = parse_sentences_fw(_unnamed_line_core_bytes(), core_path="localized/sentences/b/sentences")
+    assert id_a[0].line_id != id_b[0].line_id
+    assert id_a[0].line_id.endswith("#sentence#0")
+    assert id_b[0].line_id.endswith("#sentence#0")
+
+
+def test_fallback_id_is_deterministic_for_the_same_core_path():
+    """Namespacing must be stable across separate runs/processes (a hash of the core
+    path, not e.g. Python's randomized str hash() or an object id)."""
+    core_path = "localized/sentences/mq04/scene/sentences"
+    first = parse_sentences_fw(_unnamed_line_core_bytes(), core_path=core_path)
+    second = parse_sentences_fw(_unnamed_line_core_bytes(), core_path=core_path)
+    assert first[0].line_id == second[0].line_id
+
+
+def test_fallback_id_default_core_path_matches_pre_47_bare_form_when_unset():
+    """Callers that don't pass core_path (e.g. direct unit tests of parsing logic) get
+    a stable, harmless default rather than an error -- the namespace prefix is simply
+    constant across such calls."""
+    lines = parse_sentences_fw(_unnamed_line_core_bytes())
+    assert lines[0].line_id.endswith("#sentence#0")
+
+
+def test_parse_sentence_ids_fallback_id_is_also_namespaced():
+    id_a = parse_sentence_ids(_unnamed_line_core_bytes(), core_path="a/sentences")
+    id_b = parse_sentence_ids(_unnamed_line_core_bytes(), core_path="b/sentences")
+    assert id_a[0].line_id != id_b[0].line_id
+
+
+def test_parse_sentence_media_fallback_id_matches_parse_sentence_ids():
+    """parse_sentence_media must use the exact same namespaced fallback id as
+    parse_sentence_ids for the same core_path -- it's the single shared generator, not
+    re-derived -- so the two stages' outputs join on line_id."""
+    core_path = "localized/sentences/mq07/scene/sentences"
+    ids = parse_sentence_ids(_unnamed_line_core_bytes(), core_path=core_path)
+    media = parse_sentence_media(_unnamed_line_core_bytes(), core_path=core_path)
+    assert media[0].line_id == ids[0].line_id

@@ -7,7 +7,10 @@ import csv
 
 
 from deciwaves.games.hzd import wem_metadata
-from deciwaves.engine.catalog_io import write_core_paths_sidecar
+from deciwaves.engine.catalog_io import (
+    write_core_paths_sidecar, read_core_paths_sidecar, read_core_paths_sidecar_header,
+)
+from deciwaves.games.hzd.profile import cores_sidecar_header
 from deciwaves.games.hzd.sentence_fw import LineMedia
 
 
@@ -52,6 +55,18 @@ def _write_minimal_catalog(path, line_ids):
             w.writerow([lid, "main_quest", "Hello"])
 
 
+def _real_package_dir(tmp_path, name="pkg"):
+    """A real directory shaped like a valid HZDR package dir (has
+    PackFileLocators.bin), needed wherever locators_fingerprint/cores_sidecar_header
+    must compute for real -- build_profile itself stays mocked via _patch_profile."""
+    pkg = tmp_path / name
+    pkg.mkdir(exist_ok=True)
+    locators = pkg / "PackFileLocators.bin"
+    if not locators.is_file():
+        locators.write_bytes(b"x")
+    return str(pkg)
+
+
 def _argv(tmp_path, cores, catalog=None, out=None, errors=None, extra=()):
     catalog = catalog or (tmp_path / "catalog.csv")
     out = out or (tmp_path / "wem-metadata.csv")
@@ -79,7 +94,7 @@ def test_uses_cores_sidecar_and_never_rescans(tmp_path, monkeypatch):
     _forbid_rescan(monkeypatch)
     monkeypatch.setattr(
         wem_metadata, "parse_sentence_media",
-        lambda core_bytes, on_line_error=None: [LineMedia("L1", 0, 100, 530)])
+        lambda core_bytes, on_line_error=None, core_path=None: [LineMedia("L1", 0, 100, 530)])
 
     catalog = tmp_path / "catalog.csv"
     _write_minimal_catalog(catalog, ["L1"])
@@ -104,7 +119,7 @@ def test_main_accepts_bare_filename_out(tmp_path, monkeypatch):
     _forbid_rescan(monkeypatch)
     monkeypatch.setattr(
         wem_metadata, "parse_sentence_media",
-        lambda core_bytes, on_line_error=None: [LineMedia("L1", 0, 100, 530)])
+        lambda core_bytes, on_line_error=None, core_path=None: [LineMedia("L1", 0, 100, 530)])
 
     catalog = tmp_path / "catalog.csv"
     _write_minimal_catalog(catalog, ["L1"])
@@ -137,7 +152,7 @@ def test_falls_back_to_rescan_and_still_excludes_simpletext_when_sidecar_missing
     monkeypatch.setattr(wem_metadata, "harvest_sentence_cores", _fake_harvest)
     monkeypatch.setattr(
         wem_metadata, "parse_sentence_media",
-        lambda core_bytes, on_line_error=None: [LineMedia("L1", 0, 100, 530)])
+        lambda core_bytes, on_line_error=None, core_path=None: [LineMedia("L1", 0, 100, 530)])
 
     missing_sidecar = tmp_path / "no-such-cores.txt"
     catalog = tmp_path / "catalog.csv"
@@ -153,6 +168,135 @@ def test_falls_back_to_rescan_and_still_excludes_simpletext_when_sidecar_missing
     assert reader.read_calls == ["localized/sentences/mq/scene/sentences"]
     printed = capsys.readouterr().out.lower()
     assert "rescan" in printed
+
+
+# ---------------------------------------------------------------------------
+# (a2) staleness detection (issue #45): the sidecar's locators-fingerprint header
+# tells wem-metadata whether catalog-cores.txt still matches the live pack.
+# ---------------------------------------------------------------------------
+
+def test_matching_locators_header_trusts_sidecar_silently(tmp_path, monkeypatch, capsys):
+    pkg = _real_package_dir(tmp_path)
+    cores_sidecar = tmp_path / "catalog-cores.txt"
+    write_core_paths_sidecar(str(cores_sidecar), ["localized/sentences/mq/scene/sentences"],
+                             header=cores_sidecar_header(pkg))
+
+    reader = _FakeReader({"localized/sentences/mq/scene/sentences": b"CORE_BYTES"})
+    _patch_profile(monkeypatch, reader)
+    _forbid_rescan(monkeypatch)
+    monkeypatch.setattr(
+        wem_metadata, "parse_sentence_media",
+        lambda core_bytes, on_line_error=None, core_path=None: [LineMedia("L1", 0, 100, 530)])
+
+    catalog = tmp_path / "catalog.csv"
+    _write_minimal_catalog(catalog, ["L1"])
+    out = tmp_path / "wem-metadata.csv"
+
+    argv = _argv(tmp_path, cores_sidecar, catalog=catalog, out=out)
+    argv[argv.index("--package") + 1] = pkg
+    rc = wem_metadata.main(argv)
+
+    assert rc == 0
+    rows = list(csv.DictReader(open(out, encoding="utf-8")))
+    assert [r["line_id"] for r in rows] == ["L1"]
+    printed = capsys.readouterr().out
+    assert "STALE" not in printed.upper()
+    assert "WARNING" not in printed
+
+
+def test_mismatched_locators_header_warns_ignores_and_regenerates(tmp_path, monkeypatch, capsys):
+    pkg = _real_package_dir(tmp_path)
+    cores_sidecar = tmp_path / "catalog-cores.txt"
+    write_core_paths_sidecar(str(cores_sidecar), ["localized/sentences/stale/scene/sentences"],
+                             header="# locators: 999:999")  # deliberately wrong fingerprint
+
+    harvested = ["localized/sentences/fresh/scene/sentences"]
+    reader = _FakeReader({"localized/sentences/fresh/scene/sentences": b"CORE_BYTES"})
+    _patch_profile(monkeypatch, reader)
+    monkeypatch.setattr(wem_metadata, "harvest_sentence_cores", lambda fw, sample_cap=None: harvested)
+    monkeypatch.setattr(
+        wem_metadata, "parse_sentence_media",
+        lambda core_bytes, on_line_error=None, core_path=None: [LineMedia("L1", 0, 100, 530)])
+
+    catalog = tmp_path / "catalog.csv"
+    _write_minimal_catalog(catalog, ["L1"])
+    out = tmp_path / "wem-metadata.csv"
+
+    argv = _argv(tmp_path, cores_sidecar, catalog=catalog, out=out)
+    argv[argv.index("--package") + 1] = pkg
+    rc = wem_metadata.main(argv)
+
+    assert rc == 0
+    printed = capsys.readouterr().out
+    assert "STALE" in printed.upper()
+    assert str(cores_sidecar) in printed
+    # the stale sidecar's list was ignored -- only the fresh re-harvest's core was read
+    assert reader.read_calls == ["localized/sentences/fresh/scene/sentences"]
+    # the sidecar is overwritten with a fresh header + fresh path list
+    assert read_core_paths_sidecar_header(str(cores_sidecar)) == cores_sidecar_header(pkg)
+    assert read_core_paths_sidecar(str(cores_sidecar)) == harvested
+
+
+def test_mismatched_header_with_sample_cap_does_not_overwrite_sidecar(tmp_path, monkeypatch, capsys):
+    """A capped re-harvest is truncated -- overwriting the shared sidecar with it would
+    poison it the same way an uncapped `hzd catalog` run already guards against
+    (c50547e). The stale sidecar is left exactly as-is; only this run's own output uses
+    the (possibly truncated) fresh list."""
+    pkg = _real_package_dir(tmp_path)
+    cores_sidecar = tmp_path / "catalog-cores.txt"
+    write_core_paths_sidecar(str(cores_sidecar), ["localized/sentences/stale/scene/sentences"],
+                             header="# locators: 999:999")
+    before = cores_sidecar.read_bytes()
+
+    harvested = ["localized/sentences/fresh/scene/sentences"]
+    reader = _FakeReader({"localized/sentences/fresh/scene/sentences": b"CORE_BYTES"})
+    _patch_profile(monkeypatch, reader)
+    monkeypatch.setattr(wem_metadata, "harvest_sentence_cores", lambda fw, sample_cap=None: harvested)
+    monkeypatch.setattr(
+        wem_metadata, "parse_sentence_media",
+        lambda core_bytes, on_line_error=None, core_path=None: [LineMedia("L1", 0, 100, 530)])
+
+    catalog = tmp_path / "catalog.csv"
+    _write_minimal_catalog(catalog, ["L1"])
+    out = tmp_path / "wem-metadata.csv"
+
+    argv = _argv(tmp_path, cores_sidecar, catalog=catalog, out=out, extra=["--sample-cap", "1"])
+    argv[argv.index("--package") + 1] = pkg
+    rc = wem_metadata.main(argv)
+
+    assert rc == 0
+    assert cores_sidecar.read_bytes() == before   # untouched, not poisoned by a capped re-harvest
+    assert "sample-cap" in capsys.readouterr().out.lower()
+
+
+def test_legacy_sidecar_with_no_header_is_trusted_with_one_warning(tmp_path, monkeypatch, capsys):
+    """Back-compat (issue #45): a sidecar written before this feature existed has no
+    header at all -- staleness can't be checked, so it's trusted as-is (no forced
+    regeneration on every pre-existing workspace), but a warning is printed once."""
+    pkg = _real_package_dir(tmp_path)
+    cores_sidecar = tmp_path / "catalog-cores.txt"
+    write_core_paths_sidecar(str(cores_sidecar), ["localized/sentences/mq/scene/sentences"])  # no header
+
+    reader = _FakeReader({"localized/sentences/mq/scene/sentences": b"CORE_BYTES"})
+    _patch_profile(monkeypatch, reader)
+    _forbid_rescan(monkeypatch)
+    monkeypatch.setattr(
+        wem_metadata, "parse_sentence_media",
+        lambda core_bytes, on_line_error=None, core_path=None: [LineMedia("L1", 0, 100, 530)])
+
+    catalog = tmp_path / "catalog.csv"
+    _write_minimal_catalog(catalog, ["L1"])
+    out = tmp_path / "wem-metadata.csv"
+
+    argv = _argv(tmp_path, cores_sidecar, catalog=catalog, out=out)
+    argv[argv.index("--package") + 1] = pkg
+    rc = wem_metadata.main(argv)
+
+    assert rc == 0
+    rows = list(csv.DictReader(open(out, encoding="utf-8")))
+    assert [r["line_id"] for r in rows] == ["L1"]   # still trusted/used, not re-harvested
+    printed = capsys.readouterr().out
+    assert printed.count("can't be checked") == 1
 
 
 # ---------------------------------------------------------------------------
@@ -173,7 +317,7 @@ def test_records_core_read_error_and_continues_with_other_cores(tmp_path, monkey
     _forbid_rescan(monkeypatch)
     monkeypatch.setattr(
         wem_metadata, "parse_sentence_media",
-        lambda core_bytes, on_line_error=None: [LineMedia("L1", 0, 100, 530)])
+        lambda core_bytes, on_line_error=None, core_path=None: [LineMedia("L1", 0, 100, 530)])
 
     catalog = tmp_path / "catalog.csv"
     _write_minimal_catalog(catalog, ["L1"])
@@ -197,7 +341,7 @@ def test_records_line_level_parse_error(tmp_path, monkeypatch):
     _patch_profile(monkeypatch, reader)
     _forbid_rescan(monkeypatch)
 
-    def _fake_parse(core_bytes, on_line_error=None):
+    def _fake_parse(core_bytes, on_line_error=None, core_path=None):
         if on_line_error:
             on_line_error("L_broken", "no sound body for sentence uuid")
         return []

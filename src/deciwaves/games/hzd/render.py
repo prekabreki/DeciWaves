@@ -32,6 +32,7 @@ from deciwaves.engine.render import (
 from deciwaves.engine.parallel import KeyedLocks, default_jobs
 from deciwaves.engine.pack.fw_package import FwPackage
 from deciwaves.games.hzd.atrac9 import decode_wem_to_wav, Atrac9Error
+from deciwaves.games.hzd.catalog import load_catalog_dict
 from deciwaves.games.hzd.profile import VOICE_ARCHIVE as ARCHIVE
 
 BOUND_TIERS = {"S", "1", "2", "E"}   # E = recovered by bucket elimination (mis-bind fix)
@@ -209,7 +210,13 @@ def main(argv=None):
                          "--jobs 1 forces the old serial decode")
     a = ap.parse_args(argv)
 
-    catalog = {r["line_id"]: r for r in _load_csv(a.catalog)}
+    from deciwaves.games.hzd.profile import hzd_package_error
+    err = hzd_package_error(a.package)
+    if err:
+        print(err)
+        return 1
+
+    catalog = load_catalog_dict(a.catalog)
     clip_index = {int(c["clip_row"]): c for c in _load_csv(a.clip_index)}
     if a.spine_only:
         episode_map = None

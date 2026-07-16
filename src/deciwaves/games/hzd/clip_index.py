@@ -67,6 +67,13 @@ def main(argv=None):
                          f"Default min(8, cpu_count)={default_jobs()}; --jobs 1 forces "
                          "the old serial pass")
     a = ap.parse_args(argv)
+
+    from deciwaves.games.hzd.profile import hzd_package_error
+    err = hzd_package_error(a.package)
+    if err:
+        print(err)
+        return 1
+
     pkg = FwPackage(a.package)                       # composes FwLocators + DsarArchive
     dsar = pkg.dsar_for(ARCHIVE)                     # lazy-cached DsarArchive
     entries = pkg.locators.entries(ARCHIVE)

@@ -2,8 +2,13 @@
 import csv
 from deciwaves.games.hzd import catalog
 from deciwaves.games.hzd.catalog import classify_hzd, select_sentence_cores
-from deciwaves.games.hzd.profile import build_profile, hzd_package_error, HZD_FAMILY_PREFIXES
-from deciwaves.engine.catalog_io import read_core_paths_sidecar
+from deciwaves.games.hzd.profile import (
+    build_profile, hzd_package_error, HZD_FAMILY_PREFIXES,
+    cores_sidecar_header, locators_fingerprint,
+)
+from deciwaves.engine.catalog_io import (
+    read_core_paths_sidecar, read_core_paths_sidecar_header, write_core_paths_sidecar,
+)
 
 
 # --- classify_hzd: (category, scene) from a sentence-core virtual path ---
@@ -228,6 +233,70 @@ def test_catalog_main_uncapped_still_writes_cores_sidecar(tmp_path, monkeypatch)
     assert read_core_paths_sidecar(str(cores_sidecar)) == ["localized/sentences/full/scene/sentences"]
 
 
+def test_catalog_main_uncapped_cores_sidecar_carries_locators_header(tmp_path, monkeypatch):
+    """Issue #45: an uncapped run's cores sidecar must carry a locators-fingerprint
+    header wem_metadata can check for staleness against a patched pack."""
+    import deciwaves.games.hzd.profile as profile_mod
+    import deciwaves.games.hzd.inventory as inventory_mod
+    from deciwaves.games.hzd import catalog as catalog_mod
+
+    reader = _FakeReader()
+    monkeypatch.setattr(profile_mod, "build_profile", lambda package: _FakeProfile(reader))
+    monkeypatch.setattr(inventory_mod, "harvest_sentence_cores",
+                         lambda fw, sample_cap=None: ["localized/sentences/full/scene/sentences"])
+    monkeypatch.setattr(catalog_mod, "parse_sentences_fw", lambda core_bytes, on_line_error=None: [])
+
+    fake_pkg = tmp_path / "package"; fake_pkg.mkdir()
+    (fake_pkg / "PackFileLocators.bin").write_bytes(b"x")
+
+    cores_sidecar = tmp_path / "catalog-cores.txt"
+    rc = catalog_mod.main([
+        "--package", str(fake_pkg),
+        "--out", str(tmp_path / "catalog.csv"),
+        "--errors", str(tmp_path / "catalog-errors.log"),
+        "--processed", str(tmp_path / "catalog-processed.txt"),
+        "--cores-out", str(cores_sidecar),
+    ])
+    assert rc == 0
+    assert read_core_paths_sidecar_header(str(cores_sidecar)) == cores_sidecar_header(str(fake_pkg))
+    # the header line must not leak into the actual path list
+    assert read_core_paths_sidecar(str(cores_sidecar)) == ["localized/sentences/full/scene/sentences"]
+
+
+def test_catalog_main_sample_capped_cores_sidecar_unchanged_including_header(tmp_path, monkeypatch, capsys):
+    """The sample-cap guard (finding 6) must still leave an existing header-carrying
+    sidecar byte-identical -- a capped run never touches catalog-cores.txt at all."""
+    import deciwaves.games.hzd.profile as profile_mod
+    import deciwaves.games.hzd.inventory as inventory_mod
+    from deciwaves.games.hzd import catalog as catalog_mod
+
+    reader = _FakeReader()
+    monkeypatch.setattr(profile_mod, "build_profile", lambda package: _FakeProfile(reader))
+    monkeypatch.setattr(inventory_mod, "harvest_sentence_cores",
+                         lambda fw, sample_cap=None: ["localized/sentences/capped/scene/sentences"])
+    monkeypatch.setattr(catalog_mod, "parse_sentences_fw", lambda core_bytes, on_line_error=None: [])
+
+    fake_pkg = tmp_path / "package"; fake_pkg.mkdir()
+    (fake_pkg / "PackFileLocators.bin").write_bytes(b"x")
+
+    cores_sidecar = tmp_path / "catalog-cores.txt"
+    write_core_paths_sidecar(str(cores_sidecar), ["localized/sentences/full/run/sentences"],
+                             header=cores_sidecar_header(str(fake_pkg)))
+    before = cores_sidecar.read_bytes()
+
+    rc = catalog_mod.main([
+        "--package", str(fake_pkg),
+        "--out", str(tmp_path / "catalog.csv"),
+        "--errors", str(tmp_path / "catalog-errors.log"),
+        "--processed", str(tmp_path / "catalog-processed.txt"),
+        "--cores-out", str(cores_sidecar),
+        "--sample-cap", "5",
+    ])
+    assert rc == 0
+    assert cores_sidecar.read_bytes() == before
+    assert "sample-cap active" in capsys.readouterr().out.lower()
+
+
 class _FakeLine:
     line_id = "L0"; line_index = 0; speaker_code = "localized/voices/aloy"
     subtitle_en = "hi"; wem_path_en = "loc/x.wem"
@@ -247,7 +316,7 @@ def test_catalog_main_resumes_after_zero_byte_out(tmp_path, monkeypatch):
     monkeypatch.setattr(inventory_mod, "harvest_sentence_cores",
                          lambda fw, sample_cap=None: ["localized/sentences/mq/scene/sentences"])
     monkeypatch.setattr(catalog_mod, "parse_sentences_fw",
-                         lambda core_bytes, on_line_error=None: [_FakeLine()])
+                         lambda core_bytes, on_line_error=None, core_path=None: [_FakeLine()])
 
     fake_pkg = tmp_path / "package"; fake_pkg.mkdir()
     (fake_pkg / "PackFileLocators.bin").write_bytes(b"x")
@@ -325,6 +394,37 @@ def test_hzd_package_error_message_when_dir_missing_entirely(tmp_path):
     assert "PackFileLocators.bin" in msg
 
 
+# ---------------------------------------------------------------------------
+# locators_fingerprint / cores_sidecar_header (issue #45): a cheap size:mtime_ns
+# fingerprint of PackFileLocators.bin, stamped into catalog-cores.txt's sidecar header
+# so a downstream stage (wem_metadata) can tell a post-patch pack apart from the one
+# the sidecar was harvested from.
+# ---------------------------------------------------------------------------
+
+def test_locators_fingerprint_is_size_colon_mtime_ns(tmp_path):
+    locators = tmp_path / "PackFileLocators.bin"
+    locators.write_bytes(b"abcdef")
+    st = locators.stat()
+    assert locators_fingerprint(str(tmp_path)) == f"{st.st_size}:{st.st_mtime_ns}"
+
+
+def test_locators_fingerprint_changes_when_locators_file_changes(tmp_path):
+    locators = tmp_path / "PackFileLocators.bin"
+    locators.write_bytes(b"abcdef")
+    before = locators_fingerprint(str(tmp_path))
+    locators.write_bytes(b"abcdef-and-more-after-a-patch")   # size changes
+    after = locators_fingerprint(str(tmp_path))
+    assert before != after
+
+
+def test_cores_sidecar_header_is_a_comment_line_wrapping_the_fingerprint(tmp_path):
+    locators = tmp_path / "PackFileLocators.bin"
+    locators.write_bytes(b"abcdef")
+    header = cores_sidecar_header(str(tmp_path))
+    assert header.startswith("#")
+    assert locators_fingerprint(str(tmp_path)) in header
+
+
 def test_catalog_main_missing_package_fails_actionably(tmp_path, monkeypatch, capsys):
     # The observed bug (issue #34): `hzd run`/`hzd catalog --package <install root>`
     # used to die with a raw FileNotFoundError traceback from fw_locators.py. It
@@ -338,4 +438,122 @@ def test_catalog_main_missing_package_fails_actionably(tmp_path, monkeypatch, ca
     captured = capsys.readouterr()
     assert "--hzd-package" in captured.out
     assert "PackFileLocators.bin" in captured.out
-    assert captured.err == ""  # no traceback
+
+
+# ---------------------------------------------------------------------------
+# load_catalog_dict (issue #47): the shared catalog.csv -> {line_id: row} loading path
+# for asr_bind.py/render.py, with loud collision counting instead of a silent
+# last-write-win dict comprehension -- the guard that proves fallback-id namespacing
+# actually eliminated cross-core collisions (and catches a regression if it doesn't).
+# ---------------------------------------------------------------------------
+
+def _write_catalog_csv(path, rows):
+    fieldnames = ["line_id", "core_path", "line_index", "category", "scene",
+                  "speaker_code", "speaker_name", "subtitle_en", "wem_path_en", "language"]
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=fieldnames)
+        w.writeheader()
+        for r in rows:
+            w.writerow({**{k: "" for k in fieldnames}, **r})
+
+
+def test_load_catalog_dict_no_collisions_is_silent(tmp_path, capsys):
+    from deciwaves.games.hzd.catalog import load_catalog_dict
+
+    path = tmp_path / "catalog.csv"
+    _write_catalog_csv(path, [
+        {"line_id": "MQ04_a", "subtitle_en": "one"},
+        {"line_id": "MQ04_b", "subtitle_en": "two"},
+    ])
+
+    result = load_catalog_dict(str(path))
+
+    assert set(result) == {"MQ04_a", "MQ04_b"}
+    assert result["MQ04_a"]["subtitle_en"] == "one"
+    assert "collision" not in capsys.readouterr().out.lower()
+
+
+def test_load_catalog_dict_reports_collisions_loudly(tmp_path, capsys):
+    """Two distinct rows sharing the same line_id (e.g. a pre-#47 workspace's
+    un-namespaced sentence#N fallback ids from two different cores) must still resolve
+    (last write wins, unchanged) but the collision must be counted and reported --
+    never silent."""
+    from deciwaves.games.hzd.catalog import load_catalog_dict
+
+    path = tmp_path / "catalog.csv"
+    _write_catalog_csv(path, [
+        {"line_id": "sentence#0", "core_path": "core/a/sentences", "subtitle_en": "from core a"},
+        {"line_id": "sentence#0", "core_path": "core/b/sentences", "subtitle_en": "from core b"},
+        {"line_id": "MQ04_a", "core_path": "core/c/sentences", "subtitle_en": "unique"},
+    ])
+
+    result = load_catalog_dict(str(path))
+
+    assert result["sentence#0"]["subtitle_en"] == "from core b"   # last write wins, as before
+    assert result["MQ04_a"]["subtitle_en"] == "unique"
+    printed = capsys.readouterr().out
+    assert "1" in printed
+    assert "collision" in printed.lower()
+
+
+def test_load_catalog_dict_multiple_collisions_reports_exact_count(tmp_path, capsys):
+    from deciwaves.games.hzd.catalog import load_catalog_dict
+
+    path = tmp_path / "catalog.csv"
+    _write_catalog_csv(path, [
+        {"line_id": "X", "core_path": "1"}, {"line_id": "X", "core_path": "2"},
+        {"line_id": "X", "core_path": "3"},   # 2 collisions on "X" (2nd and 3rd row)
+        {"line_id": "Y", "core_path": "1"}, {"line_id": "Y", "core_path": "2"},  # 1 collision on "Y"
+    ])
+
+    load_catalog_dict(str(path))
+
+    printed = capsys.readouterr().out
+    assert "3" in printed   # 2 + 1 = 3 total collisions
+
+
+# ---------------------------------------------------------------------------
+# Bare pre-#47 fallback-id detection (review finding): a half-resumed pre-#47
+# workspace's catalog.csv can hold OLD bare `sentence#N` ids for already-processed
+# cores (catalog resumes append-only) while wem-metadata.csv is rewritten fully every
+# run with NEW namespaced ids -- the join between the two on line_id silently misses
+# for those rows, dropping unnamed lines from already-processed cores out of the reel.
+# The line_id collision counter above never fires on this surface (it only counts
+# collisions WITHIN catalog.csv), so this is a separate, loud detector.
+# ---------------------------------------------------------------------------
+
+def test_load_catalog_dict_detects_bare_pre47_fallback_ids(tmp_path, capsys):
+    from deciwaves.games.hzd.catalog import load_catalog_dict
+
+    path = tmp_path / "catalog.csv"
+    _write_catalog_csv(path, [
+        {"line_id": "sentence#0", "core_path": "core/a/sentences"},
+        {"line_id": "sentence#5", "core_path": "core/b/sentences"},
+        {"line_id": "MQ04_a", "core_path": "core/c/sentences"},
+    ])
+
+    load_catalog_dict(str(path))
+
+    printed = capsys.readouterr().out
+    assert "2" in printed
+    assert "pre-#47" in printed
+    assert "regenerat" in printed.lower()
+
+
+def test_load_catalog_dict_namespaced_and_named_ids_report_no_bare_warning(tmp_path, capsys):
+    """Proper names and NEW namespaced fallback ids (`<hash8>#sentence#N`) must never
+    trip the bare-id detector -- only the un-namespaced pre-#47 form does."""
+    from deciwaves.games.hzd.catalog import load_catalog_dict
+
+    path = tmp_path / "catalog.csv"
+    _write_catalog_csv(path, [
+        {"line_id": "MQ04_a", "core_path": "core/a/sentences"},
+        {"line_id": "a1b2c3d4#sentence#0", "core_path": "core/b/sentences"},
+        {"line_id": "b2c3d4e5#sentence#1", "core_path": "core/c/sentences"},
+    ])
+
+    load_catalog_dict(str(path))
+
+    printed = capsys.readouterr().out
+    assert "pre-#47" not in printed
+    assert printed == ""

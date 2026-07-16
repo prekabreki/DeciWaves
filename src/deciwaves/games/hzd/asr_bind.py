@@ -11,6 +11,7 @@ from deciwaves.engine.pack.fw_package import FwPackage
 from deciwaves.games.hzd import match
 from deciwaves.games.hzd.atrac9 import Atrac9Error, decode_wem_to_wav
 from deciwaves.games.hzd.binding import build_buckets, relevant_buckets, structural_binds
+from deciwaves.games.hzd.catalog import load_catalog_dict
 from deciwaves.games.hzd.profile import VOICE_ARCHIVE as ARCHIVE
 
 # Single source of truth for the incremental checkpoint sidecar's default path --
@@ -106,7 +107,7 @@ def main(argv=None):
                          "ones (default skips pure ambient/bark collision buckets)")
     a = ap.parse_args(argv)
 
-    cat = {r["line_id"]: r for r in _load_csv(a.catalog)}
+    cat = load_catalog_dict(a.catalog)
     story_ids = {lid for lid, r in cat.items()
                  if r.get("category") != "ambient" and r.get("subtitle_en", "").strip()}
     lines = [{**m, **{"subtitle_en": cat.get(m["line_id"], {}).get("subtitle_en", "")}}
@@ -169,6 +170,11 @@ def main(argv=None):
             # pure reuse mode (no --package): clips missing from the sidecar simply stay
             # unbound this run -- there's nothing to transcribe them with.
         else:
+            from deciwaves.games.hzd.profile import hzd_package_error
+            err = hzd_package_error(a.package)
+            if err:
+                print(err)
+                return 1
             dsar = FwPackage(a.package).dsar_for(ARCHIVE)
             model = asr.load_model()
             os.makedirs(os.path.dirname(os.path.abspath(a.transcripts_out)), exist_ok=True)
