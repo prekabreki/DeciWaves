@@ -147,7 +147,8 @@ def test_catalog_main_writes_cores_sidecar_with_dialogue_only_paths(tmp_path, mo
     monkeypatch.setattr(profile_mod, "build_profile", lambda package: _FakeProfile(reader))
     monkeypatch.setattr(inventory_mod, "harvest_sentence_cores",
                          lambda fw, sample_cap=None: harvested)
-    monkeypatch.setattr(catalog_mod, "parse_sentences_fw", lambda core_bytes, on_line_error=None: [])
+    monkeypatch.setattr(catalog_mod, "parse_sentences_fw",
+                         lambda core_bytes, on_line_error=None, core_path=None: [])
 
     # catalog.main() now validates --package up front (issue #34), so the fake
     # package must look like a real LocalCacheDX12\package dir.
@@ -156,14 +157,18 @@ def test_catalog_main_writes_cores_sidecar_with_dialogue_only_paths(tmp_path, mo
     (fake_pkg / "PackFileLocators.bin").write_bytes(b"x")
 
     cores_sidecar = tmp_path / "catalog-cores.txt"
+    errors_log = tmp_path / "catalog-errors.log"
     rc = catalog_mod.main([
         "--package", str(fake_pkg),
         "--out", str(tmp_path / "catalog.csv"),
-        "--errors", str(tmp_path / "catalog-errors.log"),
+        "--errors", str(errors_log),
         "--processed", str(tmp_path / "catalog-processed.txt"),
         "--cores-out", str(cores_sidecar),
     ])
     assert rc == 0
+    # happy-path proof: parse_sentences_fw's fake must match main()'s real call
+    # signature (core_path=...) and actually succeed, not fail-soft into errors_log.
+    assert errors_log.read_text(encoding="utf-8") == ""
     assert read_core_paths_sidecar(str(cores_sidecar)) == [
         "localized/sentences/mq/scene/sentences"
     ]
@@ -183,7 +188,8 @@ def test_catalog_main_sample_cap_leaves_existing_cores_sidecar_untouched(tmp_pat
     monkeypatch.setattr(profile_mod, "build_profile", lambda package: _FakeProfile(reader))
     monkeypatch.setattr(inventory_mod, "harvest_sentence_cores",
                          lambda fw, sample_cap=None: ["localized/sentences/capped/scene/sentences"])
-    monkeypatch.setattr(catalog_mod, "parse_sentences_fw", lambda core_bytes, on_line_error=None: [])
+    monkeypatch.setattr(catalog_mod, "parse_sentences_fw",
+                         lambda core_bytes, on_line_error=None, core_path=None: [])
 
     fake_pkg = tmp_path / "package"; fake_pkg.mkdir()
     (fake_pkg / "PackFileLocators.bin").write_bytes(b"x")
@@ -202,7 +208,11 @@ def test_catalog_main_sample_cap_leaves_existing_cores_sidecar_untouched(tmp_pat
     ])
     assert rc == 0
     assert cores_sidecar.read_bytes() == before, "capped run must not overwrite the shared sidecar"
-    assert "sample-cap active" in capsys.readouterr().out.lower()
+    printed = capsys.readouterr().out.lower()
+    assert "sample-cap active" in printed
+    # happy-path proof: the one core actually parsed (0 failed), not fail-soft'd by a
+    # TypeError from a fake signature mismatched with main()'s real call.
+    assert "0 failed" in printed
 
 
 def test_catalog_main_uncapped_still_writes_cores_sidecar(tmp_path, monkeypatch):
@@ -216,20 +226,25 @@ def test_catalog_main_uncapped_still_writes_cores_sidecar(tmp_path, monkeypatch)
     monkeypatch.setattr(profile_mod, "build_profile", lambda package: _FakeProfile(reader))
     monkeypatch.setattr(inventory_mod, "harvest_sentence_cores",
                          lambda fw, sample_cap=None: ["localized/sentences/full/scene/sentences"])
-    monkeypatch.setattr(catalog_mod, "parse_sentences_fw", lambda core_bytes, on_line_error=None: [])
+    monkeypatch.setattr(catalog_mod, "parse_sentences_fw",
+                         lambda core_bytes, on_line_error=None, core_path=None: [])
 
     fake_pkg = tmp_path / "package"; fake_pkg.mkdir()
     (fake_pkg / "PackFileLocators.bin").write_bytes(b"x")
 
     cores_sidecar = tmp_path / "catalog-cores.txt"
+    errors_log = tmp_path / "catalog-errors.log"
     rc = catalog_mod.main([
         "--package", str(fake_pkg),
         "--out", str(tmp_path / "catalog.csv"),
-        "--errors", str(tmp_path / "catalog-errors.log"),
+        "--errors", str(errors_log),
         "--processed", str(tmp_path / "catalog-processed.txt"),
         "--cores-out", str(cores_sidecar),
     ])
     assert rc == 0
+    # happy-path proof: the core actually parses (fail-soft would leave this empty too,
+    # but errors_log being empty rules out the TypeError-and-swallow failure mode).
+    assert errors_log.read_text(encoding="utf-8") == ""
     assert read_core_paths_sidecar(str(cores_sidecar)) == ["localized/sentences/full/scene/sentences"]
 
 
@@ -244,20 +259,24 @@ def test_catalog_main_uncapped_cores_sidecar_carries_locators_header(tmp_path, m
     monkeypatch.setattr(profile_mod, "build_profile", lambda package: _FakeProfile(reader))
     monkeypatch.setattr(inventory_mod, "harvest_sentence_cores",
                          lambda fw, sample_cap=None: ["localized/sentences/full/scene/sentences"])
-    monkeypatch.setattr(catalog_mod, "parse_sentences_fw", lambda core_bytes, on_line_error=None: [])
+    monkeypatch.setattr(catalog_mod, "parse_sentences_fw",
+                         lambda core_bytes, on_line_error=None, core_path=None: [])
 
     fake_pkg = tmp_path / "package"; fake_pkg.mkdir()
     (fake_pkg / "PackFileLocators.bin").write_bytes(b"x")
 
     cores_sidecar = tmp_path / "catalog-cores.txt"
+    errors_log = tmp_path / "catalog-errors.log"
     rc = catalog_mod.main([
         "--package", str(fake_pkg),
         "--out", str(tmp_path / "catalog.csv"),
-        "--errors", str(tmp_path / "catalog-errors.log"),
+        "--errors", str(errors_log),
         "--processed", str(tmp_path / "catalog-processed.txt"),
         "--cores-out", str(cores_sidecar),
     ])
     assert rc == 0
+    # happy-path proof: no fail-soft TypeError from a mismatched fake signature.
+    assert errors_log.read_text(encoding="utf-8") == ""
     assert read_core_paths_sidecar_header(str(cores_sidecar)) == cores_sidecar_header(str(fake_pkg))
     # the header line must not leak into the actual path list
     assert read_core_paths_sidecar(str(cores_sidecar)) == ["localized/sentences/full/scene/sentences"]
@@ -274,7 +293,8 @@ def test_catalog_main_sample_capped_cores_sidecar_unchanged_including_header(tmp
     monkeypatch.setattr(profile_mod, "build_profile", lambda package: _FakeProfile(reader))
     monkeypatch.setattr(inventory_mod, "harvest_sentence_cores",
                          lambda fw, sample_cap=None: ["localized/sentences/capped/scene/sentences"])
-    monkeypatch.setattr(catalog_mod, "parse_sentences_fw", lambda core_bytes, on_line_error=None: [])
+    monkeypatch.setattr(catalog_mod, "parse_sentences_fw",
+                         lambda core_bytes, on_line_error=None, core_path=None: [])
 
     fake_pkg = tmp_path / "package"; fake_pkg.mkdir()
     (fake_pkg / "PackFileLocators.bin").write_bytes(b"x")
@@ -294,7 +314,10 @@ def test_catalog_main_sample_capped_cores_sidecar_unchanged_including_header(tmp
     ])
     assert rc == 0
     assert cores_sidecar.read_bytes() == before
-    assert "sample-cap active" in capsys.readouterr().out.lower()
+    printed = capsys.readouterr().out.lower()
+    assert "sample-cap active" in printed
+    # happy-path proof, as above: the capped core still actually parsed (0 failed).
+    assert "0 failed" in printed
 
 
 class _FakeLine:
@@ -347,7 +370,8 @@ def test_catalog_main_accepts_bare_filename_out(tmp_path, monkeypatch):
     reader = _FakeReader()
     monkeypatch.setattr(profile_mod, "build_profile", lambda package: _FakeProfile(reader))
     monkeypatch.setattr(inventory_mod, "harvest_sentence_cores", lambda fw, sample_cap=None: [])
-    monkeypatch.setattr(catalog_mod, "parse_sentences_fw", lambda core_bytes, on_line_error=None: [])
+    monkeypatch.setattr(catalog_mod, "parse_sentences_fw",
+                         lambda core_bytes, on_line_error=None, core_path=None: [])
 
     fake_pkg = tmp_path / "package"
     fake_pkg.mkdir()
@@ -438,6 +462,7 @@ def test_catalog_main_missing_package_fails_actionably(tmp_path, monkeypatch, ca
     captured = capsys.readouterr()
     assert "--hzd-package" in captured.out
     assert "PackFileLocators.bin" in captured.out
+    assert captured.err == ""  # no traceback
 
 
 # ---------------------------------------------------------------------------
