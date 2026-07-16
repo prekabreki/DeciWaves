@@ -32,7 +32,15 @@ CS_TITLES = {
 # CAUTION: if an entry here is removed or typo'd, that group silently falls back to its
 # raw cs_number(group) ordering and can land mid-story instead of at the curated tail --
 # every NON_STORY_CS_GROUPS group must have an entry here (see test_episode_map.py).
+#
+# cs53 is real main-story (it is deliberately absent from NON_STORY_CS_GROUPS), but the
+# transcript doesn't reliably anchor it, so without this entry it fell back to raw
+# cs_number(53) and landed after every other main-story group instead of near cs03/cs04
+# (issue #40). Its own lines all land inside cs03's transcript span, before cs04's
+# episode-heading transition -- Junk Dealer reunion beat. Uses the small raw-cs_number
+# scale shared with its cs03/cs04 neighbors (0..10ish), not the anchor-scale ~980+ below.
 CS_ORDER_HINT = {
+    "cs53": 3.5,
     "cs71": 980.0, "cs77": 1000.0, "cs80": 1020.0,
     "cs11": 1320.0, "cs50": 1340.0, "cs56": 1360.0,
 }

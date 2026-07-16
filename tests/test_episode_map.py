@@ -71,3 +71,12 @@ def test_non_story_cs_groups_all_have_an_order_hint():
     # can land mid-story instead of at the curated ~980+ tail (see CS_ORDER_HINT comment).
     missing = em.NON_STORY_CS_GROUPS - em.CS_ORDER_HINT.keys()
     assert missing == set()
+
+
+def test_cs53_order_hint_places_it_between_cs03_and_cs04():
+    # Issue #40: cs53 is real main-story (excluded from NON_STORY_CS_GROUPS, see above),
+    # but the transcript doesn't reliably anchor it. If this hint is ever removed or
+    # typo'd, cs53 silently falls back to raw cs_number(53) and sorts after every other
+    # main-story group in the default (no-transcript) order instead of near cs03/cs04.
+    assert "cs53" in em.CS_ORDER_HINT
+    assert em.cs_number("cs03") < em.CS_ORDER_HINT["cs53"] < em.cs_number("cs04")
