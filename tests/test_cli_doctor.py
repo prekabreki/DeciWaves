@@ -80,12 +80,23 @@ def test_check_oodle_ds_configured_but_oodle_dll_unset():
 
 
 # --- DS / HZD / FW game checks: unconfigured never fails exit code ----------
+#
+# Issue #32: these three checks return a doctor.CheckResult, not a bare tuple
+# -- it carries a structured doctor.Availability (OK / NOT_CONFIGURED /
+# BROKEN) alongside the message, so guided.py's game-availability menu can
+# read `.status` instead of substring-matching the message text. CheckResult
+# still unpacks as a plain (ok, message) 2-tuple, so every `ok, msg = ...`
+# call below is unaffected.
 
 def test_check_ds_install_not_configured():
     ok, msg = doctor.check_ds_install("")
     assert ok  # does not fail the exit code
     assert "not configured" in msg
     assert msg.startswith("[--]")
+
+
+def test_check_ds_install_status_is_structured_tri_state():
+    assert doctor.check_ds_install("").status is doctor.Availability.NOT_CONFIGURED
 
 
 def test_check_ds_install_valid(tmp_path):
@@ -99,6 +110,12 @@ def test_check_ds_install_configured_but_broken(tmp_path):
     ok, msg = doctor.check_ds_install(str(tmp_path))
     assert not ok
     assert msg.startswith("[--]")
+    assert doctor.check_ds_install(str(tmp_path)).status is doctor.Availability.BROKEN
+
+
+def test_check_ds_install_valid_status_is_ok(tmp_path):
+    (tmp_path / "data").mkdir()
+    assert doctor.check_ds_install(str(tmp_path)).status is doctor.Availability.OK
 
 
 def test_check_hzd_package_not_configured():
@@ -108,6 +125,9 @@ def test_check_hzd_package_not_configured():
 
 
 def test_check_hzd_package_valid(tmp_path):
+    # A correct package dir -- the one containing PackFileLocators.bin --
+    # must pass (issue #34).
+    (tmp_path / "PackFileLocators.bin").write_bytes(b"x")
     ok, msg = doctor.check_hzd_package(str(tmp_path))
     assert ok and msg.startswith("[ok]")
 
@@ -115,6 +135,20 @@ def test_check_hzd_package_valid(tmp_path):
 def test_check_hzd_package_configured_but_broken(tmp_path):
     ok, msg = doctor.check_hzd_package(str(tmp_path / "missing"))
     assert not ok
+
+
+def test_check_hzd_package_install_root_is_not_ok(tmp_path):
+    # issue #34: an install-root-shaped dir (exists, but no PackFileLocators.bin
+    # -- e.g. the user pointed --hzd-package at the game root instead of
+    # <root>\LocalCacheDX12\package) must NOT be reported [ok]. Mirrors
+    # check_fw_package's streaming_graph.core requirement.
+    (tmp_path / "some_other_file.txt").write_bytes(b"x")  # dir exists, wrong shape
+    ok, msg = doctor.check_hzd_package(str(tmp_path))
+    assert not ok
+    assert msg.startswith("[--]")
+    assert "PackFileLocators.bin" in msg
+    assert "LocalCacheDX12" in msg  # names the expected subdir in the fix hint
+    assert "--hzd-package" in msg
 
 
 def test_check_fw_package_not_configured():
@@ -132,6 +166,30 @@ def test_check_fw_package_valid(tmp_path):
 def test_check_fw_package_configured_but_broken(tmp_path):
     ok, msg = doctor.check_fw_package(str(tmp_path))  # no streaming_graph.core
     assert not ok
+
+
+def test_check_fw_gamescript_not_configured():
+    # Optional even when FW itself is owned/configured -- must not fail the
+    # exit code just because the user hasn't supplied a gamescript yet (#23).
+    ok, msg = doctor.check_fw_gamescript("")
+    assert ok
+    assert "not configured" in msg
+
+
+def test_check_fw_gamescript_valid(tmp_path):
+    gamescript = tmp_path / "gamescript.md"
+    gamescript.write_text("Aloy: Hello.\n", encoding="utf-8")
+    ok, msg = doctor.check_fw_gamescript(str(gamescript))
+    assert ok and msg.startswith("[ok]")
+
+
+def test_check_fw_gamescript_configured_but_missing(tmp_path):
+    # Configured but the file has since moved/been deleted: this DOES fail --
+    # it was explicitly configured, just earlier (same "configured but
+    # broken" contract as check_ds_install/check_hzd_package/check_fw_package).
+    ok, msg = doctor.check_fw_gamescript(str(tmp_path / "gone.md"))
+    assert not ok
+    assert msg.startswith("[--]")
 
 
 # --- ASR extra / CUDA: informational, never fail the exit code -------------
@@ -236,6 +294,7 @@ def test_run_doctor_exit_0_with_hzd_fw_only(tmp_path, monkeypatch, capsys):
         monkeypatch.delenv(var, raising=False)
     hzd = tmp_path / "hzd"
     hzd.mkdir()
+    (hzd / "PackFileLocators.bin").write_bytes(b"x")
     fw = tmp_path / "fw"
     fw.mkdir()
     (fw / "streaming_graph.core").write_bytes(b"x")
@@ -244,6 +303,21 @@ def test_run_doctor_exit_0_with_hzd_fw_only(tmp_path, monkeypatch, capsys):
                   hzd_package=str(hzd), fw_package=str(fw))
     rc = doctor.run_doctor([])
     assert rc == 0, "doctor should exit 0 when only HZD/FW configured (DS not owned)"
+
+
+def test_run_doctor_exit_1_when_fw_gamescript_configured_but_missing(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(doctor.shutil, "which", lambda name: str(tmp_path / name))
+    for var in ("DECIWAVES_VGMSTREAM", "DECIWAVES_VGAUDIO"):
+        monkeypatch.delenv(var, raising=False)
+    fw = tmp_path / "fw"
+    fw.mkdir()
+    (fw / "streaming_graph.core").write_bytes(b"x")
+    _write_config(tmp_path, monkeypatch, tools_dir=str(tmp_path),
+                  fw_package=str(fw), fw_gamescript=str(tmp_path / "gone.md"))
+    rc = doctor.run_doctor([])
+    out = capsys.readouterr().out.lower()
+    assert rc == 1
+    assert "gamescript" in out
 
 
 def test_run_doctor_config_roundtrips_through_env_override(tmp_path, monkeypatch):

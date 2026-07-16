@@ -1,21 +1,134 @@
 """Persisted config: where setup put the tools and where the games live."""
 import json
 import os
+import tempfile
 from pathlib import Path
+from typing import NamedTuple, Optional
 
-KEYS = ("tools_dir", "ds_install", "hzd_package", "fw_package", "oodle_dll")
+KEYS = ("tools_dir", "ds_install", "hzd_package", "fw_package", "oodle_dll", "fw_gamescript")
+
+# --- decode tool metadata -------------------------------------------------
+# Single source of truth for the three decode tools `deciwaves setup` fetches.
+# Previously triplicated -- main.py's _apply_config_env (exe name + env var,
+# for PATH/env wiring), doctor.py's check_tool(...) call sites (display name +
+# exe name + env var), and setup.py's own _TOOLS (label + url + exe) each
+# spelled the same facts out independently, with the exe name spelled two
+# different ways between them ("vgmstream-cli.exe" in main.py/setup.py vs.
+# bare "vgmstream-cli" in doctor.py) (issue #32). `key`/`display` keep their
+# two previously-distinct spellings (setup's short summary-row label vs.
+# doctor's own display name) so consolidating this doesn't change either
+# module's printed text -- only the facts themselves (exe filename, env var,
+# URL) are now defined exactly once.
+
+# Pinned 2026-07-14 via:
+#   gh release view --repo vgmstream/vgmstream --json assets -q '.assets[].name' | grep -i win
+#   gh release view --repo Thealexbarney/VGAudio --json assets -q '.assets[].name'
+#   gh release view autobuild-2026-07-14-13-19 --repo BtbN/FFmpeg-Builds --json assets -q '.assets[].name' | grep win64-gpl.zip
+#
+# BtbN/FFmpeg-Builds has no versioned tags -- "latest" is a rolling alias that
+# always points at whatever the newest autobuild-YYYY-MM-DD-HH-MM release is,
+# so it is NOT a pin (issue #39). Pin to that dated autobuild tag's master
+# build instead, same as vgmstream/VGAudio pin to a fixed release/tag.
+VGMSTREAM_URL = "https://github.com/vgmstream/vgmstream/releases/download/r2117/vgmstream-win64.zip"
+VGAUDIO_URL = "https://github.com/Thealexbarney/VGAudio/releases/download/v2.2.1/VGAudioCli.zip"
+FFMPEG_URL = "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-07-14-13-19/ffmpeg-N-125608-g150f7d15df-win64-gpl.zip"
+
+
+class ToolSpec(NamedTuple):
+    key: str                       # setup's short summary-row label
+    display: str                   # doctor's human display name
+    exe: str                       # canonical exe filename (with .exe) in tools_dir
+    env_var: Optional[str]         # explicit override env var, or None (ffmpeg has none)
+    url: str                       # pinned download URL (issue #39)
+
+
+TOOLS = (
+    ToolSpec("vgmstream", "vgmstream-cli", "vgmstream-cli.exe", "DECIWAVES_VGMSTREAM", VGMSTREAM_URL),
+    ToolSpec("VGAudio",   "VGAudioCli",    "VGAudioCli.exe",    "DECIWAVES_VGAUDIO",   VGAUDIO_URL),
+    ToolSpec("ffmpeg",    "ffmpeg",        "ffmpeg.exe",        None,                  FFMPEG_URL),
+)
 
 def path() -> Path:
     root = os.environ.get("DECIWAVES_CONFIG_DIR") or os.path.join(
         os.environ.get("LOCALAPPDATA", str(Path.home())), "DeciWaves")
     return Path(root) / "config.json"
 
+def _warn_corrupted(cfg_path: Path, reason) -> None:
+    print(
+        f"warning: config file {cfg_path} is corrupted ({reason}); "
+        "ignoring it and starting fresh -- run `deciwaves setup` to repair."
+    )
+
 def load() -> dict:
+    cfg_path = path()
     try:
-        return json.loads(path().read_text(encoding="utf-8"))
+        cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return {}
+    except (json.JSONDecodeError, OSError) as exc:
+        _warn_corrupted(cfg_path, exc)
+        return {}
+    if not isinstance(cfg, dict):
+        _warn_corrupted(cfg_path, f"expected a JSON object, got {type(cfg).__name__}")
+        return {}
+    return cfg
+
+def absolutize_existing_paths(argv: list) -> list:
+    """Resolve any argv token that refers to an EXISTING file/dir relative to
+    the CURRENT (pre-chdir) cwd to its absolute form.
+
+    Call this before `enter_workspace()` changes what "relative" means. A
+    relative path the user typed to mean "relative to where I ran deciwaves"
+    (a BYO gamescript, an install dir, ...) must keep pointing at the same
+    place once the process chdirs into --workspace -- otherwise it's
+    silently (mis)resolved inside the workspace instead (issue #32).
+
+    Deliberately existence-based, not flag-name based: a stage's own OUTPUT
+    path (e.g. --out/--manifest) is correctly workspace-relative and must NOT
+    be absolutized here -- and since an output path doesn't exist yet at this
+    point (nothing has run), it's naturally left alone. A token that never
+    existed at all (a typo) is also left untouched: it still fails whatever
+    stage's own "not found" check the same way it always did, just relative
+    to the workspace instead of the original cwd -- no behavior change for
+    that already-loud, already-nonzero failure case (see run.py's fw
+    --gamescript checks, issue #38).
+    """
+    out = []
+    for tok in argv:
+        if tok and not tok.startswith("-") and not os.path.isabs(tok) and os.path.exists(tok):
+            tok = str(Path(tok).resolve())
+        out.append(tok)
+    return out
+
+def enter_workspace(workspace) -> Path:
+    """Resolve *workspace* to an absolute path, create it, and chdir into it.
+
+    Stage modules default their own outputs to CWD-relative `out/` paths, so
+    this one call is what lets a single `--workspace` flag (or guided mode's
+    workspace prompt) redirect an entire run without touching every stage's
+    individual path arguments. Previously duplicated verbatim in both
+    cli.main's stage-dispatch path and cli.guided's end-of-flow dispatch
+    (issue #32) -- now one shared helper.
+    """
+    ws = Path(workspace).resolve()
+    ws.mkdir(parents=True, exist_ok=True)
+    os.chdir(ws)
+    return ws
 
 def save(cfg: dict) -> None:
-    path().parent.mkdir(parents=True, exist_ok=True)
-    path().write_text(json.dumps({k: cfg.get(k, "") for k in KEYS}, indent=2), encoding="utf-8")
+    cfg_path = path()
+    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    data = json.dumps({k: cfg.get(k, "") for k in KEYS}, indent=2)
+    fd, tmp_name = tempfile.mkstemp(
+        dir=cfg_path.parent, prefix=cfg_path.name + ".", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(data)
+        os.replace(tmp_name, cfg_path)
+    except BaseException:
+        try:
+            os.remove(tmp_name)
+        except OSError:
+            pass
+        raise

@@ -46,28 +46,56 @@ def _stage_choices(game: str) -> tuple:
     args.stage, so the two stay in sync."""
     return (*STAGES[game], "run")
 
+def _stage_list_epilog(game: str) -> str:
+    """Render STAGES[game]'s curated per-stage help_text as `deciwaves <game>
+    --help`'s epilog. These strings used to be dead data -- STAGES[game][stage]
+    is a (module_path, help_text) pair, but the only place that ever read it
+    (main()'s dispatch, below) discarded help_text into a `_help` throwaway
+    and used just the module path (issue #32). Surfacing them here is the fix:
+    a stage's one-line description is now genuinely user-visible, not just a
+    comment-shaped string sitting in a dict."""
+    width = max(len(name) for name in _stage_choices(game))
+    lines = [f"  {name:<{width}}  {help_text}" for name, (_mod, help_text) in STAGES[game].items()]
+    lines.append(f"  {'run':<{width}}  chain {game}'s stages end-to-end (see `deciwaves {game} run --help`)")
+    return "stages:\n" + "\n".join(lines)
+
 def _apply_config_env():
     cfg = config.load()
     if cfg.get("tools_dir") and os.path.isdir(cfg["tools_dir"]):
         os.environ["PATH"] = cfg["tools_dir"] + os.pathsep + os.environ.get("PATH", "")
-        for exe, var in (("vgmstream-cli.exe", "DECIWAVES_VGMSTREAM"),
-                         ("VGAudioCli.exe", "DECIWAVES_VGAUDIO")):
-            p = Path(cfg["tools_dir"]) / exe
+        for tool in config.TOOLS:  # single TOOLS table -- see config.py (issue #32)
+            if not tool.env_var:  # ffmpeg: resolved via PATH, no override env var
+                continue
+            p = Path(cfg["tools_dir"]) / tool.exe
             if p.is_file():
-                os.environ.setdefault(var, str(p))
+                os.environ.setdefault(tool.env_var, str(p))
     return cfg
 
 def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     ap = argparse.ArgumentParser(prog="deciwaves", description=__doc__)
     ap.add_argument("--version", action="version", version=f"deciwaves {__version__}")
-    ap.add_argument("--workspace", default=".", help="directory outputs are written under (default: current dir)")
+    ap.add_argument("--workspace", default=".", help=(
+        "directory outputs are written under (default: current dir). Must come "
+        "BEFORE the game name, e.g. `deciwaves --workspace DIR ds run` -- placed "
+        "after it (`deciwaves ds --workspace DIR run`), it is swallowed as that "
+        "stage's own argument instead, not read as the global --workspace. A "
+        "relative path you pass to a stage's own flag (e.g. --gamescript) that "
+        "ALREADY EXISTS there is resolved against the directory you ran "
+        "`deciwaves` from, before the process chdirs into --workspace -- it does "
+        "not need to sit inside the workspace (a relative path that doesn't exist "
+        "yet, e.g. a stage's own output path, is left alone and stays "
+        "workspace-relative, same as always). A path saved via `deciwaves setup` "
+        "(ds_install, fw_gamescript, ...) is always stored absolute, so it is "
+        "unaffected by --workspace either way."
+    ))
     sub = ap.add_subparsers(dest="cmd", required=False)
     for name in ("setup", "doctor"):
         sub.add_parser(name, add_help=False)
     game_parsers = {}
     for game, stages in STAGES.items():
-        gp = sub.add_parser(game)
+        gp = sub.add_parser(game, epilog=_stage_list_epilog(game),
+                             formatter_class=argparse.RawDescriptionHelpFormatter)
         stage_names = _stage_choices(game)
         # nargs=REMAINDER so a stage name -- "run" especially -- plus ALL of its
         # own following argv (including a "--help") is captured as one opaque
@@ -102,7 +130,15 @@ def main(argv=None) -> int:
     # PATH) from saved config; engine.tool_paths.resolve() reads them when the
     # decoder subprocess is actually spawned, not at stage-module import time.
     if args.cmd is None:
-        from deciwaves.cli.guided import run_guided; return run_guided(cfg)
+        # Resolve to an absolute path before handing it to guided mode as its
+        # workspace-prompt default -- whether it came from an explicit
+        # --workspace or is just the "." argparse default, the prompt should
+        # always show a real absolute path, matching what it showed before
+        # this flag existed (issue #32: bare `deciwaves --workspace X` used
+        # to silently ignore --workspace entirely here, always defaulting the
+        # prompt to Path.cwd() instead).
+        from deciwaves.cli.guided import run_guided
+        return run_guided(cfg, workspace=str(Path(args.workspace).resolve()))
     if args.cmd == "setup":
         from deciwaves.cli.setup import run_setup; return run_setup(rest)
     if args.cmd == "doctor":
@@ -127,9 +163,12 @@ def main(argv=None) -> int:
             return e.code
     stage, extra_argv = stage_argv[0], stage_argv[1:] + rest
 
-    ws = Path(args.workspace).resolve()
-    ws.mkdir(parents=True, exist_ok=True)
-    os.chdir(ws)                      # stage modules default outputs to CWD-relative out/
+    # Absolutize any relative path in the stage's own argv (e.g. --gamescript)
+    # BEFORE chdir'ing into --workspace -- otherwise a relative flag value is
+    # silently looked up inside the workspace instead of relative to wherever
+    # the user actually ran `deciwaves` from (issue #32).
+    extra_argv = config.absolutize_existing_paths(extra_argv)
+    config.enter_workspace(args.workspace)
     if stage == "run":
         from deciwaves.cli.run import run_game; return run_game(args.cmd, cfg, extra_argv)
     mod, _help = STAGES[args.cmd][stage]

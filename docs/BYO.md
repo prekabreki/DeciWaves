@@ -89,6 +89,17 @@ matched line supplies the speaker, the quest, and the near-chronological positio
 
     deciwaves --workspace D:\deciwaves fw run --gamescript D:\path\to\gamescript.md
 
+Or persist it once so you never have to pass the flag again -- including from guided mode
+(bare `deciwaves`), which otherwise has no way to reach match/full-reel/render:
+
+    deciwaves setup --fw-gamescript D:\path\to\gamescript.md
+
+An explicit `--gamescript` on a given `fw run` still beats a configured `fw_gamescript`, so
+you can override it for one run without losing the saved default. `deciwaves doctor` reports
+`fw_gamescript` alongside the other configured paths; if it was configured and the file has
+since moved, `fw run`/`doctor` treat that the same as any other configured-but-missing path --
+loudly, with a nonzero exit -- rather than silently falling back to "no gamescript at all".
+
 The standalone match stage (`deciwaves fw match`) instead defaults to
 `docs/forbidden_west_gamescript.md` under the workspace, or takes its own `--gamescript`.
 

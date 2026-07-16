@@ -176,6 +176,58 @@ def test_ds_marker_not_written_on_failure_and_chain_aborts(tmp_path, monkeypatch
     assert not os.path.exists(_marker("ds", "render"))  # never ran
 
 
+def test_ds_rerunning_early_stage_invalidates_downstream_markers(tmp_path, monkeypatch):
+    """Issue #37: re-running an early stage must invalidate every LATER stage's
+    done-marker, so a stale catalog rebuild doesn't leave stale order/render
+    markers standing (which would make a fresh run indistinguishable from a
+    stale one). Deleting only the catalog marker and re-running must re-execute
+    catalog, order, AND render -- not just catalog."""
+    monkeypatch.chdir(tmp_path)
+    mods = _mods("ds")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _ds_outputs(mods)))
+    monkeypatch.setattr(run_mod.data, "packaged", lambda rel: Path(f"/pkg/{rel}"))
+
+    cfg = {"ds_install": r"C:\Games\DS"}
+    rc = run_mod.run_game("ds", cfg, [])
+    assert rc == 0
+    assert [m for m, _ in calls] == [mods["catalog"], mods["order"], mods["render"]]
+    for stage in ("catalog", "order", "render"):
+        assert os.path.isfile(_marker("ds", stage))
+
+    calls.clear()
+    os.remove(_marker("ds", "catalog"))  # simulate a game-patch-triggered re-catalog
+
+    rc = run_mod.run_game("ds", cfg, [])
+    assert rc == 0
+
+    # catalog re-ran (its own marker was gone) and that re-run must have
+    # invalidated order's and render's markers too, so both re-execute rather
+    # than being skipped on stale data.
+    assert [m for m, _ in calls] == [mods["catalog"], mods["order"], mods["render"]]
+
+
+def test_ds_full_skip_run_stays_full_skip(tmp_path, monkeypatch, capsys):
+    """Guard for #37's fix: when every stage is already done, nothing executes
+    and nothing gets invalidated -- a fully-resumed run must remain a no-op."""
+    monkeypatch.chdir(tmp_path)
+    mods = _mods("ds")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _ds_outputs(mods)))
+    monkeypatch.setattr(run_mod.data, "packaged", lambda rel: Path(f"/pkg/{rel}"))
+
+    cfg = {"ds_install": r"C:\Games\DS"}
+    rc = run_mod.run_game("ds", cfg, [])
+    assert rc == 0
+    calls.clear()
+
+    rc = run_mod.run_game("ds", cfg, [])
+    assert rc == 0
+    assert calls == []  # every stage skipped -- none invalidated, none re-ran
+    for stage in ("catalog", "order", "render"):
+        assert os.path.isfile(_marker("ds", stage))
+
+
 def test_ds_missing_config_errors(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     rc = run_mod.run_game("ds", {}, [])
@@ -530,18 +582,26 @@ def test_fw_byo_stop_without_gamescript(tmp_path, monkeypatch, capsys):
     assert "--gamescript" in out
 
 
-def test_fw_byo_stop_when_gamescript_path_missing(tmp_path, monkeypatch, capsys):
+def test_fw_gamescript_path_missing_exits_nonzero_and_names_path(tmp_path, monkeypatch, capsys):
+    """An explicitly-given --gamescript path that doesn't exist must be reported and
+    fail the run -- not silently treated like no --gamescript at all (#38). Otherwise
+    anything scripted on the exit code believes match/full-reel/render actually ran."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
     mods = _mods("fw")
     calls = []
     monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _fw_outputs(mods)))
 
-    rc = run_mod.run_game("fw", {"fw_package": "PKG"}, ["--gamescript", str(tmp_path / "nope.md")])
-    assert rc == 0
+    bad_path = str(tmp_path / "nope.md")
+    rc = run_mod.run_game("fw", {"fw_package": "PKG"}, ["--gamescript", bad_path])
+    assert rc != 0
 
     called = [m for m, _ in calls]
     assert called == [mods["extract"], mods["asr"], mods["subtitle-bind"]]
+    assert mods["match"] not in called
+
+    out = capsys.readouterr().out
+    assert bad_path in out
 
 
 def test_fw_full_chain_with_gamescript(tmp_path, monkeypatch):
@@ -569,6 +629,129 @@ def test_fw_full_chain_with_gamescript(tmp_path, monkeypatch):
     assert _after(render_argv, "--stem") == "fw_story_full"
     assert "--uniform-mono" in render_argv
     assert _after(render_argv, "--manifest") == "out/fw/full-reel-manifest.csv"
+
+
+def test_fw_extract_rerun_invalidates_downstream_across_gamescript_gate(tmp_path, monkeypatch):
+    """Issue #37, fw-specific: fw's chain is split into two `_run_chain` calls
+    around the BYO --gamescript gate (extract/asr/subtitle-bind, then
+    match/full-reel/render). Invalidation must still follow the FULL declared
+    chain order across that split -- re-running `extract` must invalidate
+    match/full-reel/render's markers too, not just subtitle-bind's (the only
+    later stage that happens to share extract's own _run_chain call)."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    gamescript = tmp_path / "gamescript.md"
+    gamescript.write_text("Aloy: Hello.\n", encoding="utf-8")
+
+    mods = _mods("fw")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _fw_outputs(mods)))
+
+    cfg = {"fw_package": "PKG"}
+    rc = run_mod.run_game("fw", cfg, ["--gamescript", str(gamescript)])
+    assert rc == 0
+    all_stages = ["extract", "asr", "subtitle-bind", "match", "full-reel", "render"]
+    assert [m for m, _ in calls] == [mods[s] for s in all_stages]
+    for stage in all_stages:
+        assert os.path.isfile(_marker("fw", stage))
+
+    calls.clear()
+    os.remove(_marker("fw", "extract"))  # simulate a re-extract after a game patch
+
+    rc = run_mod.run_game("fw", cfg, ["--gamescript", str(gamescript)])
+    assert rc == 0
+
+    # extract re-ran, which must invalidate every later stage's marker --
+    # including match/full-reel/render, which live in the *second* _run_chain
+    # call (past the --gamescript gate) -- so all six re-execute.
+    assert [m for m, _ in calls] == [mods[s] for s in all_stages]
+
+
+def test_fw_run_uses_configured_gamescript_when_no_flag(tmp_path, monkeypatch):
+    """No --gamescript flag: fw_gamescript from config is used automatically,
+    the same precedence pattern as ds_install/hzd_package/fw_package (#23)."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    gamescript = tmp_path / "gamescript.md"
+    gamescript.write_text("Aloy: Hello.\n", encoding="utf-8")
+
+    mods = _mods("fw")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _fw_outputs(mods)))
+
+    cfg = {"fw_package": "PKG", "fw_gamescript": str(gamescript)}
+    rc = run_mod.run_game("fw", cfg, [])
+    assert rc == 0
+
+    called = [m for m, _ in calls]
+    assert called == [mods["extract"], mods["asr"], mods["subtitle-bind"],
+                       mods["match"], mods["full-reel"], mods["render"]]
+    match_argv = dict(calls)[mods["match"]]
+    assert _after(match_argv, "--gamescript") == str(gamescript)
+
+
+def test_fw_explicit_gamescript_flag_overrides_configured(tmp_path, monkeypatch):
+    """An explicit --gamescript beats a saved fw_gamescript config value."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    configured = tmp_path / "configured-gamescript.md"
+    configured.write_text("Aloy: Hello.\n", encoding="utf-8")
+    explicit = tmp_path / "explicit-gamescript.md"
+    explicit.write_text("Aloy: Hi.\n", encoding="utf-8")
+
+    mods = _mods("fw")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _fw_outputs(mods)))
+
+    cfg = {"fw_package": "PKG", "fw_gamescript": str(configured)}
+    rc = run_mod.run_game("fw", cfg, ["--gamescript", str(explicit)])
+    assert rc == 0
+
+    match_argv = dict(calls)[mods["match"]]
+    assert _after(match_argv, "--gamescript") == str(explicit)
+
+
+def test_fw_configured_gamescript_missing_exits_nonzero_and_names_path(tmp_path, monkeypatch, capsys):
+    """A configured-but-now-missing fw_gamescript must fail loud (nonzero), the
+    same as an explicitly-given missing --gamescript path (#38) -- it was
+    explicitly configured, just earlier, via `deciwaves setup --fw-gamescript`."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    mods = _mods("fw")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _fw_outputs(mods)))
+
+    missing = str(tmp_path / "gone-gamescript.md")
+    cfg = {"fw_package": "PKG", "fw_gamescript": missing}
+    rc = run_mod.run_game("fw", cfg, [])
+    assert rc != 0
+
+    called = [m for m, _ in calls]
+    assert called == [mods["extract"], mods["asr"], mods["subtitle-bind"]]
+    assert mods["match"] not in called
+
+    out = capsys.readouterr().out
+    assert missing in out
+
+
+def test_fw_byo_message_shows_exact_rerun_command(tmp_path, monkeypatch, capsys):
+    """The BYO message (#23) must show the exact command to re-run with -- the
+    real --package path this run used, plus a placeholder for the still-BYO
+    gamescript -- not just a generic "pass --gamescript" hint."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    mods = _mods("fw")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _fw_outputs(mods)))
+
+    rc = run_mod.run_game("fw", {"fw_package": "PKG"}, [])
+    assert rc == 0
+
+    out = capsys.readouterr().out
+    assert "deciwaves fw run" in out
+    assert "--package PKG" in out
+    assert "--gamescript" in out
+    assert "deciwaves setup --fw-gamescript" in out
 
 
 def test_fw_asr_gpu_gate_aborts_without_whisperx(tmp_path, monkeypatch, capsys):

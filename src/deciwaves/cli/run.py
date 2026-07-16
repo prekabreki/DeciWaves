@@ -63,7 +63,37 @@ def _done_marker(game: str, stage_name: str) -> str:
     return os.path.join("out", game, f".done-{stage_name}")
 
 
-def _run_chain(game: str, chain: list[Stage], ctx: dict) -> int:
+def _invalidate_downstream_markers(game: str, full_chain: list[Stage], stage_name: str) -> None:
+    """Delete the done-markers of every stage that comes AFTER ``stage_name`` in
+    the game's full declared chain (issue #37).
+
+    Resume markers previously only ever skipped work -- nothing invalidated
+    them, so re-running an early stage (e.g. re-cataloging after a game patch)
+    left later stages' stale markers standing, and a stale run became
+    indistinguishable from a fresh one. ``full_chain`` is the game's complete,
+    declared stage order (not necessarily the same list object actually being
+    executed in this call -- fw splits its chain across the BYO --gamescript
+    gate into two separate `_run_chain` calls, so invalidation must still see
+    the stages on the far side of that gate to find "later" correctly).
+    """
+    names = [s.name for s in full_chain]
+    idx = names.index(stage_name)
+    for later_name in names[idx + 1:]:
+        try:
+            os.remove(_done_marker(game, later_name))
+        except FileNotFoundError:
+            pass  # nothing to invalidate -- fresh run, or already invalidated
+
+
+def _run_chain(game: str, chain: list[Stage], ctx: dict, full_chain: list[Stage] | None = None) -> int:
+    """Run ``chain`` in order, skipping stages whose done-marker already exists.
+
+    ``full_chain`` is the game's complete declared stage order, used only to
+    compute "later stages" for marker invalidation (see
+    ``_invalidate_downstream_markers``); it defaults to ``chain`` itself for
+    games whose whole pipeline runs through a single `_run_chain` call.
+    """
+    full_chain = chain if full_chain is None else full_chain
     for st in chain:
         marker = _done_marker(game, st.name)
         if os.path.isfile(marker):
@@ -77,6 +107,11 @@ def _run_chain(game: str, chain: list[Stage], ctx: dict) -> int:
         except StageConfigError as exc:
             print(f"{st.name}: {exc}")
             return 1
+        # The stage is genuinely about to (re-)execute -- its data may already
+        # differ from what any later stage previously consumed, so invalidate
+        # downstream markers now, before dispatch, so a failed run still
+        # leaves them invalidated (they're stale either way).
+        _invalidate_downstream_markers(game, full_chain, st.name)
         rc = _import_stage(st.module)(argv) or 0
         if rc:
             return rc
@@ -235,12 +270,25 @@ def _run_hzd(cfg: dict, extra_argv: list) -> int:
 # fw
 # ---------------------------------------------------------------------------
 
-_FW_BYO_MESSAGE = (
-    "fw: no gamescript configured. extract/asr/subtitle-bind are done; speaker + "
-    "story-order matching needs your own copy of the Forbidden West gamescript -- "
-    "BYO, this repo can't ship game text. Re-run with --gamescript <path> to "
-    "continue with match -> full-reel -> render."
-)
+def _fw_byo_message(package: str) -> str:
+    """The BYO stop message printed when neither an explicit --gamescript nor a
+    configured fw_gamescript was found (issue #23: the message must show the
+    EXACT re-run command, not just a generic "pass --gamescript" hint, so guided
+    mode's primary UX has something concrete to act on). ``package`` is filled in
+    for real (it's whatever this run actually used, whether from --package or
+    from the configured fw_package) since a re-run needs it too; the gamescript
+    path itself stays a placeholder -- it's BYO, this repo never has a real one
+    to show.
+    """
+    return (
+        "fw: no gamescript configured. extract/asr/subtitle-bind are done; speaker + "
+        "story-order matching needs your own copy of the Forbidden West gamescript -- "
+        "BYO, this repo can't ship game text (see docs/BYO.md). Re-run with:\n"
+        f"    deciwaves fw run --package {package} --gamescript <path-to-gamescript>\n"
+        "to continue with match -> full-reel -> render, or persist it once with "
+        "`deciwaves setup --fw-gamescript <path-to-gamescript>` so future runs (and "
+        "guided mode) don't need the flag at all."
+    )
 
 # subtitle-bind's own --out default ("out/fw/subtitle-manifest.csv") is a quick-sample
 # name; match/full-reel/weave all default to reading the "-full" name, so the run chain
@@ -283,7 +331,9 @@ def _run_fw(cfg: dict, extra_argv: list) -> int:
     )
     ap.add_argument("--package", help="FW package/install path (default: from `deciwaves setup`)")
     ap.add_argument("--gamescript", help="path to your own Forbidden West gamescript transcript "
-                                          "(BYO -- required to run match/full-reel/render)")
+                                          "(BYO, optional -- required only to run "
+                                          "match/full-reel/render; default: from "
+                                          "`deciwaves setup --fw-gamescript`)")
     ns = _parse_or_exit(ap, extra_argv)
     if isinstance(ns, int):
         return ns
@@ -292,27 +342,47 @@ def _run_fw(cfg: dict, extra_argv: list) -> int:
     if not package:
         return _missing_config("fw", "FW package (fw_package)", "--package")
 
-    ctx = {"package": package, "gamescript": ns.gamescript}
-    chunk1 = [
+    # An explicit --gamescript beats a saved fw_gamescript config value; an
+    # explicitly-given empty/None flag falls back to the saved config, same
+    # `or`-based precedence as package/data_dir/oodle above (issue #23).
+    gamescript = ns.gamescript or cfg.get("fw_gamescript", "")
+
+    ctx = {"package": package, "gamescript": gamescript}
+    # The chain is executed in two `_run_chain` calls (split around the BYO
+    # --gamescript gate below), but it is one declared pipeline -- pass the
+    # full, ordered stage list as `full_chain` to both calls so marker
+    # invalidation (issue #37) sees stages on the far side of the gate too.
+    full_chain = [
         Stage("extract", STAGES["fw"]["extract"][0], _fw_extract_argv),
         Stage("asr", STAGES["fw"]["asr"][0], _fw_asr_argv, gpu=True),
         Stage("subtitle-bind", STAGES["fw"]["subtitle-bind"][0], _fw_subtitle_bind_argv),
-    ]
-    rc = _run_chain("fw", chunk1, ctx)
-    if rc:
-        return rc
-
-    gamescript = ctx["gamescript"]
-    if not gamescript or not os.path.isfile(gamescript):
-        print(_FW_BYO_MESSAGE)
-        return 0
-
-    chunk2 = [
         Stage("match", STAGES["fw"]["match"][0], _fw_match_argv),
         Stage("full-reel", STAGES["fw"]["full-reel"][0], _fw_full_reel_argv),
         Stage("render", STAGES["fw"]["render"][0], _fw_render_argv),
     ]
-    return _run_chain("fw", chunk2, ctx)
+    chunk1, chunk2 = full_chain[:3], full_chain[3:]
+
+    rc = _run_chain("fw", chunk1, ctx, full_chain=full_chain)
+    if rc:
+        return rc
+
+    gamescript = ctx["gamescript"]
+    if not gamescript:
+        print(_fw_byo_message(package))
+        return 0
+    if not os.path.isfile(gamescript):
+        # Loud and nonzero whether this path came from an explicit --gamescript
+        # (issue #38) or from a configured-but-now-missing fw_gamescript -- in
+        # both cases it was explicitly pointed at this path, just possibly
+        # earlier via `deciwaves setup --fw-gamescript` (issue #23), so a silent
+        # BYO-style skip here would be wrong: unlike "never configured", this is
+        # "configured and broken", which must fail the run the same way a
+        # missing --ds-install/--hzd-package/--fw-package does.
+        print(f"deciwaves fw run: gamescript not found: {gamescript} "
+              f"(check --gamescript, or re-run `deciwaves setup --fw-gamescript <path>`)")
+        return 1
+
+    return _run_chain("fw", chunk2, ctx, full_chain=full_chain)
 
 
 # ---------------------------------------------------------------------------

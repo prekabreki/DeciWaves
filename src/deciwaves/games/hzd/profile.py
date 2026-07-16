@@ -13,6 +13,8 @@ self-contained games.hzd.sentence_fw), so `decima_version` is informational only
 """
 from __future__ import annotations
 
+import os
+
 from deciwaves.engine.profile import GameProfile
 
 # HZD quest-prefix -> category family (heuristic; see games.hzd.catalog.classify_hzd).
@@ -33,6 +35,28 @@ HZD_FAMILY_PREFIXES: dict[str, str] = {
 # "eclipse"/"square"/"mqueen". The remaining keys are deliberate word-stems
 # (e.g. "collectab" is a prefix of "collectables") and keep plain substring matching.
 HZD_ANCHORED_PREFIXES: frozenset[str] = frozenset({"mq", "sq", "ec", "dlc"})
+
+
+def hzd_package_error(package_dir: str) -> str | None:
+    """Return an actionable error message if *package_dir* doesn't contain
+    ``PackFileLocators.bin`` (the file ``FwPackage``/``FwLocators`` need), else
+    ``None``. Kept separate from ``build_profile`` so the missing-file message
+    is unit-testable without a real install (mirrors
+    ``games.fw.subtitle_bind.types_json_error``).
+
+    Without this check, a wrong --package (e.g. the game install root instead
+    of ...\\LocalCacheDX12\\package) surfaced only as a raw FileNotFoundError
+    traceback from engine.pack.fw_locators at catalog time (issue #34).
+    """
+    if os.path.isfile(os.path.join(package_dir, "PackFileLocators.bin")):
+        return None
+    return (
+        f"HZD package not found: no PackFileLocators.bin under {package_dir}. "
+        "This must be the ...\\LocalCacheDX12\\package directory (the one "
+        "containing PackFileLocators.bin), not the game install root. Fix: "
+        "re-run `deciwaves setup --hzd-package <...\\LocalCacheDX12\\package>` "
+        "(or pass the correct --package directly to this stage)."
+    )
 
 
 def build_profile(package_dir: str | None) -> GameProfile:

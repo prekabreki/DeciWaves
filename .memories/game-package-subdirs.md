@@ -11,7 +11,10 @@ Verified against fresh installs (2026-07-15, E2E run):
   `<install>\LocalCacheWinGame\package`.
 - **DS:DC** takes the install root itself (`data\*.bin` + `oo2core_7_win64.dll` live there).
 
-`deciwaves setup` accepts any existing dir for `--hzd-package`, and doctor's HZD check
-currently green-lights the install root, so a wrong path surfaces only as a
-`FileNotFoundError` traceback at catalog time - issue #34 tracks mirroring the FW-style
-validation (which names the expected subdir in its fix hint).
+Fixed in issue #34: doctor's `check_hzd_package` (src/deciwaves/cli/doctor.py) now requires
+`PackFileLocators.bin` to exist under the given path, mirroring `check_fw_package`'s
+`streaming_graph.core` check. `games/hzd/profile.py`'s `hzd_package_error()` gives the same
+validation an actionable, non-traceback failure at `hzd catalog`'s entry point (mirrors
+`games.fw.subtitle_bind.types_json_error`). `deciwaves setup --hzd-package` now prints a
+non-blocking WARNING when the path is wrong, and suggests the exact `LocalCacheDX12\package`
+subdir when it detects the user pointed at the install root.

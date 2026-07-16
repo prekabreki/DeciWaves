@@ -48,11 +48,14 @@ Then fetch the decode tools, point DeciWaves at your game, and check the result:
     deciwaves setup --ds-install "C:\...\DEATH STRANDING DIRECTORS CUT"
     deciwaves doctor
 
-`setup` downloads vgmstream-cli, VGAudioCli, and ffmpeg into `%LOCALAPPDATA%\DeciWaves\tools`,
-finds the Oodle DLL next to a DS install, and writes `config.json`. Pass `--hzd-package` or
-`--fw-package` for those games instead. It exits nonzero if any tool failed to download.
-`doctor` prints a preflight report and returns success as long as every required tool is
-present; a game you don't own shows `[--] not configured` and never fails the check.
+`setup` downloads vgmstream-cli, VGAudioCli, and ffmpeg into `%LOCALAPPDATA%\DeciWaves\tools`
+(skipping any tool already present there -- pass `--force` to refetch anyway), finds the
+Oodle DLL next to a DS install, and writes `config.json`. Pass `--hzd-package` or
+`--fw-package` for those games instead, and (optionally) `--fw-gamescript` to persist your own
+FW gamescript transcript so `fw run` and guided mode don't need `--gamescript` passed by hand
+every time. It exits nonzero if any tool failed to download. `doctor` prints a preflight report
+and returns success as long as every required tool is present; a game you don't own shows
+`[--] not configured` and never fails the check.
 
 ## Quick start - pick your game
 
@@ -61,12 +64,21 @@ The fastest path is guided mode. Run `deciwaves` with no arguments:
     deciwaves
 
 It detects which games you have configured, asks which one to extract, confirms a workspace
-directory, and runs that game's full pipeline. This is the same pipeline the explicit commands
+directory (and, for FW, optionally asks for your gamescript path if one isn't already
+configured - see below - so guided mode can reach match/full-reel/render too, not just
+subtitle-bind), and runs that game's full pipeline. This is the same pipeline the explicit commands
 run; it only adds the menu around it. In a non-interactive shell it prints usage and exits
 instead of blocking.
 
 If you'd rather drive it yourself, each game has an explicit `run` command. The global
-`--workspace` flag sets where output lands (default: the current directory).
+`--workspace` flag sets where output lands (default: the current directory) -- it must come
+*before* the game name (`deciwaves --workspace DIR ds run`, not `deciwaves ds --workspace DIR
+run`, which is parsed as that stage's own argument instead). A relative path you pass to a
+stage's own flag (e.g. `--gamescript`) that already exists is resolved against the directory
+you ran `deciwaves` from, not against `--workspace` -- it doesn't need to sit inside the
+workspace. A relative path that doesn't exist yet (e.g. a stage's own output path) is left
+alone and stays workspace-relative, same as always. A path saved earlier via `deciwaves setup`
+is always absolute regardless.
 
 ### Death Stranding (no GPU)
 
@@ -95,8 +107,9 @@ below), so an interrupted bind picks up where it stopped.
 FW chains extract -> asr -> subtitle-bind, which gets you clips labeled with their exact
 in-game subtitle. The asr stage needs the `[asr]` extra and a GPU. subtitle-bind requires a
 `types.json` (a Decima type map for FW) in the workspace root. Speaker labels and real story
-order additionally need your own copy of the FW gamescript, passed with `--gamescript`. Both
-are bring-your-own inputs that this repo does not and will not ship - see
+order additionally need your own copy of the FW gamescript, passed with `--gamescript` (or set
+once with `deciwaves setup --fw-gamescript <path>`, so you never have to pass the flag again).
+Both are bring-your-own inputs that this repo does not and will not ship - see
 [docs/BYO.md](docs/BYO.md). Without a gamescript, `fw run` stops cleanly after subtitle-bind
 and tells you what it's waiting for.
 
@@ -162,14 +175,20 @@ install by hand.
 | render | Render MP3 reels + tracklists | `--manifest`, `--tiers` |
 
 `fw run` chains extract -> asr -> subtitle-bind, then continues match -> full-reel -> render
-once a `--gamescript` is supplied.
+once a `--gamescript` is supplied (explicitly, or via a `--fw-gamescript` configured earlier
+with `deciwaves setup`).
 
 ## Configuration
 
 `deciwaves setup` writes `config.json` to `%LOCALAPPDATA%\DeciWaves\config.json`. It records
-the tools directory and the install path for each game you configured (`ds_install`,
-`hzd_package`, `fw_package`, `oodle_dll`). Set `DECIWAVES_CONFIG_DIR` to keep that file
+the tools directory, the install path for each game you configured (`ds_install`,
+`hzd_package`, `fw_package`, `oodle_dll`), and your optional FW gamescript path
+(`fw_gamescript`, set with `--fw-gamescript`). Set `DECIWAVES_CONFIG_DIR` to keep that file
 somewhere else.
+
+Each run merges its flags over what's already saved -- an omitted flag keeps its previous
+value, so running `deciwaves setup --hzd-package ...` later doesn't blank out a `--ds-install`
+configured earlier. Pass a flag again (with a new path) to update it.
 
 Environment overrides, all optional:
 
@@ -182,11 +201,13 @@ written under, all inside `out/`. DS writes `out/catalog.csv`, `out/playlist.csv
 in `out/audio`; HZD and FW write under `out/hzd/` and `out/fw/`.
 
 Resume. `deciwaves <game> run` writes a marker file at `out/<game>/.done-<stage>` after each
-stage finishes cleanly, and skips any stage whose marker already exists. To force one stage to
-re-run, delete its marker and run again; the stages before it stay skipped. A stage's output
-existing is deliberately not treated as done - only its marker is - so a crash mid-stage never
-looks finished. The HZD bind stage also checkpoints within itself: its `--transcripts-out`
-sidecar lets a restarted bind reuse the clips it already transcribed.
+stage finishes cleanly, and skips any stage whose marker already exists. To force a stage to
+re-run, delete its marker and run again; the stages before it stay skipped, but re-running
+that stage also deletes every LATER stage's marker in the chain, so downstream stages re-run
+too instead of resuming from what's now stale data. A stage's output existing is deliberately
+not treated as done - only its marker is - so a crash mid-stage never looks finished. The HZD
+bind stage also checkpoints within itself: its `--transcripts-out` sidecar lets a restarted
+bind reuse the clips it already transcribed.
 
 Bring-your-own inputs. The optional DS transcript, the required FW `types.json`, and the
 optional FW gamescript are all documented in [docs/BYO.md](docs/BYO.md), including the exact

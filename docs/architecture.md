@@ -145,9 +145,13 @@ guided interactive flow (see below).
   `doctor.py`'s own install checks (`check_ds_install` / `check_hzd_package` /
   `check_fw_package`) consider configured, prompts for a game and a workspace directory,
   `chdir`s into that workspace, and calls the identical
-  `deciwaves.cli.run.run_game(...)` that `deciwaves <game> run` calls. If stdin isn't a
-  TTY (CI, a pipe, a scripted invocation) it never blocks on `input()` — it prints a
-  one-line usage hint and returns a nonzero exit code instead.
+  `deciwaves.cli.run.run_game(...)` that `deciwaves <game> run` calls. Choosing FW adds one
+  more optional prompt — the BYO gamescript path, defaulting to whatever `fw_gamescript`
+  `deciwaves setup` already has saved (blank input skips it gracefully; this is the fix for
+  issue #23, which otherwise left guided mode with no way to ever complete the FW pipeline
+  past subtitle-bind). If stdin isn't a TTY (CI, a pipe, a scripted invocation) it never
+  blocks on `input()` — it prints a one-line usage hint and returns a nonzero exit code
+  instead.
 - **Stage dispatch.** `deciwaves/cli/main.py` keeps a `STAGES` registry — a
   `{game: {stage_name: (module_path, help_text)}}` mapping covering every stage in all
   three pipelines (DS: `catalog` / `cutscenes` / `trim` / `order` / `render`; HZD:
@@ -157,54 +161,110 @@ guided interactive flow (see below).
   `importlib.import_module(module_name).main(rest)` — the CLI doesn't reimplement stage
   logic or flags, it just imports the right module and calls its `main`. If you're looking
   for where a given stage's flags are defined, read the `argparse` block at the bottom of
-  that stage's own module, not the CLI layer.
-- **Workspace.** `--workspace` (default `.`) is resolved to an absolute path, created if
-  it doesn't exist, and the process `chdir`s into it before a stage runs. Stage modules
-  default their own outputs to CWD-relative `out/` paths (this is also why FW's
-  `subtitle-bind` stage can default `--types-json` to a bare `types.json`: it resolves
+  that stage's own module, not the CLI layer. Each stage's curated `help_text` is rendered
+  as its game subparser's epilog, so `deciwaves ds --help` (etc.) shows the one-line
+  description for every stage, not just the bare stage-name list (issue #32).
+- **Workspace.** `--workspace` (default `.`; must come *before* the game name — placed
+  after it, it's swallowed as that stage's own argument instead) is resolved to an absolute
+  path, created if it doesn't exist, and the process `chdir`s into it before a stage runs —
+  one shared `config.enter_workspace()` helper, used by both `main.py`'s stage dispatch and
+  guided mode's end-of-flow dispatch (issue #32; previously duplicated in both places).
+  Stage modules default their own outputs to CWD-relative `out/` paths (this is also why
+  FW's `subtitle-bind` stage can default `--types-json` to a bare `types.json`: it resolves
   against whatever directory `--workspace` chdir'd into), so this `chdir` is what lets one
   flag redirect an entire run without touching every stage's individual path arguments.
+  Because the `chdir` happens before a stage (or `run`) ever sees its own argv, any relative
+  path in a stage's own flags (e.g. `--gamescript`) is absolutized first, against the
+  directory the user actually ran `deciwaves` from — via `config.absolutize_existing_paths()`,
+  which rewrites only argv tokens that already exist relative to that pre-chdir cwd (an
+  output flag like `--out`/`--manifest` doesn't exist yet, so it's correctly left
+  workspace-relative; a typo'd input path is left alone too, and still fails its stage's own
+  "not found" check the same way it always did) — otherwise a relative `--gamescript` would
+  be silently looked up inside the workspace instead of where the user meant (issue #32).
+  Bare `deciwaves --workspace X` (no subcommand) passes `X` through to guided mode as its
+  workspace-prompt default, for the same reason — it used to be dropped entirely, and the
+  prompt always defaulted to the process cwd regardless of `--workspace`.
 - **Config env application.** `deciwaves/cli/config.py` persists a small JSON config
-  (`tools_dir`, `ds_install`, `hzd_package`, `fw_package`, `oodle_dll`) under
-  `%LOCALAPPDATA%/DeciWaves/config.json` (overridable via `DECIWAVES_CONFIG_DIR`).
-  Before dispatching to any stage, `main()` calls `_apply_config_env()`, which prepends
-  the saved `tools_dir` onto `PATH` and sets `DECIWAVES_VGMSTREAM` / `DECIWAVES_VGAUDIO`
-  when the corresponding executables are found there. `engine/audio_clip.py`,
-  `games/fw/extract.py`, and `games/hzd/atrac9.py` all read those environment variables
-  via `engine/tool_paths.py`'s `resolve(env_var, exe)` at the moment the decoder
-  subprocess is actually spawned, so stage-module import order relative to
-  `_apply_config_env()` doesn't matter.
+  (`tools_dir`, `ds_install`, `hzd_package`, `fw_package`, `oodle_dll`, `fw_gamescript`)
+  under `%LOCALAPPDATA%/DeciWaves/config.json` (overridable via `DECIWAVES_CONFIG_DIR`). Every
+  path field is saved absolute (resolved against the cwd at `setup` time, issue #32) — a
+  persisted path has no fixed "relative to what" once a later run can invoke `deciwaves`
+  from any directory. `config.py` also holds `TOOLS`, the single source of truth for each
+  decode tool's exe filename, override env var, display name, and pinned download URL —
+  previously triplicated (with the exe name spelled two different ways) across `main.py`,
+  `doctor.py`, and `setup.py` (issue #32). Before dispatching to any stage, `main()` calls
+  `_apply_config_env()`, which prepends the saved `tools_dir` onto `PATH` and sets
+  `DECIWAVES_VGMSTREAM` / `DECIWAVES_VGAUDIO` (from `TOOLS`) when the corresponding
+  executables are found there. `engine/audio_clip.py`, `games/fw/extract.py`, and
+  `games/hzd/atrac9.py` all read those environment variables via `engine/tool_paths.py`'s
+  `resolve(env_var, exe)` at the moment the decoder subprocess is actually spawned, so
+  stage-module import order relative to `_apply_config_env()` doesn't matter (issue #25).
 - **`setup`.** `deciwaves setup` (`deciwaves/cli/setup.py`) fetches `vgmstream-cli`,
-  `VGAudioCli`, and `ffmpeg` into a tools directory (default
+  `VGAudioCli`, and `ffmpeg` (via `config.TOOLS`) into a tools directory (default
   `%LOCALAPPDATA%\DeciWaves\tools`), locates `oo2core_7_win64.dll` under a supplied
-  `--ds-install`, and persists all of that — plus any `--hzd-package` / `--fw-package`
-  paths — via `deciwaves/cli/config.py`. Each tool's download/unpack is isolated (one
-  failed fetch is reported in the summary table and doesn't stop the others), but the
-  command exits nonzero overall if any tool ended up missing.
+  `--ds-install`, and persists all of that — plus any `--hzd-package` / `--fw-package` /
+  `--fw-gamescript` paths, each resolved to absolute — via `deciwaves/cli/config.py`. A
+  tool already present in the tools dir is *not* re-fetched (skipping the ~200 MB download
+  most runs used to repeat, issue #32) — but "present" means genuinely, fully installed, not
+  just "an exe with that name exists": `_download_and_unpack` writes a sidecar
+  `<exe>.files.txt` manifest (every extracted filename, one per line) only after every file in
+  its zip lands successfully, and `_tool_fully_installed` requires both the exe and every file
+  the manifest lists to still be there. A missing manifest (a legacy tools dir from before this
+  check existed, or an unpack interrupted before it got written — exe landed, a sibling decoder
+  DLL didn't) is treated as not-yet-installed and refetched once, which writes the manifest and
+  lets later runs genuinely skip (issue #32 follow-up: a present-but-partial exe used to pass as
+  "installed" and only `--force` could recover it). Pass `--force` to refetch a tool anyway even
+  when it's fully verified. `--skip-downloads` remains separate: it never downloads, and just
+  reports what's already there (by exe presence only, not manifest-verified). Each tool's download/unpack is isolated (one failed fetch is reported in the
+  summary table and doesn't stop the others), but the command exits nonzero overall if any
+  tool ended up missing. Every run merges its flags over what's already saved (issue #36):
+  an omitted flag keeps its previous value, so registering one game's (or
+  `--fw-gamescript`'s) path never blanks out another's.
 - **`doctor`.** `deciwaves doctor` (`deciwaves/cli/doctor.py`) runs a set of small,
-  independently-testable `(ok, message)` checks — the decode tools, the Oodle DLL, each
-  game's install/package path, the optional ASR extra, and CUDA availability — and prints
-  a report. The exit code is 0 only when every *required* check passes; an unconfigured
-  game (the user simply doesn't own it) reports `[--] not configured` but its check
-  reports `ok=True` regardless, so `doctor` never requires a DS (or HZD, or FW) install to
-  report a clean bill of health. The ASR extra and CUDA checks are purely informational
-  either way.
+  independently-testable checks — the decode tools, the Oodle DLL, each game's
+  install/package path, the optional FW gamescript, the optional ASR extra, and CUDA
+  availability — and prints a report. Every check still unpacks as a plain `(ok, message)`
+  2-tuple (`run_doctor`'s own loop, and every existing test, relies on that), but the three
+  game-install checks (`check_ds_install` / `check_hzd_package` / `check_fw_package`) return
+  a `CheckResult` carrying a structured `Availability` status (`OK` / `NOT_CONFIGURED` /
+  `BROKEN`) alongside the message — guided mode reads `.status` directly instead of
+  substring-matching the human-readable message text for "not configured" (issue #32). The
+  exit code is 0 only when every *required* check passes; an unconfigured game (the user
+  simply doesn't own it) reports `[--] not configured` (`Availability.NOT_CONFIGURED`) but
+  its check reports `ok=True` regardless, so `doctor` never requires a DS (or HZD, or FW)
+  install to report a clean bill of health. `fw_gamescript` follows the same shape: unset is
+  fine (`ok=True`, it's optional even when FW is owned), but configured-and-now-missing
+  fails the check (`ok=False`) the same way a moved DS/HZD/FW install path does — it was
+  explicitly pointed at that path, just earlier. The ASR extra and CUDA checks are purely
+  informational either way.
 - **`<game> run`.** Each per-game subparser accepts `run` alongside its real stage names,
   as a whole-pipeline shortcut (`deciwaves/cli/run.py`): `ds run` chains `catalog -> order
   -> render`; `hzd run` chains `catalog -> clip-index -> wem-metadata -> bind -> render`;
   `fw run` chains `extract -> asr -> subtitle-bind`, then — only once a `--gamescript`
-  (BYO; see `docs/BYO.md`) is supplied — continues `match -> full-reel -> render`. The
+  (BYO; see `docs/BYO.md`), or otherwise a configured `fw_gamescript`, resolves to a real
+  file — continues `match -> full-reel -> render`. An explicit `--gamescript` beats a
+  configured `fw_gamescript`; either way, if the resolved path doesn't exist on disk the
+  run fails loudly (nonzero exit, issue #38) instead of silently behaving like no
+  gamescript was given at all — that distinction matters because "never configured" (fine,
+  BYO is optional) and "configured but the file moved" (a real problem) must not look the
+  same. Without any gamescript at all, the stop message shows the exact command to re-run
+  with, including the real `--package` this run used, plus the `deciwaves setup
+  --fw-gamescript` alternative for persisting it once (issue #23). The
   GPU-bound stages in those chains (`hzd bind`, `fw asr`) are gated on
   `importlib.util.find_spec("whisperx")` and print an actionable install hint (`pip
   install deciwaves[asr]`, plus a matching PyTorch build) instead of crashing when the ASR
   extra isn't installed. **Resume is per-stage**: once a stage's `main()` returns `0`,
   `run` writes a done-marker file at `out/<game>/.done-<stage>`, and a later `run`
   invocation skips any stage whose marker already exists (delete the marker to force a
-  re-run of just that stage). A stage's own output path or directory existing is
-  deliberately *not* treated as "done" — a crash-interrupted run's partial output, or one
-  stage's output directory being mistaken for another's, must never look like a finished
-  stage. Each `run` subcommand builds its own `argparse` parser for its own flags (e.g. `ds
-  run --data-dir/--oodle`, `fw run --package/--gamescript`), so `deciwaves <game> run
+  re-run of that stage). Re-running a stage this way (or any stage whose marker didn't
+  already exist) also deletes every LATER stage's marker in that game's declared chain
+  before it runs, so a stale early-stage rebuild can't leave downstream stages
+  skip-and-stale — they're forced to re-run too (issue #37). A stage's own output path or
+  directory existing is deliberately *not* treated as "done" — a crash-interrupted run's
+  partial output, or one stage's output directory being mistaken for another's, must never
+  look like a finished stage. Each `run` subcommand builds its own `argparse` parser for
+  its own flags (e.g. `ds run --data-dir/--oodle`, `fw run --package/--gamescript`), so
+  `deciwaves <game> run
   --help` prints that game's actual flags instead of falling through and starting the
   multi-hour pipeline.
 

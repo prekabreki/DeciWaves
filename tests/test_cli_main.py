@@ -15,6 +15,28 @@ def _restore_cwd():
     os.chdir(cwd)
 
 
+def test_workspace_help_documents_ordering_and_path_resolution_semantics(capsys):
+    """--workspace's help text must actually explain the two easy-to-get-wrong
+    semantics (issue #32): it must precede the game name, and a relative
+    stage-flag path resolves against the invocation cwd, not --workspace --
+    but ONLY for a path that already exists there. A not-yet-existing
+    relative path (e.g. a stage's own output flag) stays workspace-relative,
+    same as always -- the help text must not overclaim otherwise (review
+    follow-up: it previously said "any relative path ... is resolved
+    against ..." unconditionally, which doesn't match
+    config.absolutize_existing_paths' existence-based rule)."""
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["--help"])
+
+    assert exc.value.code == 0
+    # argparse wraps --workspace's help text across lines -- normalize
+    # whitespace before substring-checking so wrap points don't matter.
+    out = " ".join(capsys.readouterr().out.split())
+    assert "BEFORE the game name" in out
+    assert "ALREADY EXISTS there is resolved against the directory you ran" in out
+    assert "doesn't exist yet" in out and "stays workspace-relative" in out
+
+
 def test_version(capsys):
     with pytest.raises(SystemExit) as e:
         cli.main(["--version"])
@@ -101,6 +123,23 @@ def test_game_help_alone_still_shows_generic_stage_list(capsys):
         assert stage_name in out
 
 
+@pytest.mark.parametrize("game", ["ds", "hzd", "fw"])
+def test_game_help_shows_each_stage_curated_description(game, capsys):
+    """STAGES' per-stage help strings (the second element of each
+    `(module_path, help_text)` tuple) used to be dead data -- nothing ever
+    printed them (main.py's own dispatch discarded it into `_help`, see
+    STAGES[args.cmd][stage]). They must now actually reach the user, as the
+    game subparser's epilog (issue #32)."""
+    with pytest.raises(SystemExit) as exc:
+        cli.main([game, "--help"])
+
+    assert exc.value.code == 0
+    out = capsys.readouterr().out
+    for stage_name, (_mod, help_text) in cli.STAGES[game].items():
+        assert stage_name in out
+        assert help_text in out, f"{game} {stage_name}'s curated help text missing from --help output"
+
+
 def test_non_run_stage_help_does_not_execute_the_stage(tmp_path, capsys):
     """`deciwaves ds catalog --help` must not execute the catalog stage. Drives the
     REAL catalog module (no faking `_import_stage`): catalog.py's own argparse
@@ -113,3 +152,51 @@ def test_non_run_stage_help_does_not_execute_the_stage(tmp_path, capsys):
 
     assert exc.value.code == 0
     assert not (tmp_path / "out").exists()
+
+
+def test_relative_stage_flag_path_survives_workspace_chdir(monkeypatch, tmp_path):
+    """chdir-before-dispatch used to mis-resolve relative stage-flag paths: a
+    relative --gamescript is meant relative to where the user ran `deciwaves`
+    from, but main.py's --workspace chdir happens BEFORE the stage (or `run`)
+    ever sees it, so it got looked up inside the workspace instead -- silently
+    wrong (issue #32). A path that exists relative to the original cwd must
+    be absolutized before the chdir, so it still points at the same file."""
+    invoke_dir = tmp_path / "invoke_dir"
+    invoke_dir.mkdir()
+    gamescript = invoke_dir / "gamescript.md"
+    gamescript.write_text("Aloy: hi\n", encoding="utf-8")
+    monkeypatch.chdir(invoke_dir)
+
+    workspace = tmp_path / "ws"
+
+    seen = {}
+
+    def _fake_run_game(game, cfg, extra_argv):
+        seen["argv"] = extra_argv
+        return 0
+
+    monkeypatch.setattr(run_mod, "run_game", _fake_run_game)
+
+    rc = cli.main(["--workspace", str(workspace), "fw", "run",
+                   "--gamescript", "gamescript.md"])
+
+    assert rc == 0
+    assert seen["argv"] == ["--gamescript", str(gamescript)]
+
+
+def test_relative_path_that_never_existed_is_left_untouched(monkeypatch, tmp_path):
+    """A typo'd/never-existed relative path must not be rewritten -- it still
+    fails whatever stage's own "not found" check the same way it always did,
+    just relative to the workspace instead of the original cwd (no change for
+    this case, which was already a loud, correctly-nonzero failure)."""
+    called = {}
+
+    def _stage(argv):
+        called["argv"] = argv
+        return 0
+
+    monkeypatch.setattr(cli, "_import_stage", lambda mod: _stage)
+    rc = cli.main(["--workspace", str(tmp_path), "ds", "catalog",
+                   "--data-dir", "no-such-relative-dir", "--oodle", "Y"])
+    assert rc == 0
+    assert called["argv"] == ["--data-dir", "no-such-relative-dir", "--oodle", "Y"]

@@ -5,7 +5,9 @@ reimplementing anything:
 
 - which games are usable: doctor.py's per-game ``check_ds_install`` /
   ``check_hzd_package`` / ``check_fw_package`` functions -- the single source
-  of truth for "found" vs "not configured" vs "configured but broken".
+  of truth for "found" vs "not configured" vs "configured but broken", read
+  off each check's structured ``doctor.Availability`` status, not its message
+  text (issue #32).
 - dispatch: :func:`deciwaves.cli.run.run_game`, the identical path
   ``deciwaves <game> run`` takes -- chdir into the chosen workspace, then
   ``run_game(game, cfg, [])``. Per-stage progress is whatever that call
@@ -17,12 +19,11 @@ nonzero exit code instead.
 """
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
 from deciwaves import __version__
-from deciwaves.cli import doctor
+from deciwaves.cli import config, doctor
 from deciwaves.cli.run import run_game
 
 # (key, menu label, banner abbreviation, gpu note)
@@ -41,15 +42,17 @@ _CHECKS = {
 
 def _detect_games(cfg: dict) -> dict:
     """{game key: found}. "found" means configured *and* valid -- reuses
-    doctor.py's check functions (which return ok=True for both a valid
-    install and an unconfigured one, distinguished only by message text) so
+    doctor.py's check functions, reading each one's structured
+    ``doctor.Availability`` status (issue #32: this used to substring-match
+    the human-readable message for "not configured", which broke the moment
+    a message legitimately contained those words for an unrelated reason) so
     that "not configured" vs "configured but broken" logic lives in exactly
     one place.
     """
     found = {}
     for game, check in _CHECKS.items():
-        ok, msg = check(cfg)
-        found[game] = ok and "not configured" not in msg
+        result = check(cfg)
+        found[game] = result.status is doctor.Availability.OK
     return found
 
 
@@ -88,8 +91,33 @@ def _prompt_workspace(default_ws: str) -> str | None:
     return raw or default_ws
 
 
-def run_guided(cfg: dict) -> int:
-    """Entry point for bare ``deciwaves`` (no subcommand). Returns an exit code."""
+def _prompt_gamescript(default: str) -> str | None:
+    """Ask for the (optional, BYO) FW gamescript path. Enter alone keeps
+    ``default`` -- the already-configured `fw_gamescript`, if any, or "" (skip)
+    when nothing is configured -- same default-on-blank shape as
+    `_prompt_workspace`. Returning "" (not None) means "skip gracefully";
+    only an EOFError (non-interactive edge case) returns None."""
+    print("Optional: your own Forbidden West gamescript transcript, for speaker + "
+          "story-order matching (BYO -- this repo can't ship game text; see docs/BYO.md). "
+          "Leave blank to skip for now -- you can still supply it later with "
+          "`deciwaves fw run --gamescript <path>` or `deciwaves setup --fw-gamescript <path>`.")
+    suffix = f" [{default}]" if default else " [skip]"
+    try:
+        raw = input(f"Gamescript path{suffix}: ").strip()
+    except EOFError:
+        return None
+    return raw or default
+
+
+def run_guided(cfg: dict, workspace: str | None = None) -> int:
+    """Entry point for bare ``deciwaves`` (no subcommand). Returns an exit code.
+
+    ``workspace``, when given, is used as the workspace prompt's default (issue
+    #32: bare `deciwaves --workspace X` used to silently ignore --workspace
+    here, always defaulting the prompt to ``Path.cwd()`` instead) -- ``None``
+    (the default, e.g. when calling this directly in a test) falls back to the
+    process cwd, same as before this parameter existed.
+    """
     if not sys.stdin.isatty():
         print(_usage_message())
         return 2
@@ -106,13 +134,25 @@ def run_guided(cfg: dict) -> int:
         print(f"{label} isn't set up yet -- run `deciwaves setup` first.")
         return 1
 
-    default_ws = str(Path.cwd())
+    default_ws = workspace or str(Path.cwd())
     workspace = _prompt_workspace(default_ws)
     if workspace is None:
         print(_usage_message())
         return 2
 
-    ws = Path(workspace).resolve()
-    ws.mkdir(parents=True, exist_ok=True)
-    os.chdir(ws)                      # same contract as main.py's `run` dispatch
-    return run_game(game, cfg, [])
+    extra_argv = []
+    if game == "fw":
+        gamescript = _prompt_gamescript(cfg.get("fw_gamescript", ""))
+        if gamescript is None:
+            print(_usage_message())
+            return 2
+        if gamescript:
+            extra_argv = ["--gamescript", gamescript]
+
+    # Same as main.py's stage dispatch: absolutize a relative --gamescript
+    # BEFORE the chdir below, so it keeps pointing at the file the user meant
+    # (relative to where they ran `deciwaves` from) instead of being looked
+    # up inside the workspace (issue #32).
+    extra_argv = config.absolutize_existing_paths(extra_argv)
+    config.enter_workspace(workspace)  # same contract as main.py's `run` dispatch
+    return run_game(game, cfg, extra_argv)
