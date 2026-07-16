@@ -92,7 +92,15 @@ def main(argv=None):
                     help="incremental transcript checkpoint sidecar; appended to per clip "
                          "as it is transcribed so a crash/interrupt loses at most one clip -- "
                          "resume with --transcripts <this file> --package <pkg>")
-    ap.add_argument("--sample-cap", type=int, default=300)   # MVP: cap ASR work
+    ap.add_argument("--sample-cap", type=int, default=300,
+                     help="MVP cap on ASR work: transcribe at most this many clips' worth of "
+                          "ambiguous buckets (whole buckets, so it may slightly overshoot -- "
+                          "see the cap loop below), never the full library, since structural "
+                          "binding already resolves most rows without any ASR at all. 0 = "
+                          "unlimited (a full pass over every ambiguous bucket -- hours on a "
+                          "full library). When a nonzero cap actually truncates work, this "
+                          "prints exactly how many ambiguous buckets were left "
+                          "untranscribed. Forwarded through `hzd run` (issue #35).")
     ap.add_argument("--all-buckets", action="store_true",
                     help="transcribe every ambiguous bucket, not just story-relevant "
                          "ones (default skips pure ambient/bark collision buckets)")
@@ -121,11 +129,23 @@ def main(argv=None):
     # so a cap that split a bucket would starve it of clips and (formerly) fabricate binds by
     # exclusion. Include whole buckets until the cap is reached (may slightly overshoot).
     want = []
+    n_bucket_consumed = 0
     for grp in relevant:
         if a.sample_cap and len(want) >= a.sample_cap:
             break
         want.extend(c["clip_row"] for c in grp["clips"])
+        n_bucket_consumed += 1
     want = set(want)
+    # Issue #35: a cap that truncates work must never be silent -- every stage that
+    # applies it reports success regardless, and (before this) nothing said how much
+    # was left on the table. `n_bucket_consumed` stops advancing the moment the cap
+    # trips, so every bucket from there to the end of `relevant` was skipped whole.
+    n_bucket_skipped = len(relevant) - n_bucket_consumed
+    if n_bucket_skipped:
+        print(f"asr: SAMPLE CAP APPLIED (--sample-cap={a.sample_cap}): "
+              f"{n_bucket_skipped} ambiguous bucket(s) left untranscribed this run -- "
+              f"those rows will be absent from the manifest/reels. Re-run with "
+              f"--sample-cap 0 (or a higher number) for a full pass.")
 
     # Transcripts: reuse a prior manifest/sidecar's clip_row+transcript columns (instant
     # re-match, no GPU) and/or run WhisperX for whatever's left. Combining --transcripts
