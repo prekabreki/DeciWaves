@@ -12,15 +12,57 @@ unconfigured game (the user simply doesn't own it) reports ``[--] not
 configured`` but its ``ok`` is True -- it must never fail the run. The ASR
 extra and CUDA checks are purely informational and always report ``ok=True``
 regardless of what they find.
+
+The three game-install checks (``check_ds_install`` / ``check_hzd_package`` /
+``check_fw_package``) return a :class:`CheckResult` instead of a bare tuple:
+alongside the human-readable ``message``, it carries a structured
+:class:`Availability` (``OK`` / ``NOT_CONFIGURED`` / ``BROKEN``) so a caller
+that needs to distinguish "not configured" from "configured and valid" --
+guided.py's game-availability menu, specifically -- can branch on that status
+directly instead of substring-matching the message text for "not configured"
+(issue #32: that substring match broke the moment a message legitimately
+mentioned those words for an unrelated reason). ``CheckResult`` still unpacks
+as a plain ``(ok, message)`` 2-tuple -- ``run_doctor``'s own loop below, and
+every other existing check function, keep the bare-tuple shape unchanged.
 """
 from __future__ import annotations
 
 import argparse
+import enum
 import os
 import shutil
 from pathlib import Path
+from typing import NamedTuple
 
 from deciwaves.cli import config
+
+
+class Availability(enum.Enum):
+    """Tri-state install/config status for a game-availability check."""
+    OK = "ok"
+    NOT_CONFIGURED = "not_configured"
+    BROKEN = "broken"
+
+
+class CheckResult(NamedTuple):
+    """A game-availability check's outcome. Unpacks as ``(ok, message)`` --
+    see ``__iter__`` -- so it drops into `run_doctor`'s existing
+    ``for passed, msg in checks`` loop, and every existing
+    ``ok, msg = check_x(...)`` call site/test, unchanged. ``status`` is the
+    structured signal callers that need more than pass/fail (guided.py)
+    should read instead of the message text.
+    """
+    status: Availability
+    message: str
+
+    @property
+    def ok(self) -> bool:
+        return self.status is not Availability.BROKEN
+
+    def __iter__(self):
+        yield self.ok
+        yield self.message
+
 
 # --- tool resolution ---------------------------------------------------
 # Mirrors the resolution order the engine modules use at import time
@@ -62,33 +104,39 @@ def check_oodle(oodle_dll: str, ds_install: str = "") -> tuple[bool, str]:
 
 # --- game installs: unconfigured never fails the exit code ----------------
 
-def check_ds_install(ds_install: str) -> tuple[bool, str]:
+def check_ds_install(ds_install: str) -> CheckResult:
     if not ds_install:
-        return True, "[--] DS install: not configured (fine if you don't own it)"
+        return CheckResult(Availability.NOT_CONFIGURED,
+                            "[--] DS install: not configured (fine if you don't own it)")
     if Path(ds_install, "data").is_dir():
-        return True, f"[ok] DS install: {ds_install}"
-    return False, (f"[--] DS install: {ds_install!r} has no data/ dir. "
-                    f"Fix: run `deciwaves setup --ds-install <game root>`.")
+        return CheckResult(Availability.OK, f"[ok] DS install: {ds_install}")
+    return CheckResult(Availability.BROKEN,
+                        f"[--] DS install: {ds_install!r} has no data/ dir. "
+                        f"Fix: run `deciwaves setup --ds-install <game root>`.")
 
 
-def check_hzd_package(hzd_package: str) -> tuple[bool, str]:
+def check_hzd_package(hzd_package: str) -> CheckResult:
     if not hzd_package:
-        return True, "[--] HZD package: not configured (fine if you don't own it)"
+        return CheckResult(Availability.NOT_CONFIGURED,
+                            "[--] HZD package: not configured (fine if you don't own it)")
     if Path(hzd_package, "PackFileLocators.bin").is_file():
-        return True, f"[ok] HZD package: {hzd_package}"
-    return False, (f"[--] HZD package: {hzd_package!r} has no PackFileLocators.bin. "
-                    f"This must be the ...\\LocalCacheDX12\\package directory (the one "
-                    f"containing PackFileLocators.bin), not the game install root. "
-                    f"Fix: run `deciwaves setup --hzd-package <...\\LocalCacheDX12\\package>`.")
+        return CheckResult(Availability.OK, f"[ok] HZD package: {hzd_package}")
+    return CheckResult(Availability.BROKEN,
+                        f"[--] HZD package: {hzd_package!r} has no PackFileLocators.bin. "
+                        f"This must be the ...\\LocalCacheDX12\\package directory (the one "
+                        f"containing PackFileLocators.bin), not the game install root. "
+                        f"Fix: run `deciwaves setup --hzd-package <...\\LocalCacheDX12\\package>`.")
 
 
-def check_fw_package(fw_package: str) -> tuple[bool, str]:
+def check_fw_package(fw_package: str) -> CheckResult:
     if not fw_package:
-        return True, "[--] FW package: not configured (fine if you don't own it)"
+        return CheckResult(Availability.NOT_CONFIGURED,
+                            "[--] FW package: not configured (fine if you don't own it)")
     if Path(fw_package, "streaming_graph.core").is_file():
-        return True, f"[ok] FW package: {fw_package}"
-    return False, (f"[--] FW package: {fw_package!r} has no streaming_graph.core. "
-                    f"Fix: run `deciwaves setup --fw-package <...\\LocalCacheWinGame\\package>`.")
+        return CheckResult(Availability.OK, f"[ok] FW package: {fw_package}")
+    return CheckResult(Availability.BROKEN,
+                        f"[--] FW package: {fw_package!r} has no streaming_graph.core. "
+                        f"Fix: run `deciwaves setup --fw-package <...\\LocalCacheWinGame\\package>`.")
 
 
 def check_fw_gamescript(fw_gamescript: str) -> tuple[bool, str]:

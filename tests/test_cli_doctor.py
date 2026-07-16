@@ -80,12 +80,23 @@ def test_check_oodle_ds_configured_but_oodle_dll_unset():
 
 
 # --- DS / HZD / FW game checks: unconfigured never fails exit code ----------
+#
+# Issue #32: these three checks return a doctor.CheckResult, not a bare tuple
+# -- it carries a structured doctor.Availability (OK / NOT_CONFIGURED /
+# BROKEN) alongside the message, so guided.py's game-availability menu can
+# read `.status` instead of substring-matching the message text. CheckResult
+# still unpacks as a plain (ok, message) 2-tuple, so every `ok, msg = ...`
+# call below is unaffected.
 
 def test_check_ds_install_not_configured():
     ok, msg = doctor.check_ds_install("")
     assert ok  # does not fail the exit code
     assert "not configured" in msg
     assert msg.startswith("[--]")
+
+
+def test_check_ds_install_status_is_structured_tri_state():
+    assert doctor.check_ds_install("").status is doctor.Availability.NOT_CONFIGURED
 
 
 def test_check_ds_install_valid(tmp_path):
@@ -99,6 +110,12 @@ def test_check_ds_install_configured_but_broken(tmp_path):
     ok, msg = doctor.check_ds_install(str(tmp_path))
     assert not ok
     assert msg.startswith("[--]")
+    assert doctor.check_ds_install(str(tmp_path)).status is doctor.Availability.BROKEN
+
+
+def test_check_ds_install_valid_status_is_ok(tmp_path):
+    (tmp_path / "data").mkdir()
+    assert doctor.check_ds_install(str(tmp_path)).status is doctor.Availability.OK
 
 
 def test_check_hzd_package_not_configured():

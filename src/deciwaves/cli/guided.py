@@ -5,7 +5,9 @@ reimplementing anything:
 
 - which games are usable: doctor.py's per-game ``check_ds_install`` /
   ``check_hzd_package`` / ``check_fw_package`` functions -- the single source
-  of truth for "found" vs "not configured" vs "configured but broken".
+  of truth for "found" vs "not configured" vs "configured but broken", read
+  off each check's structured ``doctor.Availability`` status, not its message
+  text (issue #32).
 - dispatch: :func:`deciwaves.cli.run.run_game`, the identical path
   ``deciwaves <game> run`` takes -- chdir into the chosen workspace, then
   ``run_game(game, cfg, [])``. Per-stage progress is whatever that call
@@ -40,15 +42,17 @@ _CHECKS = {
 
 def _detect_games(cfg: dict) -> dict:
     """{game key: found}. "found" means configured *and* valid -- reuses
-    doctor.py's check functions (which return ok=True for both a valid
-    install and an unconfigured one, distinguished only by message text) so
+    doctor.py's check functions, reading each one's structured
+    ``doctor.Availability`` status (issue #32: this used to substring-match
+    the human-readable message for "not configured", which broke the moment
+    a message legitimately contained those words for an unrelated reason) so
     that "not configured" vs "configured but broken" logic lives in exactly
     one place.
     """
     found = {}
     for game, check in _CHECKS.items():
-        ok, msg = check(cfg)
-        found[game] = ok and "not configured" not in msg
+        result = check(cfg)
+        found[game] = result.status is doctor.Availability.OK
     return found
 
 
@@ -145,5 +149,10 @@ def run_guided(cfg: dict, workspace: str | None = None) -> int:
         if gamescript:
             extra_argv = ["--gamescript", gamescript]
 
+    # Same as main.py's stage dispatch: absolutize a relative --gamescript
+    # BEFORE the chdir below, so it keeps pointing at the file the user meant
+    # (relative to where they ran `deciwaves` from) instead of being looked
+    # up inside the workspace (issue #32).
+    extra_argv = config.absolutize_existing_paths(extra_argv)
     config.enter_workspace(workspace)  # same contract as main.py's `run` dispatch
     return run_game(game, cfg, extra_argv)

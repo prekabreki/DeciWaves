@@ -34,6 +34,38 @@ def _all_found_cfg(tmp_path):
     return {"ds_install": str(ds), "hzd_package": str(hzd), "fw_package": str(fw)}
 
 
+def test_detect_games_reads_structured_status_not_message_substring(monkeypatch):
+    """Regression for the old `ok and "not configured" not in msg` substring
+    match (issue #32): a check's message could mention the words "not
+    configured" for a reason unrelated to its own tri-state status (e.g. as
+    part of a longer, differently-worded hint) while genuinely being
+    Availability.OK -- guided.py must read the check's structured `.status`,
+    never grep the human-readable message text."""
+    from deciwaves.cli.doctor import Availability, CheckResult
+
+    monkeypatch.setattr(
+        guided.doctor, "check_ds_install",
+        lambda ds: CheckResult(Availability.OK,
+                                "[ok] DS install: C:\\Games\\DS (extra: HD texture pack not configured)"),
+    )
+    found = guided._detect_games({"ds_install": "C:\\Games\\DS"})
+    assert found["ds"] is True  # OK status, even though the message contains "not configured"
+
+
+def test_detect_games_not_configured_status_is_never_found_regardless_of_wording(monkeypatch):
+    """The inverse: a NOT_CONFIGURED status must read as not-found even when
+    the message text doesn't contain the literal substring "not configured"
+    at all -- proving guided.py isn't grepping text either way."""
+    from deciwaves.cli.doctor import Availability, CheckResult
+
+    monkeypatch.setattr(
+        guided.doctor, "check_hzd_package",
+        lambda pkg: CheckResult(Availability.NOT_CONFIGURED, "[--] HZD package: nothing set up yet, all fine"),
+    )
+    found = guided._detect_games({"hzd_package": ""})
+    assert found["hzd"] is False
+
+
 def test_non_tty_never_calls_input_and_prints_usage(monkeypatch, capsys):
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
 
@@ -197,6 +229,37 @@ def test_fw_selection_gamescript_prompt_defaults_to_configured_value(monkeypatch
     cfg["fw_gamescript"] = str(gamescript)
 
     responses = iter(["3", "", ""])  # pick fw, default workspace, accept configured default
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(responses))
+
+    calls = {}
+
+    def _fake_run_game(game, cfg_arg, extra_argv):
+        calls["args"] = (game, cfg_arg, extra_argv)
+        return 0
+
+    monkeypatch.setattr(guided, "run_game", _fake_run_game)
+
+    rc = guided.run_guided(cfg)
+    assert rc == 0
+    assert calls["args"] == ("fw", cfg, ["--gamescript", str(gamescript)])
+
+
+def test_fw_selection_relative_gamescript_survives_workspace_chdir(monkeypatch, tmp_path):
+    """A relative gamescript path typed at the prompt is relative to wherever
+    the user is running `deciwaves` from -- it must keep pointing at that
+    file after guided mode chdirs into the (possibly different) workspace,
+    not be silently looked up inside the workspace instead (issue #32)."""
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    invoke_dir = tmp_path / "invoke_dir"
+    invoke_dir.mkdir()
+    monkeypatch.chdir(invoke_dir)
+    cfg = _all_found_cfg(tmp_path)
+    gamescript = invoke_dir / "gamescript.md"
+    gamescript.write_text("Aloy: Hello.\n", encoding="utf-8")
+
+    workspace = tmp_path / "some-other-workspace"
+
+    responses = iter(["3", str(workspace), "gamescript.md"])  # fw, explicit workspace, relative gamescript
     monkeypatch.setattr("builtins.input", lambda prompt="": next(responses))
 
     calls = {}
