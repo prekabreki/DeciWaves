@@ -225,8 +225,10 @@ def main(argv=None):
     ap.add_argument("--catalog", default="out/catalog.csv")
     ap.add_argument("--cutscene-tracks", default="out/cutscene_tracks.csv")
     ap.add_argument("--transcript", default="",
-                    help="narrative transcript for anchoring (BYO — see docs/BYO.md); "
-                         "'' disables anchoring and falls back to episode/scene order")
+                    help="narrative transcript for anchoring (BYO -- see docs/BYO.md); "
+                         "omit (or pass '') to disable anchoring and fall back to "
+                         "episode/scene order. A given path that doesn't exist is an "
+                         "error, not a silent fallback.")
     ap.add_argument("--out", default="out/playlist.csv")
     ap.add_argument("--dupes", default="out/render-dupes.csv")
     args = ap.parse_args(argv)
@@ -236,14 +238,19 @@ def main(argv=None):
     with open(args.cutscene_tracks, newline="", encoding="utf-8") as f:
         cutscene_rows = list(csv.DictReader(f))
 
-    if args.transcript and os.path.isfile(args.transcript):
+    if args.transcript:
+        # An EXPLICIT --transcript that doesn't exist is a mistyped path, not a
+        # request to disable anchoring -- fail loud and nonzero naming it, the
+        # same shape #38 fixed for fw --gamescript and #33 for --speech-trim.
+        # Silently disabling anchoring and exiting 0 let anything scripted on the
+        # exit code believe anchoring succeeded (finding 8).
+        if not os.path.isfile(args.transcript):
+            print(f"deciwaves ds order: transcript not found: {args.transcript} "
+                  f"(check --transcript, or omit it to disable anchoring; see docs/BYO.md)")
+            return 1
         anchor_index = ta.build_index(args.transcript)
     else:
-        if args.transcript:
-            print(f"transcript not found: {args.transcript} -- "
-                  f"anchoring disabled (see docs/BYO.md)")
-        else:
-            print("transcript anchoring disabled (no transcript provided — see docs/BYO.md)")
+        print("transcript anchoring disabled (no transcript provided -- see docs/BYO.md)")
         anchor_index = {}
 
     segs, dropped = build_playlist(catalog_rows, cutscene_rows, anchor_index)
