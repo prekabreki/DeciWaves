@@ -134,6 +134,110 @@ def test_unconfigured_game_selection_points_at_setup(monkeypatch, tmp_path, caps
     assert "deciwaves setup" in out
 
 
+def test_fw_selection_prompts_for_gamescript_and_passes_it(monkeypatch, tmp_path):
+    """Guided mode's whole point is completing FW end-to-end -- it must be able
+    to both ask for and pass a --gamescript (#23), not just leave the user
+    stuck at the BYO stop after subtitle-bind."""
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.chdir(tmp_path)
+    cfg = _all_found_cfg(tmp_path)
+    gamescript = tmp_path / "gamescript.md"
+    gamescript.write_text("Aloy: Hello.\n", encoding="utf-8")
+
+    responses = iter(["3", "", str(gamescript)])  # pick fw, default workspace, gamescript path
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(responses))
+
+    calls = {}
+
+    def _fake_run_game(game, cfg_arg, extra_argv):
+        calls["args"] = (game, cfg_arg, extra_argv)
+        return 0
+
+    monkeypatch.setattr(guided, "run_game", _fake_run_game)
+
+    rc = guided.run_guided(cfg)
+    assert rc == 0
+    assert calls["args"] == ("fw", cfg, ["--gamescript", str(gamescript)])
+
+
+def test_fw_selection_gamescript_skip_is_graceful(monkeypatch, tmp_path):
+    """Pressing Enter with no gamescript configured must not block or error --
+    it's BYO and optional. The run proceeds without a --gamescript flag and
+    `run.py`'s own BYO message + graceful exit-0 handles the rest."""
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.chdir(tmp_path)
+    cfg = _all_found_cfg(tmp_path)
+
+    responses = iter(["3", "", ""])  # pick fw, default workspace, skip gamescript
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(responses))
+
+    calls = {}
+
+    def _fake_run_game(game, cfg_arg, extra_argv):
+        calls["args"] = (game, cfg_arg, extra_argv)
+        return 0
+
+    monkeypatch.setattr(guided, "run_game", _fake_run_game)
+
+    rc = guided.run_guided(cfg)
+    assert rc == 0
+    assert calls["args"] == ("fw", cfg, [])
+
+
+def test_fw_selection_gamescript_prompt_defaults_to_configured_value(monkeypatch, tmp_path):
+    """If fw_gamescript is already configured (via `deciwaves setup
+    --fw-gamescript`), pressing Enter accepts that configured value rather
+    than skipping -- mirrors _prompt_workspace's default-on-blank behavior."""
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.chdir(tmp_path)
+    cfg = _all_found_cfg(tmp_path)
+    gamescript = tmp_path / "gamescript.md"
+    gamescript.write_text("Aloy: Hello.\n", encoding="utf-8")
+    cfg["fw_gamescript"] = str(gamescript)
+
+    responses = iter(["3", "", ""])  # pick fw, default workspace, accept configured default
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(responses))
+
+    calls = {}
+
+    def _fake_run_game(game, cfg_arg, extra_argv):
+        calls["args"] = (game, cfg_arg, extra_argv)
+        return 0
+
+    monkeypatch.setattr(guided, "run_game", _fake_run_game)
+
+    rc = guided.run_guided(cfg)
+    assert rc == 0
+    assert calls["args"] == ("fw", cfg, ["--gamescript", str(gamescript)])
+
+
+def test_fw_selection_gamescript_eof_prints_usage(monkeypatch, tmp_path, capsys):
+    """EOFError on the gamescript prompt (e.g. `deciwaves < NUL`) must be
+    handled like every other guided-mode prompt -- never a raw traceback."""
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.chdir(tmp_path)
+    cfg = _all_found_cfg(tmp_path)
+
+    responses = iter(["3", ""])  # pick fw, default workspace, then EOF on gamescript prompt
+
+    def _fake_input(prompt=""):
+        try:
+            return next(responses)
+        except StopIteration:
+            raise EOFError("EOF when reading a line")
+
+    monkeypatch.setattr("builtins.input", _fake_input)
+
+    called = {"run_game": False}
+    monkeypatch.setattr(guided, "run_game", lambda *a, **k: called.update(run_game=True) or 0)
+
+    rc = guided.run_guided(cfg)
+    assert rc == 2
+    assert not called["run_game"]
+    out = capsys.readouterr().out
+    assert "no subcommand" in out.lower()
+
+
 def test_bare_invocation_dispatches_to_run_guided(monkeypatch):
     from deciwaves.cli import main as cli
 

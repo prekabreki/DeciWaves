@@ -88,6 +88,24 @@ def _prompt_workspace(default_ws: str) -> str | None:
     return raw or default_ws
 
 
+def _prompt_gamescript(default: str) -> str | None:
+    """Ask for the (optional, BYO) FW gamescript path. Enter alone keeps
+    ``default`` -- the already-configured `fw_gamescript`, if any, or "" (skip)
+    when nothing is configured -- same default-on-blank shape as
+    `_prompt_workspace`. Returning "" (not None) means "skip gracefully";
+    only an EOFError (non-interactive edge case) returns None."""
+    print("Optional: your own Forbidden West gamescript transcript, for speaker + "
+          "story-order matching (BYO -- this repo can't ship game text; see docs/BYO.md). "
+          "Leave blank to skip for now -- you can still supply it later with "
+          "`deciwaves fw run --gamescript <path>` or `deciwaves setup --fw-gamescript <path>`.")
+    suffix = f" [{default}]" if default else " [skip]"
+    try:
+        raw = input(f"Gamescript path{suffix}: ").strip()
+    except EOFError:
+        return None
+    return raw or default
+
+
 def run_guided(cfg: dict) -> int:
     """Entry point for bare ``deciwaves`` (no subcommand). Returns an exit code."""
     if not sys.stdin.isatty():
@@ -112,7 +130,16 @@ def run_guided(cfg: dict) -> int:
         print(_usage_message())
         return 2
 
+    extra_argv = []
+    if game == "fw":
+        gamescript = _prompt_gamescript(cfg.get("fw_gamescript", ""))
+        if gamescript is None:
+            print(_usage_message())
+            return 2
+        if gamescript:
+            extra_argv = ["--gamescript", gamescript]
+
     ws = Path(workspace).resolve()
     ws.mkdir(parents=True, exist_ok=True)
     os.chdir(ws)                      # same contract as main.py's `run` dispatch
-    return run_game(game, cfg, [])
+    return run_game(game, cfg, extra_argv)
