@@ -79,13 +79,15 @@ def main(argv=None) -> int:
         "directory outputs are written under (default: current dir). Must come "
         "BEFORE the game name, e.g. `deciwaves --workspace DIR ds run` -- placed "
         "after it (`deciwaves ds --workspace DIR run`), it is swallowed as that "
-        "stage's own argument instead, not read as the global --workspace. Any "
-        "relative path you pass to a stage's own flag (e.g. --gamescript) is "
-        "resolved against the directory you ran `deciwaves` from, before the "
-        "process chdirs into --workspace -- it does not need to sit inside the "
-        "workspace. A path saved via `deciwaves setup` (ds_install, "
-        "fw_gamescript, ...) is always stored absolute, so it is unaffected by "
-        "--workspace either way."
+        "stage's own argument instead, not read as the global --workspace. A "
+        "relative path you pass to a stage's own flag (e.g. --gamescript) that "
+        "ALREADY EXISTS there is resolved against the directory you ran "
+        "`deciwaves` from, before the process chdirs into --workspace -- it does "
+        "not need to sit inside the workspace (a relative path that doesn't exist "
+        "yet, e.g. a stage's own output path, is left alone and stays "
+        "workspace-relative, same as always). A path saved via `deciwaves setup` "
+        "(ds_install, fw_gamescript, ...) is always stored absolute, so it is "
+        "unaffected by --workspace either way."
     ))
     sub = ap.add_subparsers(dest="cmd", required=False)
     for name in ("setup", "doctor"):

@@ -20,7 +20,13 @@ def _restore_cwd():
 def test_workspace_help_documents_ordering_and_path_resolution_semantics(capsys):
     """--workspace's help text must actually explain the two easy-to-get-wrong
     semantics (issue #32): it must precede the game name, and a relative
-    stage-flag path resolves against the invocation cwd, not --workspace."""
+    stage-flag path resolves against the invocation cwd, not --workspace --
+    but ONLY for a path that already exists there. A not-yet-existing
+    relative path (e.g. a stage's own output flag) stays workspace-relative,
+    same as always -- the help text must not overclaim otherwise (review
+    follow-up: it previously said "any relative path ... is resolved
+    against ..." unconditionally, which doesn't match
+    config.absolutize_existing_paths' existence-based rule)."""
     with pytest.raises(SystemExit) as exc:
         cli.main(["--help"])
 
@@ -29,7 +35,8 @@ def test_workspace_help_documents_ordering_and_path_resolution_semantics(capsys)
     # whitespace before substring-checking so wrap points don't matter.
     out = " ".join(capsys.readouterr().out.split())
     assert "BEFORE the game name" in out
-    assert "resolved against the directory you ran" in out
+    assert "ALREADY EXISTS there is resolved against the directory you ran" in out
+    assert "doesn't exist yet" in out and "stays workspace-relative" in out
 
 
 def test_version(capsys):
