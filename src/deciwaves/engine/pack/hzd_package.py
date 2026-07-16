@@ -1,4 +1,4 @@
-"""PackReader over HZD Remastered's Forbidden-West package format.
+"""PackReader over HZD Remastered's Forbidden-West-generation package format.
 
 Composes HzdLocators (PackFileLocators.bin index) + DsarArchive (per-archive DSAR reader).
 The virtual-path hash is identical to DS, so we reuse engine.pack.bin_archive.file_hash.

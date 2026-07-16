@@ -63,6 +63,11 @@ class Locator:
     Decoded from the raw u64 exactly as odradek's ``computeLocators``:
     ``file_index = data & 0xFFFFFF`` (index into :attr:`StreamingGraph.files`),
     ``offset = data >> 24`` (byte offset within that file, logical space).
+
+    Not the same concept as :class:`engine.pack.hzd_locators.Locator`, which
+    addresses a resource by ``(archive, offset, length)`` in HZD Remastered's
+    ``PackFileLocators.bin`` -- different on-disk index format, different
+    fields, different game (real FW here vs. HZD Remastered there).
     """
     file_index: int
     offset: int
@@ -78,7 +83,14 @@ class Span:
 
 @dataclass(frozen=True)
 class ObjectLocator:
-    """One ``ObjectLocators`` entry: UUID -> object storage location."""
+    """One ``ObjectLocators`` entry: UUID -> object storage location.
+
+    Not the same concept as :class:`Locator` above (that addresses a streamed
+    audio payload via ``LocatorTable``; this addresses an arbitrary serialised
+    object via ``ObjectLocators`` -- different table, different byte width),
+    nor :class:`engine.pack.hzd_locators.Locator` (HZD Remastered's unrelated
+    ``PackFileLocators.bin`` index format).
+    """
     uuid: bytes        # raw 16 bytes (on-disk order)
     type_index: int
     file_index: int

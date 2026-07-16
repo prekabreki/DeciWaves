@@ -1,5 +1,10 @@
 """Schema-driven Decima (Forbidden West) RTTI type registry.
 
+``fw_`` here names the real game Horizon Forbidden West (see :mod:`deciwaves.games.fw`),
+not the "Forbidden-West-generation" engine/pack-format lineage that HZD Remastered also
+belongs to -- HZD parses its own resources with a self-contained byte parser
+(:mod:`deciwaves.games.hzd.sentence_fw`) and never touches this module (issue #48).
+
 Loads odradek's generated ``types.json`` and reproduces its ordered-attribute
 computation so a compound can be deserialised field-by-field exactly as the game
 does. The two load-bearing details (ported from odradek):

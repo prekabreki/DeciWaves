@@ -1,5 +1,8 @@
 """Fast-path English-audio resolver for Forbidden West dialogue lines.
 
+``fw_`` here is the real FW game -- this arithmetic fast path is specific to
+FW's streaming graph and has no HZD Remastered counterpart (issue #48).
+
 For *arithmetically clean* streaming groups -- those whose locator slice holds
 exactly 12 locators per ``LocalizedSimpleSoundResource`` (one per dubbed-audio
 language) -- the k-th LSSR's English clip is ``locators[locator_start + 12*k]``:
