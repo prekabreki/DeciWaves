@@ -48,7 +48,11 @@ def build_full_reel(subtitle_rows, anchor_rows, dlc_line_ids,
     ``subtitle_rows``: subtitle_bind manifest rows (exact subtitle per line).
     ``anchor_rows``: subtitle_match story manifest (line_id -> speaker/quest/
     gamescript_index/tier). ``dlc_line_ids``: set of DLC line_ids (file_index 101).
-    Returns manifest rows (``MANIFEST_COLS``) with a continuous ``gamescript_index``.
+    Returns ``(rows, anchored_count)``: ``rows`` are manifest rows (``MANIFEST_COLS``)
+    with a continuous ``gamescript_index``; ``anchored_count`` is how many of them
+    landed in a real gamescript-anchored scene (bucket 0) -- the caller's own
+    "story-positioned" count must use this, not a ``quest``-string comparison,
+    since unanchored rows get a distinct per-chunk quest string below.
     """
     anchor_by_id = {r["line_id"]: r for r in anchor_rows}
     # group -> story position (median of its anchors' gamescript indices)
@@ -88,13 +92,16 @@ def build_full_reel(subtitle_rows, anchor_rows, dlc_line_ids,
     items.sort(key=lambda t: (t[0], t[1], t[2], t[3]))
     out = []
     n_unsorted = 0
+    anchored_count = 0
     for rank, (bucket, _p, _g, _l, row) in enumerate(items):
-        if bucket == 1:    # chunk the unsorted block into <=290MB-able episodes
+        if bucket == 0:
+            anchored_count += 1
+        elif bucket == 1:  # chunk the unsorted block into <=290MB-able episodes
             row["quest"] = f"(unsorted scenes {n_unsorted // unsorted_chunk + 1})"
             n_unsorted += 1
         row["gamescript_index"] = rank
         out.append({k: row.get(k, "") for k in MANIFEST_COLS})
-    return out
+    return out, anchored_count
 
 
 def _load_csv(path):
@@ -113,7 +120,7 @@ def main(argv=None):  # pragma: no cover - integration glue
     subs = _load_csv(a.subtitles)
     anchors = _load_csv(a.anchors)
     dlc = {r["line_id"] for r in _load_csv(a.clip_index) if r.get("file_index") == "101"}
-    rows = build_full_reel(subs, anchors, dlc)
+    rows, anchored = build_full_reel(subs, anchors, dlc)
 
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
     with open(a.out, "w", newline="", encoding="utf-8") as f:
@@ -122,9 +129,8 @@ def main(argv=None):  # pragma: no cover - integration glue
         w.writerows(rows)
     from collections import Counter
     tc = Counter(r["tier"] for r in rows)
-    anch = sum(1 for r in rows if r["quest"] not in (UNSORTED_QUEST, DLC_QUEST))
     print(f"subtitles={len(subs)} dlc={len(dlc)} -> reel={len(rows)} rows "
-          f"(tiers={dict(tc)}; story-positioned={anch}) -> {a.out}")
+          f"(tiers={dict(tc)}; story-positioned={anchored}) -> {a.out}")
     return 0
 
 
