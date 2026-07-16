@@ -1,4 +1,5 @@
 # tests/test_build_catalog.py
+from deciwaves.games.ds import catalog as ds_catalog
 from deciwaves.games.ds.catalog import select_core_paths, classify
 from deciwaves.engine.catalog_io import (
     done_core_paths, processed_core_paths, prune_incomplete_rows, CSV_COLUMNS,
@@ -301,3 +302,65 @@ def test_write_core_paths_sidecar_overwrites_existing_atomically(tmp_path):
     write_core_paths_sidecar(str(sidecar), ["old/path/sentences"])
     write_core_paths_sidecar(str(sidecar), ["new/path/sentences"])
     assert read_core_paths_sidecar(str(sidecar)) == ["new/path/sentences"]
+
+
+# ---------------------------------------------------------------------------
+# Finding 9: a 0-byte resume file (a crash right after creating but before
+# writing the header) must be treated as a fresh file so the header is written.
+# Mirrors fcc0d1c's fix for fw extract/asr_run, not applied to the DS catalog.
+# ---------------------------------------------------------------------------
+
+class _FakeLine:
+    line_id = "L0"; line_index = 0; speaker_code = "c"
+    subtitle_en = "hi"; wem_path_en = "loc/x.wem.english"
+
+
+class _FakeReader:
+    def read_core(self, path):
+        return b"CORE_BYTES"
+
+
+class _FakeSmap:
+    def __init__(self, *a, **k):
+        pass
+
+    def __len__(self):
+        return 0
+
+    def name_for(self, code):
+        return "Name"
+
+
+def test_ds_catalog_main_resumes_after_zero_byte_out(tmp_path, monkeypatch):
+    """A 0-byte out/catalog.csv left by a crash must get a real header on resume --
+    an is_file()-only 'new file' check treats the 0-byte file as already-headered,
+    so the first data row silently becomes the CSV's fieldnames on the next load."""
+    import deciwaves.games.ds.profile as ds_profile
+
+    class _Profile:
+        decima_version = "DS"
+        core_prefixes = {"localized/sentences/ds_lines_cutscene": "cutscene"}
+        pack_reader = _FakeReader()
+        speaker_simpletext_filter = None
+
+    monkeypatch.setattr(ds_profile, "build_profile", lambda data_dir, oodle: _Profile())
+    monkeypatch.setattr(ds_catalog._pydecima_reader, "set_globals", lambda **k: None)
+    monkeypatch.setattr(ds_catalog, "SpeakerMap", _FakeSmap)
+    monkeypatch.setattr(ds_catalog, "parse_sentences", lambda b, on_line_error=None: [_FakeLine()])
+
+    file_list = tmp_path / "fl.txt"
+    file_list.write_text("localized/sentences/ds_lines_cutscene/scene/sentences\n", encoding="utf-8")
+    out = tmp_path / "catalog.csv"
+    out.write_bytes(b"")  # 0-byte crash artifact
+
+    rc = ds_catalog.main([
+        "--data-dir", "X", "--oodle", "Y",
+        "--file-list", str(file_list),
+        "--out", str(out),
+        "--errors", str(tmp_path / "err.log"),
+        "--processed", str(tmp_path / "proc.txt"),
+    ])
+    assert rc == 0
+    rows = list(csv.DictReader(open(out, encoding="utf-8")))
+    assert len(rows) == 1
+    assert rows[0]["core_path"] == "localized/sentences/ds_lines_cutscene/scene/sentences"

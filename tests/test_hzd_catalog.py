@@ -1,4 +1,5 @@
 """HZD identification pipeline: classification + profile (pure, no install needed)."""
+import csv
 from deciwaves.games.hzd import catalog
 from deciwaves.games.hzd.catalog import classify_hzd, select_sentence_cores
 from deciwaves.games.hzd.profile import build_profile, hzd_package_error, HZD_FAMILY_PREFIXES
@@ -225,6 +226,46 @@ def test_catalog_main_uncapped_still_writes_cores_sidecar(tmp_path, monkeypatch)
     ])
     assert rc == 0
     assert read_core_paths_sidecar(str(cores_sidecar)) == ["localized/sentences/full/scene/sentences"]
+
+
+class _FakeLine:
+    line_id = "L0"; line_index = 0; speaker_code = "localized/voices/aloy"
+    subtitle_en = "hi"; wem_path_en = "loc/x.wem"
+
+
+def test_catalog_main_resumes_after_zero_byte_out(tmp_path, monkeypatch):
+    """Finding 9: a 0-byte out/hzd/catalog.csv left by a crash (created before the
+    header was written) must get a real header on resume -- an is_file()-only
+    'new file' check treats it as already-headered, so the first data row silently
+    becomes the CSV's fieldnames on the next load. Mirrors fcc0d1c for fw."""
+    import deciwaves.games.hzd.profile as profile_mod
+    import deciwaves.games.hzd.inventory as inventory_mod
+    from deciwaves.games.hzd import catalog as catalog_mod
+
+    reader = _FakeReader()
+    monkeypatch.setattr(profile_mod, "build_profile", lambda package: _FakeProfile(reader))
+    monkeypatch.setattr(inventory_mod, "harvest_sentence_cores",
+                         lambda fw, sample_cap=None: ["localized/sentences/mq/scene/sentences"])
+    monkeypatch.setattr(catalog_mod, "parse_sentences_fw",
+                         lambda core_bytes, on_line_error=None: [_FakeLine()])
+
+    fake_pkg = tmp_path / "package"; fake_pkg.mkdir()
+    (fake_pkg / "PackFileLocators.bin").write_bytes(b"x")
+
+    out = tmp_path / "catalog.csv"
+    out.write_bytes(b"")  # 0-byte crash artifact
+
+    rc = catalog_mod.main([
+        "--package", str(fake_pkg),
+        "--out", str(out),
+        "--errors", str(tmp_path / "catalog-errors.log"),
+        "--processed", str(tmp_path / "catalog-processed.txt"),
+        "--cores-out", str(tmp_path / "catalog-cores.txt"),
+    ])
+    assert rc == 0
+    rows = list(csv.DictReader(open(out, encoding="utf-8")))
+    assert len(rows) == 1
+    assert rows[0]["core_path"] == "localized/sentences/mq/scene/sentences"
 
 
 def test_catalog_main_accepts_bare_filename_out(tmp_path, monkeypatch):
