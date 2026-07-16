@@ -1,6 +1,7 @@
 """HZD identification pipeline: classification + profile (pure, no install needed)."""
 from deciwaves.games.hzd.catalog import classify_hzd, select_sentence_cores
 from deciwaves.games.hzd.profile import build_profile, HZD_FAMILY_PREFIXES
+from deciwaves.engine.catalog_io import read_core_paths_sidecar
 
 
 # --- classify_hzd: (category, scene) from a sentence-core virtual path ---
@@ -109,3 +110,47 @@ def test_build_profile_fields():
     assert p.decima_version == "HZDR"
     assert p.core_prefixes == HZD_FAMILY_PREFIXES
     assert p.pack_reader is None  # None when package_dir not given
+
+
+# --- catalog.main() persists a core-path sidecar (issue #31): wem-metadata reuses
+#          this instead of repeating catalog's own full-pack harvest ---
+
+class _FakeReader:
+    """Stand-in for FwPackage: read_core returns fixed bytes regardless of path;
+    parse_sentences_fw is monkeypatched below, so the bytes' content never matters."""
+    def read_core(self, path):
+        return b"CORE_BYTES"
+
+
+class _FakeProfile:
+    def __init__(self, reader):
+        self.pack_reader = reader
+
+
+def test_catalog_main_writes_cores_sidecar_with_dialogue_only_paths(tmp_path, monkeypatch):
+    import deciwaves.games.hzd.profile as profile_mod
+    import deciwaves.games.hzd.inventory as inventory_mod
+    from deciwaves.games.hzd import catalog as catalog_mod
+
+    harvested = [
+        "localized/sentences/mq/scene/sentences",
+        "localized/sentences/voices/aloy/simpletext",  # must be dropped from the sidecar
+    ]
+    reader = _FakeReader()
+    monkeypatch.setattr(profile_mod, "build_profile", lambda package: _FakeProfile(reader))
+    monkeypatch.setattr(inventory_mod, "harvest_sentence_cores",
+                         lambda fw, sample_cap=None: harvested)
+    monkeypatch.setattr(catalog_mod, "parse_sentences_fw", lambda core_bytes, on_line_error=None: [])
+
+    cores_sidecar = tmp_path / "catalog-cores.txt"
+    rc = catalog_mod.main([
+        "--package", "FAKE_PKG",
+        "--out", str(tmp_path / "catalog.csv"),
+        "--errors", str(tmp_path / "catalog-errors.log"),
+        "--processed", str(tmp_path / "catalog-processed.txt"),
+        "--cores-out", str(cores_sidecar),
+    ])
+    assert rc == 0
+    assert read_core_paths_sidecar(str(cores_sidecar)) == [
+        "localized/sentences/mq/scene/sentences"
+    ]

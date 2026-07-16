@@ -2,8 +2,10 @@
 from deciwaves.games.ds.catalog import select_core_paths, classify
 from deciwaves.engine.catalog_io import (
     done_core_paths, processed_core_paths, prune_incomplete_rows, CSV_COLUMNS,
+    write_core_paths_sidecar, read_core_paths_sidecar,
 )
 import csv
+import pytest
 
 
 def _write_csv_rows(path, core_paths):
@@ -208,3 +210,53 @@ def test_sidecar_is_sole_resume_authority_after_prune(tmp_path):
     paths = ["done/core/sentences", "crashed/core/sentences", "new/core/sentences"]
     todo = [p for p in paths if p not in done]
     assert todo == ["crashed/core/sentences", "new/core/sentences"]
+
+
+# ---------------------------------------------------------------------------
+# write_core_paths_sidecar / read_core_paths_sidecar (issue #31): lets a downstream
+# stage (HZD's wem-metadata) reuse the core-path list a catalog stage's harvest
+# already produced, instead of repeating a full-pack content scan.
+# ---------------------------------------------------------------------------
+
+def test_write_and_read_core_paths_sidecar_roundtrip(tmp_path):
+    sidecar = tmp_path / "catalog-cores.txt"
+    write_core_paths_sidecar(str(sidecar), ["a/b/sentences", "c/d/sentences"])
+    assert read_core_paths_sidecar(str(sidecar)) == ["a/b/sentences", "c/d/sentences"]
+
+
+def test_read_core_paths_sidecar_missing_returns_none(tmp_path):
+    assert read_core_paths_sidecar(str(tmp_path / "missing.txt")) is None
+
+
+def test_read_core_paths_sidecar_empty_file_returns_empty_list(tmp_path):
+    """An existing-but-empty sidecar means 'ran, found zero cores' -- distinct from
+    'never ran' (None), which callers use to decide rescan-vs-trust-empty."""
+    sidecar = tmp_path / "catalog-cores.txt"
+    write_core_paths_sidecar(str(sidecar), [])
+    assert read_core_paths_sidecar(str(sidecar)) == []
+
+
+def test_write_core_paths_sidecar_is_atomic_no_partial_file_on_failure(tmp_path):
+    """A failure partway through producing the path list (e.g. the iterable itself
+    raising) must not leave a torn file at the sidecar's final path, and must not leak
+    a temp file either -- readers only ever see the last complete write, or nothing."""
+    sidecar = tmp_path / "catalog-cores.txt"
+
+    def _boom():
+        yield "a/b/sentences"
+        raise RuntimeError("simulated write failure")
+
+    with pytest.raises(RuntimeError):
+        write_core_paths_sidecar(str(sidecar), _boom())
+
+    assert not sidecar.exists()
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_write_core_paths_sidecar_overwrites_existing_atomically(tmp_path):
+    """A pre-existing sidecar is replaced wholesale (not appended to); a reader never
+    sees a mix of old and new content."""
+    sidecar = tmp_path / "catalog-cores.txt"
+    write_core_paths_sidecar(str(sidecar), ["old/path/sentences"])
+    write_core_paths_sidecar(str(sidecar), ["new/path/sentences"])
+    assert read_core_paths_sidecar(str(sidecar)) == ["new/path/sentences"]
