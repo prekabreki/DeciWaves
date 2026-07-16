@@ -95,6 +95,55 @@ def test_setup_second_run_with_different_game_preserves_first(tmp_path, monkeypa
     assert cfg["hzd_package"] == str(hzd)
 
 
+def test_setup_saves_fw_gamescript_path(tmp_path, monkeypatch):
+    gamescript = tmp_path / "gamescript.md"
+    monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.setattr(s, "_download_and_unpack", _stub_download_ok)
+    rc = s.run_setup([
+        "--tools-dir", str(tmp_path / "tools"),
+        "--fw-gamescript", str(gamescript),
+    ])
+    assert rc == 0
+    cfg = json.loads((tmp_path / "cfg" / "config.json").read_text())
+    assert cfg["fw_gamescript"] == str(gamescript)
+
+
+def test_setup_second_run_preserves_fw_gamescript_when_omitted(tmp_path, monkeypatch):
+    # Registering fw_gamescript, then later re-running setup for an unrelated
+    # game/flag without repeating --fw-gamescript, must not blank it out --
+    # same merge-over-saved contract issue #36 already guarantees for the
+    # other config keys (see test_setup_second_run_with_different_game_preserves_first).
+    gamescript = tmp_path / "gamescript.md"
+    hzd = tmp_path / "hzd.package"
+    cfg_dir = tmp_path / "cfg"
+    monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(cfg_dir))
+    monkeypatch.setattr(s, "_download_and_unpack", _stub_download_ok)
+
+    rc1 = s.run_setup(["--fw-gamescript", str(gamescript), "--tools-dir", str(tmp_path / "tools")])
+    assert rc1 == 0
+
+    rc2 = s.run_setup(["--hzd-package", str(hzd), "--tools-dir", str(tmp_path / "tools")])
+    assert rc2 == 0
+
+    cfg = json.loads((cfg_dir / "config.json").read_text())
+    assert cfg["fw_gamescript"] == str(gamescript)
+    assert cfg["hzd_package"] == str(hzd)
+
+
+def test_setup_reregistering_fw_gamescript_updates_not_stuck_on_old_path(tmp_path, monkeypatch):
+    old = tmp_path / "old-gamescript.md"
+    new = tmp_path / "new-gamescript.md"
+    cfg_dir = tmp_path / "cfg"
+    monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(cfg_dir))
+    monkeypatch.setattr(s, "_download_and_unpack", _stub_download_ok)
+
+    assert s.run_setup(["--fw-gamescript", str(old), "--tools-dir", str(tmp_path / "tools")]) == 0
+    assert s.run_setup(["--fw-gamescript", str(new), "--tools-dir", str(tmp_path / "tools")]) == 0
+
+    cfg = json.loads((cfg_dir / "config.json").read_text())
+    assert cfg["fw_gamescript"] == str(new)
+
+
 def test_setup_reregistering_same_game_updates_not_stuck_on_old_path(tmp_path, monkeypatch):
     ds_old = tmp_path / "DS_old"; ds_old.mkdir(); (ds_old / "oo2core_7_win64.dll").write_bytes(b"x")
     ds_new = tmp_path / "DS_new"; ds_new.mkdir(); (ds_new / "oo2core_7_win64.dll").write_bytes(b"x")

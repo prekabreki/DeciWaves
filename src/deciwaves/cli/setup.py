@@ -130,7 +130,7 @@ def _fetch_tools(tools_dir: Path, skip_downloads: bool):
     return rows, any_failed
 
 
-def _print_summary(tool_rows, ds_install, oodle_dll, hzd_package, fw_package):
+def _print_summary(tool_rows, ds_install, oodle_dll, hzd_package, fw_package, fw_gamescript):
     print("\nDeciWaves setup summary:")
     print(f"  {'tool':<10} {'status':<32} path")
     for label, status, p in tool_rows:
@@ -139,6 +139,7 @@ def _print_summary(tool_rows, ds_install, oodle_dll, hzd_package, fw_package):
     print(f"  {'oodle_dll':<10} {'ok' if oodle_dll else 'MISSING':<32} {oodle_dll or '(not found)'}")
     print(f"  {'hzd_pkg':<10} {'ok' if hzd_package else '--':<32} {hzd_package or '(not set)'}")
     print(f"  {'fw_pkg':<10} {'ok' if fw_package else '--':<32} {fw_package or '(not set)'}")
+    print(f"  {'fw_script':<10} {'ok' if fw_gamescript else '--':<32} {fw_gamescript or '(not set -- optional, BYO)'}")
 
 
 def run_setup(argv) -> int:
@@ -146,6 +147,9 @@ def run_setup(argv) -> int:
     ap.add_argument("--ds-install", default="", help="DS:DC game root (contains ds.exe, oo2core_7_win64.dll)")
     ap.add_argument("--hzd-package", default="", help="HZD Remastered .package/install path")
     ap.add_argument("--fw-package", default="", help="Forbidden West install/package path")
+    ap.add_argument("--fw-gamescript", default="", help="path to your own Forbidden West gamescript "
+                    "transcript (BYO, optional -- see docs/BYO.md); needed for `fw run` to reach "
+                    "match/full-reel/render without passing --gamescript every time")
     ap.add_argument("--tools-dir", default=None, help="where to fetch vgmstream/VGAudio/ffmpeg (default: %%LOCALAPPDATA%%\\DeciWaves\\tools)")
     ap.add_argument("--skip-downloads", action="store_true", help="don't fetch tools, just re-check what's already there and rewrite config")
     args = ap.parse_args(argv)
@@ -160,6 +164,7 @@ def run_setup(argv) -> int:
     ds_install = args.ds_install or saved.get("ds_install", "")
     hzd_package = args.hzd_package or saved.get("hzd_package", "")
     fw_package = args.fw_package or saved.get("fw_package", "")
+    fw_gamescript = args.fw_gamescript or saved.get("fw_gamescript", "")
     tools_dir = (
         Path(args.tools_dir) if args.tools_dir
         else Path(saved["tools_dir"]) if saved.get("tools_dir")
@@ -184,7 +189,7 @@ def run_setup(argv) -> int:
               "Tools are set up regardless -- rerun `deciwaves setup` with a game path once you "
               "have one, or check status anytime with `deciwaves doctor`.")
 
-    _print_summary(tool_rows, ds_install, oodle_dll, hzd_package, fw_package)
+    _print_summary(tool_rows, ds_install, oodle_dll, hzd_package, fw_package, fw_gamescript)
 
     config.save({
         "tools_dir": str(tools_dir),
@@ -192,6 +197,7 @@ def run_setup(argv) -> int:
         "hzd_package": hzd_package,
         "fw_package": fw_package,
         "oodle_dll": oodle_dll,
+        "fw_gamescript": fw_gamescript,
     })
     print(f"\nWrote {config.path()}")
     return 1 if tools_failed else 0

@@ -4,7 +4,7 @@ import os
 import tempfile
 from pathlib import Path
 
-KEYS = ("tools_dir", "ds_install", "hzd_package", "fw_package", "oodle_dll")
+KEYS = ("tools_dir", "ds_install", "hzd_package", "fw_package", "oodle_dll", "fw_gamescript")
 
 def path() -> Path:
     root = os.environ.get("DECIWAVES_CONFIG_DIR") or os.path.join(
