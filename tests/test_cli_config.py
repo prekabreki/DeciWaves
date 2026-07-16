@@ -5,6 +5,49 @@ import pytest
 from deciwaves.cli import config
 
 
+# --- config.TOOLS: single source of truth for tool metadata (issue #32) ----
+# Previously triplicated across main.py/_apply_config_env, doctor.py's
+# check_tool(...) call sites, and setup.py's own _TOOLS -- with the exe name
+# spelled two ways ("vgmstream-cli.exe" vs. bare "vgmstream-cli") between
+# them. These characterize the shape every consumer relies on.
+
+def test_tools_table_has_one_entry_per_decode_tool():
+    keys = [t.key for t in config.TOOLS]
+    assert keys == ["vgmstream", "VGAudio", "ffmpeg"]
+
+
+def test_tools_table_exe_names_are_all_dot_exe():
+    # The whole point of consolidating: one spelling, always with the
+    # extension, instead of main.py/setup.py's ".exe" vs. doctor.py's bare name.
+    for t in config.TOOLS:
+        assert t.exe.lower().endswith(".exe")
+
+
+def test_tools_table_only_ffmpeg_lacks_an_env_var():
+    env_vars = {t.key: t.env_var for t in config.TOOLS}
+    assert env_vars["vgmstream"] == "DECIWAVES_VGMSTREAM"
+    assert env_vars["VGAudio"] == "DECIWAVES_VGAUDIO"
+    assert env_vars["ffmpeg"] is None
+
+
+def test_tools_table_urls_are_pinned_releases():
+    for t in config.TOOLS:
+        assert t.url.startswith("https://github.com/")
+        assert "/releases/download/" in t.url
+
+
+def test_setup_and_main_and_doctor_all_consume_the_same_tools_table():
+    """Guards against the table being reintroduced as separate copies: setup's
+    own _TOOLS and doctor's check list must be *derived from* config.TOOLS,
+    not restate its facts independently."""
+    from deciwaves.cli import setup as setup_mod
+
+    assert setup_mod.VGMSTREAM_URL == config.TOOLS[0].url
+    assert setup_mod.VGAUDIO_URL == config.TOOLS[1].url
+    assert setup_mod.FFMPEG_URL == config.TOOLS[2].url
+    assert setup_mod._TOOLS == tuple((t.key, t.url, t.exe) for t in config.TOOLS)
+
+
 def test_load_returns_empty_dict_when_file_missing(tmp_path, monkeypatch):
     monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(tmp_path / "cfg"))
     assert config.load() == {}

@@ -50,11 +50,12 @@ def _apply_config_env():
     cfg = config.load()
     if cfg.get("tools_dir") and os.path.isdir(cfg["tools_dir"]):
         os.environ["PATH"] = cfg["tools_dir"] + os.pathsep + os.environ.get("PATH", "")
-        for exe, var in (("vgmstream-cli.exe", "DECIWAVES_VGMSTREAM"),
-                         ("VGAudioCli.exe", "DECIWAVES_VGAUDIO")):
-            p = Path(cfg["tools_dir"]) / exe
+        for tool in config.TOOLS:  # single TOOLS table -- see config.py (issue #32)
+            if not tool.env_var:  # ffmpeg: resolved via PATH, no override env var
+                continue
+            p = Path(cfg["tools_dir"]) / tool.exe
             if p.is_file():
-                os.environ.setdefault(var, str(p))
+                os.environ.setdefault(tool.env_var, str(p))
     return cfg
 
 def main(argv=None) -> int:

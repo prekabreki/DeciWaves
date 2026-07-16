@@ -9,9 +9,11 @@ whether the upstream zip nests its exe one folder deep.
 
 URLs are pinned to specific releases (not "latest" redirects) so a run next
 year fetches the same bits this one did; see the comment above the URL
-constants below for how each pinned asset name was verified against the
-upstream releases -- including BtbN/FFmpeg-Builds, whose own "latest" tag is
-a rolling alias and therefore not itself a valid pin (issue #39).
+constants in `deciwaves.cli.config` (config.TOOLS' single source of truth for
+all three tools' metadata, issue #32) for how each pinned asset name was
+verified against the upstream releases -- including BtbN/FFmpeg-Builds, whose
+own "latest" tag is a rolling alias and therefore not itself a valid pin
+(issue #39).
 """
 from __future__ import annotations
 
@@ -25,26 +27,14 @@ import zipfile
 from pathlib import Path
 
 from deciwaves.cli import config
-
-# Pinned 2026-07-14 via:
-#   gh release view --repo vgmstream/vgmstream --json assets -q '.assets[].name' | grep -i win
-#   gh release view --repo Thealexbarney/VGAudio --json assets -q '.assets[].name'
-#   gh release view autobuild-2026-07-14-13-19 --repo BtbN/FFmpeg-Builds --json assets -q '.assets[].name' | grep win64-gpl.zip
-#
-# BtbN/FFmpeg-Builds has no versioned tags -- "latest" is a rolling alias that
-# always points at whatever the newest autobuild-YYYY-MM-DD-HH-MM release is,
-# so it is NOT a pin (issue #39). Pin to that dated autobuild tag's master
-# build instead, same as vgmstream/VGAudio pin to a fixed release/tag.
-VGMSTREAM_URL = "https://github.com/vgmstream/vgmstream/releases/download/r2117/vgmstream-win64.zip"
-VGAUDIO_URL = "https://github.com/Thealexbarney/VGAudio/releases/download/v2.2.1/VGAudioCli.zip"
-FFMPEG_URL = "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-07-14-13-19/ffmpeg-N-125608-g150f7d15df-win64-gpl.zip"
+# VGMSTREAM_URL/VGAUDIO_URL/FFMPEG_URL and the pin provenance comment above them
+# now live in config.TOOLS (issue #32: one TOOLS table, not one copy per
+# module) -- re-exported here under their old names since tests (and anyone
+# scripting against this module) reference `setup.VGMSTREAM_URL` etc. directly.
+from deciwaves.cli.config import FFMPEG_URL, VGAUDIO_URL, VGMSTREAM_URL  # noqa: F401
 
 # (label, url, exe expected to land directly in the tools dir once unpacked).
-_TOOLS = (
-    ("vgmstream", VGMSTREAM_URL, "vgmstream-cli.exe"),
-    ("VGAudio", VGAUDIO_URL, "VGAudioCli.exe"),
-    ("ffmpeg", FFMPEG_URL, "ffmpeg.exe"),
-)
+_TOOLS = tuple((t.key, t.url, t.exe) for t in config.TOOLS)
 
 OODLE_DLL_NAME = "oo2core_7_win64.dll"
 

@@ -147,9 +147,7 @@ def run_doctor(argv=None) -> int:
     tools_dir = cfg.get("tools_dir", "")
 
     checks = [
-        check_tool("vgmstream-cli", "vgmstream-cli", "DECIWAVES_VGMSTREAM", tools_dir),
-        check_tool("VGAudioCli", "VGAudioCli", "DECIWAVES_VGAUDIO", tools_dir),
-        check_tool("ffmpeg", "ffmpeg", None, tools_dir),
+        *[check_tool(t.display, t.exe, t.env_var, tools_dir) for t in config.TOOLS],
         check_oodle(cfg.get("oodle_dll", ""), cfg.get("ds_install", "")),
         check_ds_install(cfg.get("ds_install", "")),
         check_hzd_package(cfg.get("hzd_package", "")),
