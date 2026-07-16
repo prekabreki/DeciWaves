@@ -73,6 +73,24 @@ def test_build_rows_uses_exact_subtitle_as_label_and_orders_by_group_then_clip()
     assert rows[0]["speaker"] == ""  # subtitle path gives no speaker
 
 
+def test_build_rows_preserves_numeric_group_order_not_lexicographic():
+    # group 10 must sort AFTER group 9 (numeric), not before it (lexicographic
+    # string comparison: "g10_..." < "g9_..." because '1' < '9').
+    groups = [
+        {"group_id": 10,
+         "clips": [{"line_id": "g10_0000", "lssr_index": 0, "wav": "a/10.wav",
+                    "transcript": "this is the tenth group line"}],
+         "subtitles": ["This is the tenth group line."]},
+        {"group_id": 9,
+         "clips": [{"line_id": "g9_0000", "lssr_index": 0, "wav": "a/9.wav",
+                    "transcript": "this is the ninth group line"}],
+         "subtitles": ["This is the ninth group line."]},
+    ]
+    rows = build_subtitle_rows(groups, accept=60.0)
+    assert [r["line_id"] for r in rows] == ["g9_0000", "g10_0000"]
+    assert [r["gamescript_index"] for r in rows] == [0, 1]
+
+
 def test_build_rows_drops_low_score_multi_line_but_keeps_certain_single():
     groups = [
         # multi-line group: one clip is unintelligible ASR (music) -> its
