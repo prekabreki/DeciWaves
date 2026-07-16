@@ -83,6 +83,7 @@ def main(argv=None):
 
     from deciwaves.engine import asr, audio_clip
     from deciwaves.engine.pack.bin_index import PackIndex
+    from deciwaves.engine.tool_paths import resolve
 
     idx = PackIndex(args.data_dir, args.oodle)
     model = asr.load_model(args.model)
@@ -91,9 +92,13 @@ def main(argv=None):
         keys = tuple(s for s in args.scenes.split(",") if s)
         rows = [r for r in rows if any(k in r.get("scene", "") for k in keys)]
     done = _done_streams(args.out)
+    # Resolved once per run instead of once per track: clip_wav's own default
+    # would otherwise re-resolve DECIWAVES_VGMSTREAM (env var -> PATH -> bare
+    # name) on every single decode_fn call (issue #51 item 7b).
+    vgmstream = resolve("DECIWAVES_VGMSTREAM", "vgmstream-cli")
 
     def decode_fn(stream):
-        wav, dur = audio_clip.clip_wav(idx, stream, args.cache)
+        wav, dur = audio_clip.clip_wav(idx, stream, args.cache, vgmstream=vgmstream)
         return wav, dur
 
     def transcribe_fn(wav):

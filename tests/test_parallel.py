@@ -4,6 +4,7 @@ order regardless of which worker finishes first, (b) actually run concurrently,
 (c) run inline (no pool) at jobs<=1 so the serial path is byte-for-byte the old
 behavior, and (d) stay bounded so a 61k-item streaming input never materializes
 all futures at once."""
+import gc
 import threading
 import time
 
@@ -101,3 +102,73 @@ def test_ordered_parallel_bounded_in_flight():
 def test_ordered_parallel_empty_input():
     assert list(parallel.ordered_parallel([], lambda x: x, jobs=4)) == []
     assert list(parallel.ordered_parallel([], lambda x: x, jobs=1)) == []
+
+
+# --- KeyedLocks (issue #51 item 7a): one lock per key, but the registry must
+# stay bounded over a long-running process's life, not grow one entry per
+# distinct key ever seen -- while mutual exclusion on a key currently in use
+# (and full concurrency across distinct keys) must be unaffected.
+
+def test_keyed_locks_serializes_same_key():
+    locks = parallel.KeyedLocks()
+    order = []
+
+    def worker(tag):
+        with locks("shared"):
+            order.append(f"{tag}-enter")
+            time.sleep(0.05)
+            order.append(f"{tag}-exit")
+
+    t1 = threading.Thread(target=worker, args=("a",))
+    t2 = threading.Thread(target=worker, args=("b",))
+    t1.start()
+    time.sleep(0.01)  # give t1 a head start so it acquires first
+    t2.start()
+    t1.join()
+    t2.join()
+    # one worker must fully enter+exit before the other enters at all -- no
+    # interleave, i.e. real mutual exclusion on the shared key.
+    assert order in (
+        ["a-enter", "a-exit", "b-enter", "b-exit"],
+        ["b-enter", "b-exit", "a-enter", "a-exit"],
+    )
+
+
+def test_keyed_locks_distinct_keys_run_concurrently():
+    locks = parallel.KeyedLocks()
+    concurrent = 0
+    peak = 0
+    guard = threading.Lock()
+
+    def worker(key):
+        nonlocal concurrent, peak
+        with locks(key):
+            with guard:
+                concurrent += 1
+                peak = max(peak, concurrent)
+            time.sleep(0.05)
+            with guard:
+                concurrent -= 1
+
+    threads = [threading.Thread(target=worker, args=(f"k{i}",)) for i in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert peak > 1, "distinct keys should run concurrently, not serialize"
+
+
+def test_keyed_locks_registry_does_not_grow_unbounded_after_release():
+    """A plain dict kept one lock alive per distinct key forever -- a
+    long-running process (engine.audio_clip's module-level _cache_locks,
+    reused across every clip decoded for the process's whole life) would
+    accumulate one entry per distinct cache path ever seen. Locks are held
+    only weakly now: once nothing is using a given key's lock anymore, it's
+    eligible for collection, so the registry doesn't grow without bound."""
+    locks = parallel.KeyedLocks()
+    for i in range(500):
+        with locks(f"path-{i}"):
+            pass
+    gc.collect()
+    assert len(locks._locks) < 500, (
+        "KeyedLocks retained every finished entry -- registry is unbounded")
