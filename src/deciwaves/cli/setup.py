@@ -46,6 +46,18 @@ def _default_tools_dir() -> Path:
     return Path(root) / "DeciWaves" / "tools"
 
 
+def _resolve_or_empty(path_str: str) -> str:
+    """Resolve *path_str* to an absolute string, or keep "" as "" (an unset
+    field). Every path persisted to config.json is saved absolute: once
+    written, "relative to what" has no fixed meaning -- a later `deciwaves`
+    invocation can run from any directory, or chdir into an unrelated
+    --workspace, before this value is ever read again (issue #32). A relative
+    flag is resolved against the cwd *at setup time*, the one point where
+    "relative" still has an unambiguous meaning.
+    """
+    return str(Path(path_str).resolve()) if path_str else ""
+
+
 def _short_reason(exc: Exception) -> str:
     """Collapse an exception to a short, single-line, ASCII-safe reason
     suitable for a summary table cell -- never a raw traceback."""
@@ -180,13 +192,17 @@ def run_setup(argv) -> int:
     # warning), so this merge degrades gracefully to "just this run's flags"
     # in that case too.
     saved = config.load()
-    ds_install = args.ds_install or saved.get("ds_install", "")
-    hzd_package = args.hzd_package or saved.get("hzd_package", "")
-    fw_package = args.fw_package or saved.get("fw_package", "")
-    fw_gamescript = args.fw_gamescript or saved.get("fw_gamescript", "")
+    # Resolved to absolute below (issue #32) -- `saved`'s own values are
+    # already absolute from a prior run of this same fix, so re-resolving
+    # them here is a no-op; only a freshly-given relative flag actually
+    # changes shape.
+    ds_install = _resolve_or_empty(args.ds_install or saved.get("ds_install", ""))
+    hzd_package = _resolve_or_empty(args.hzd_package or saved.get("hzd_package", ""))
+    fw_package = _resolve_or_empty(args.fw_package or saved.get("fw_package", ""))
+    fw_gamescript = _resolve_or_empty(args.fw_gamescript or saved.get("fw_gamescript", ""))
     tools_dir = (
-        Path(args.tools_dir) if args.tools_dir
-        else Path(saved["tools_dir"]) if saved.get("tools_dir")
+        Path(args.tools_dir).resolve() if args.tools_dir
+        else Path(saved["tools_dir"]).resolve() if saved.get("tools_dir")
         else _default_tools_dir()
     )
     tools_dir.mkdir(parents=True, exist_ok=True)

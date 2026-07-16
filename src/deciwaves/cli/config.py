@@ -73,6 +73,33 @@ def load() -> dict:
         return {}
     return cfg
 
+def absolutize_existing_paths(argv: list) -> list:
+    """Resolve any argv token that refers to an EXISTING file/dir relative to
+    the CURRENT (pre-chdir) cwd to its absolute form.
+
+    Call this before `enter_workspace()` changes what "relative" means. A
+    relative path the user typed to mean "relative to where I ran deciwaves"
+    (a BYO gamescript, an install dir, ...) must keep pointing at the same
+    place once the process chdirs into --workspace -- otherwise it's
+    silently (mis)resolved inside the workspace instead (issue #32).
+
+    Deliberately existence-based, not flag-name based: a stage's own OUTPUT
+    path (e.g. --out/--manifest) is correctly workspace-relative and must NOT
+    be absolutized here -- and since an output path doesn't exist yet at this
+    point (nothing has run), it's naturally left alone. A token that never
+    existed at all (a typo) is also left untouched: it still fails whatever
+    stage's own "not found" check the same way it always did, just relative
+    to the workspace instead of the original cwd -- no behavior change for
+    that already-loud, already-nonzero failure case (see run.py's fw
+    --gamescript checks, issue #38).
+    """
+    out = []
+    for tok in argv:
+        if tok and not tok.startswith("-") and not os.path.isabs(tok) and os.path.exists(tok):
+            tok = str(Path(tok).resolve())
+        out.append(tok)
+    return out
+
 def enter_workspace(workspace) -> Path:
     """Resolve *workspace* to an absolute path, create it, and chdir into it.
 

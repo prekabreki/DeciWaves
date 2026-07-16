@@ -121,6 +121,37 @@ def test_setup_saves_hzd_and_fw_package_paths(tmp_path, monkeypatch, capsys):
     assert cfg["ds_install"] == ""
 
 
+def test_setup_saves_absolute_path_for_relative_flags(tmp_path, monkeypatch):
+    # A relative path (relative to wherever the user ran `deciwaves setup`
+    # from) has no fixed meaning once persisted: a later `deciwaves` run can
+    # invoke from any directory, or chdir into an unrelated --workspace,
+    # before this value is ever read again -- so config-sourced paths must
+    # always be saved absolute (issue #32).
+    workdir = tmp_path / "workdir"
+    workdir.mkdir()
+    ds = workdir / "DS"
+    ds.mkdir()
+    (ds / "oo2core_7_win64.dll").write_bytes(b"x")
+    (ds / "data").mkdir()
+    (workdir / "gamescript.md").write_text("Aloy: Hi.\n", encoding="utf-8")
+    monkeypatch.chdir(workdir)
+    monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.setattr(s, "_download_and_unpack", _stub_download_ok)
+
+    rc = s.run_setup([
+        "--ds-install", "DS",
+        "--fw-gamescript", "gamescript.md",
+        "--tools-dir", "tools",
+    ])
+    assert rc == 0
+
+    cfg = json.loads((tmp_path / "cfg" / "config.json").read_text())
+    assert cfg["ds_install"] == str(ds)
+    assert cfg["fw_gamescript"] == str(workdir / "gamescript.md")
+    assert cfg["tools_dir"] == str(workdir / "tools")
+    assert cfg["oodle_dll"] == str(ds / "oo2core_7_win64.dll")
+
+
 def test_setup_second_run_with_different_game_preserves_first(tmp_path, monkeypatch):
     # Registering game A, then later registering game B without repeating A's
     # flags, must not blank out A's previously-saved entries (issue #36).

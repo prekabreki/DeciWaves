@@ -75,7 +75,18 @@ def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     ap = argparse.ArgumentParser(prog="deciwaves", description=__doc__)
     ap.add_argument("--version", action="version", version=f"deciwaves {__version__}")
-    ap.add_argument("--workspace", default=".", help="directory outputs are written under (default: current dir)")
+    ap.add_argument("--workspace", default=".", help=(
+        "directory outputs are written under (default: current dir). Must come "
+        "BEFORE the game name, e.g. `deciwaves --workspace DIR ds run` -- placed "
+        "after it (`deciwaves ds --workspace DIR run`), it is swallowed as that "
+        "stage's own argument instead, not read as the global --workspace. Any "
+        "relative path you pass to a stage's own flag (e.g. --gamescript) is "
+        "resolved against the directory you ran `deciwaves` from, before the "
+        "process chdirs into --workspace -- it does not need to sit inside the "
+        "workspace. A path saved via `deciwaves setup` (ds_install, "
+        "fw_gamescript, ...) is always stored absolute, so it is unaffected by "
+        "--workspace either way."
+    ))
     sub = ap.add_subparsers(dest="cmd", required=False)
     for name in ("setup", "doctor"):
         sub.add_parser(name, add_help=False)
@@ -151,6 +162,11 @@ def main(argv=None) -> int:
             return e.code
     stage, extra_argv = stage_argv[0], stage_argv[1:] + rest
 
+    # Absolutize any relative path in the stage's own argv (e.g. --gamescript)
+    # BEFORE chdir'ing into --workspace -- otherwise a relative flag value is
+    # silently looked up inside the workspace instead of relative to wherever
+    # the user actually ran `deciwaves` from (issue #32).
+    extra_argv = config.absolutize_existing_paths(extra_argv)
     config.enter_workspace(args.workspace)
     if stage == "run":
         from deciwaves.cli.run import run_game; return run_game(args.cmd, cfg, extra_argv)

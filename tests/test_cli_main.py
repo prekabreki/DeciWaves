@@ -134,6 +134,54 @@ def test_non_run_stage_help_does_not_execute_the_stage(tmp_path, capsys):
     assert not (tmp_path / "out").exists()
 
 
+def test_relative_stage_flag_path_survives_workspace_chdir(monkeypatch, tmp_path):
+    """chdir-before-dispatch used to mis-resolve relative stage-flag paths: a
+    relative --gamescript is meant relative to where the user ran `deciwaves`
+    from, but main.py's --workspace chdir happens BEFORE the stage (or `run`)
+    ever sees it, so it got looked up inside the workspace instead -- silently
+    wrong (issue #32). A path that exists relative to the original cwd must
+    be absolutized before the chdir, so it still points at the same file."""
+    invoke_dir = tmp_path / "invoke_dir"
+    invoke_dir.mkdir()
+    gamescript = invoke_dir / "gamescript.md"
+    gamescript.write_text("Aloy: hi\n", encoding="utf-8")
+    monkeypatch.chdir(invoke_dir)
+
+    workspace = tmp_path / "ws"
+
+    seen = {}
+
+    def _fake_run_game(game, cfg, extra_argv):
+        seen["argv"] = extra_argv
+        return 0
+
+    monkeypatch.setattr(run_mod, "run_game", _fake_run_game)
+
+    rc = cli.main(["--workspace", str(workspace), "fw", "run",
+                   "--gamescript", "gamescript.md"])
+
+    assert rc == 0
+    assert seen["argv"] == ["--gamescript", str(gamescript)]
+
+
+def test_relative_path_that_never_existed_is_left_untouched(monkeypatch, tmp_path):
+    """A typo'd/never-existed relative path must not be rewritten -- it still
+    fails whatever stage's own "not found" check the same way it always did,
+    just relative to the workspace instead of the original cwd (no change for
+    this case, which was already a loud, correctly-nonzero failure)."""
+    called = {}
+
+    def _stage(argv):
+        called["argv"] = argv
+        return 0
+
+    monkeypatch.setattr(cli, "_import_stage", lambda mod: _stage)
+    rc = cli.main(["--workspace", str(tmp_path), "ds", "catalog",
+                   "--data-dir", "no-such-relative-dir", "--oodle", "Y"])
+    assert rc == 0
+    assert called["argv"] == ["--data-dir", "no-such-relative-dir", "--oodle", "Y"]
+
+
 def test_lazy_stage_import():
     """`deciwaves.cli.main` must not eagerly import any stage module -- the CLI applies
     config-derived env (tool PATH/env vars) in `_apply_config_env()` before any stage

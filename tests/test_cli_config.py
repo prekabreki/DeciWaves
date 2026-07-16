@@ -48,6 +48,30 @@ def test_setup_and_main_and_doctor_all_consume_the_same_tools_table():
     assert setup_mod._TOOLS == tuple((t.key, t.url, t.exe) for t in config.TOOLS)
 
 
+def test_absolutize_existing_paths_rewrites_only_existing_relative_tokens(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    existing = tmp_path / "real.md"
+    existing.write_text("x", encoding="utf-8")
+
+    argv = ["--gamescript", "real.md", "--data-dir", "does-not-exist", "--bitrate", "96"]
+    out = config.absolutize_existing_paths(argv)
+
+    assert out == ["--gamescript", str(existing), "--data-dir", "does-not-exist", "--bitrate", "96"]
+
+
+def test_absolutize_existing_paths_leaves_already_absolute_paths_alone(tmp_path):
+    existing = tmp_path / "real.md"
+    existing.write_text("x", encoding="utf-8")
+    out = config.absolutize_existing_paths(["--gamescript", str(existing)])
+    assert out == ["--gamescript", str(existing)]
+
+
+def test_absolutize_existing_paths_ignores_flag_tokens_even_if_coincidentally_a_path(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    out = config.absolutize_existing_paths(["--gamescript"])
+    assert out == ["--gamescript"]  # never treated as a path token, existing or not
+
+
 def test_load_returns_empty_dict_when_file_missing(tmp_path, monkeypatch):
     monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(tmp_path / "cfg"))
     assert config.load() == {}
