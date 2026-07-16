@@ -18,9 +18,23 @@ _TOOL_EXES = {
 }
 
 
-def _stub_download_ok(url, dest):
+def _stub_download_ok(url, dest, **_kwargs):
+    # **_kwargs swallows manifest_path=... (and any future kwarg) -- this
+    # stub replaces the real _download_and_unpack, which is now called with
+    # manifest_path as a keyword; ignoring it here (rather than writing a
+    # manifest) is deliberate: tests that need a "fully installed" fixture
+    # use _mark_fully_installed below instead.
     dest.mkdir(parents=True, exist_ok=True)
     (dest / _TOOL_EXES[url]).write_bytes(b"x")
+
+
+def _mark_fully_installed(tools_dir, exe):
+    """Write *exe* plus a complete sidecar manifest for it, so
+    `_tool_fully_installed` (and therefore `_fetch_tools`' skip-if-present
+    check) considers it genuinely, fully installed -- not just "a file
+    happens to be sitting there" (issue #32 follow-up)."""
+    (tools_dir / exe).write_bytes(b"already-here")
+    (tools_dir / f"{exe}.files.txt").write_text(f"{exe}\n", encoding="utf-8")
 
 
 def test_setup_writes_config_and_finds_oodle(tmp_path, monkeypatch):
@@ -260,34 +274,34 @@ def test_setup_after_corrupted_config_yields_only_current_game(tmp_path, monkeyp
 
 def test_existing_tools_are_not_redownloaded_without_force(tmp_path, monkeypatch):
     # issue #32: every non-skip run used to re-fetch all ~200 MB regardless of
-    # whether the exe was already sitting in tools_dir. A present exe must now
-    # be left alone unless --force is passed.
+    # whether the exe was already sitting in tools_dir. A tool that's fully
+    # installed (exe + complete manifest) must now be left alone unless
+    # --force is passed.
     tools_dir = tmp_path / "tools"
     tools_dir.mkdir()
     for exe in _TOOL_EXES.values():
-        (tools_dir / exe).write_bytes(b"already-here")
+        _mark_fully_installed(tools_dir, exe)
 
-    def _boom(url, dest):
+    def _boom(url, dest, **_kwargs):
         raise AssertionError("must not re-download an already-present tool without --force")
 
     monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(tmp_path / "cfg"))
     monkeypatch.setattr(s, "_download_and_unpack", _boom)
     rc = s.run_setup(["--tools-dir", str(tools_dir)])
-    assert rc == 0
-    out = ""  # nothing to assert on captured output here; the _boom guard is the real check
+    assert rc == 0  # the _boom guard above is the real check: no re-download happened
 
 
 def test_force_redownloads_even_when_already_present(tmp_path, monkeypatch):
     tools_dir = tmp_path / "tools"
     tools_dir.mkdir()
     for exe in _TOOL_EXES.values():
-        (tools_dir / exe).write_bytes(b"stale")
+        _mark_fully_installed(tools_dir, exe)  # genuinely complete -- --force must still refetch
 
     calls = []
 
-    def _record(url, dest):
+    def _record(url, dest, **kwargs):
         calls.append(url)
-        _stub_download_ok(url, dest)
+        _stub_download_ok(url, dest, **kwargs)
 
     monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(tmp_path / "cfg"))
     monkeypatch.setattr(s, "_download_and_unpack", _record)
@@ -297,17 +311,18 @@ def test_force_redownloads_even_when_already_present(tmp_path, monkeypatch):
 
 
 def test_missing_tool_is_still_fetched_even_without_force(tmp_path, monkeypatch):
-    # Only some tools present -- the missing one must still be fetched on a
-    # normal (non---force) run; only already-present ones are skipped.
+    # Only some tools present (and fully verified) -- the missing ones must
+    # still be fetched on a normal (non---force) run; only the genuinely
+    # complete one is skipped.
     tools_dir = tmp_path / "tools"
     tools_dir.mkdir()
-    (tools_dir / "vgmstream-cli.exe").write_bytes(b"already-here")
+    _mark_fully_installed(tools_dir, "vgmstream-cli.exe")
 
     calls = []
 
-    def _record(url, dest):
+    def _record(url, dest, **kwargs):
         calls.append(url)
-        _stub_download_ok(url, dest)
+        _stub_download_ok(url, dest, **kwargs)
 
     monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(tmp_path / "cfg"))
     monkeypatch.setattr(s, "_download_and_unpack", _record)
@@ -316,11 +331,94 @@ def test_missing_tool_is_still_fetched_even_without_force(tmp_path, monkeypatch)
     assert calls == [s.VGAUDIO_URL, s.FFMPEG_URL]  # vgmstream skipped, the other two fetched
 
 
+def test_partial_install_missing_sibling_file_is_refetched_without_force(tmp_path, monkeypatch):
+    # issue #32 follow-up: an interrupted prior unpack that landed the exe
+    # but not a sibling decoder DLL must NOT be silently treated as fully
+    # installed -- it must be refetched on the next normal (non---force) run,
+    # not require the user to know to pass --force.
+    tools_dir = tmp_path / "tools"
+    tools_dir.mkdir()
+    (tools_dir / "vgmstream-cli.exe").write_bytes(b"partial-unpack")
+    # Manifest claims a sibling DLL that never actually landed on disk --
+    # simulates a download that was interrupted mid-unpack.
+    (tools_dir / "vgmstream-cli.exe.files.txt").write_text(
+        "vgmstream-cli.exe\nlibvgmstream.dll\n", encoding="utf-8"
+    )
+
+    calls = []
+
+    def _record(url, dest, **kwargs):
+        calls.append(url)
+        _stub_download_ok(url, dest, **kwargs)
+
+    monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.setattr(s, "_download_and_unpack", _record)
+    rc = s.run_setup(["--tools-dir", str(tools_dir)])
+    assert rc == 0
+    assert s.VGMSTREAM_URL in calls  # re-fetched despite the exe already being present
+
+
+def test_legacy_install_without_manifest_is_refetched_once(tmp_path, monkeypatch):
+    # A tools_dir populated before this manifest check existed (exe present,
+    # no manifest at all) must be treated as "not verified" and refetched --
+    # matching the old always-download default, self-healing, and leaving a
+    # manifest behind so a LATER run can genuinely skip.
+    tools_dir = tmp_path / "tools"
+    tools_dir.mkdir()
+    for exe in _TOOL_EXES.values():
+        (tools_dir / exe).write_bytes(b"pre-manifest-install")  # no .files.txt sidecar
+
+    calls = []
+
+    def _record(url, dest, **kwargs):
+        calls.append(url)
+        _stub_download_ok(url, dest, **kwargs)
+
+    monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.setattr(s, "_download_and_unpack", _record)
+    rc = s.run_setup(["--tools-dir", str(tools_dir)])
+    assert rc == 0
+    assert calls == [s.VGMSTREAM_URL, s.VGAUDIO_URL, s.FFMPEG_URL]  # all re-fetched once
+
+
+def test_download_and_unpack_writes_manifest_listing_every_extracted_file(tmp_path, monkeypatch):
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("vgmstream-win64/vgmstream-cli.exe", b"exe-bytes")
+        zf.writestr("vgmstream-win64/libvgmstream.dll", b"dll-bytes")
+    zip_bytes = buf.getvalue()
+    monkeypatch.setattr(urllib.request, "urlopen", lambda url, timeout=None: io.BytesIO(zip_bytes))
+
+    dest = tmp_path / "tools"
+    manifest = dest / "vgmstream-cli.exe.files.txt"
+    s._download_and_unpack("https://example.invalid/vgmstream-win64.zip", dest, manifest_path=manifest)
+
+    assert manifest.is_file()
+    listed = manifest.read_text(encoding="utf-8").split()
+    assert set(listed) == {"vgmstream-cli.exe", "libvgmstream.dll"}
+
+
+def test_download_and_unpack_writes_no_manifest_when_not_asked(tmp_path, monkeypatch):
+    # Backward-compatible default: existing callers that don't pass
+    # manifest_path (and the many tests that call _download_and_unpack via
+    # the plain 2-arg stub shape) must see no new file appear.
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("vgmstream-cli.exe", b"exe-bytes")
+    zip_bytes = buf.getvalue()
+    monkeypatch.setattr(urllib.request, "urlopen", lambda url, timeout=None: io.BytesIO(zip_bytes))
+
+    dest = tmp_path / "tools"
+    s._download_and_unpack("https://example.invalid/vgmstream-win64.zip", dest)
+
+    assert list(dest.glob("*.files.txt")) == []
+
+
 def test_skip_downloads_never_calls_download(tmp_path, monkeypatch):
     tools_dir = tmp_path / "tools"; tools_dir.mkdir()
     (tools_dir / "vgmstream-cli.exe").write_bytes(b"x")  # only one of the three present
 
-    def _boom(url, dest):
+    def _boom(url, dest, **_kwargs):
         raise AssertionError("must not fetch when --skip-downloads is passed")
 
     monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(tmp_path / "cfg"))
@@ -369,12 +467,12 @@ def test_find_oodle_empty_when_no_ds_install():
 def test_download_failure_returns_nonzero_and_reports_failed_row_and_continues(tmp_path, monkeypatch, capsys):
     calls = []
 
-    def _flaky(url, dest):
+    def _flaky(url, dest, **kwargs):
         calls.append(url)
         if url == s.VGMSTREAM_URL:
             raise TimeoutError("timed out")
         # remaining tools still get attempted and succeed
-        _stub_download_ok(url, dest)
+        _stub_download_ok(url, dest, **kwargs)
 
     monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(tmp_path / "cfg"))
     monkeypatch.setattr(s, "_download_and_unpack", _flaky)
@@ -397,10 +495,10 @@ def test_config_still_written_correctly_when_one_tool_fails(tmp_path, monkeypatc
     # config write is unconditional.
     ds = tmp_path / "DS"; ds.mkdir(); (ds / "oo2core_7_win64.dll").write_bytes(b"x"); (ds / "data").mkdir()
 
-    def _flaky(url, dest):
+    def _flaky(url, dest, **kwargs):
         if url == s.VGAUDIO_URL:
             raise TimeoutError("timed out")
-        _stub_download_ok(url, dest)
+        _stub_download_ok(url, dest, **kwargs)
 
     monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(tmp_path / "cfg"))
     monkeypatch.setattr(s, "_download_and_unpack", _flaky)
@@ -417,7 +515,7 @@ def test_unpack_succeeds_but_exe_missing_returns_nonzero(tmp_path, monkeypatch, 
     # _download_and_unpack "succeeds" (no exception) but never drops the exe --
     # simulates an upstream zip whose layout changed.
     monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(tmp_path / "cfg"))
-    monkeypatch.setattr(s, "_download_and_unpack", lambda url, dest: None)
+    monkeypatch.setattr(s, "_download_and_unpack", lambda url, dest, **kwargs: None)
     rc = s.run_setup(["--tools-dir", str(tmp_path / "tools")])
     assert rc == 1
     out = capsys.readouterr().out

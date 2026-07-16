@@ -177,9 +177,17 @@ guided interactive flow (see below).
   `--ds-install`, and persists all of that — plus any `--hzd-package` / `--fw-package` /
   `--fw-gamescript` paths, each resolved to absolute — via `deciwaves/cli/config.py`. A
   tool already present in the tools dir is *not* re-fetched (skipping the ~200 MB download
-  most runs used to repeat, issue #32); pass `--force` to refetch it anyway.
-  `--skip-downloads` remains separate: it never downloads, and just reports what's already
-  there. Each tool's download/unpack is isolated (one failed fetch is reported in the
+  most runs used to repeat, issue #32) — but "present" means genuinely, fully installed, not
+  just "an exe with that name exists": `_download_and_unpack` writes a sidecar
+  `<exe>.files.txt` manifest (every extracted filename, one per line) only after every file in
+  its zip lands successfully, and `_tool_fully_installed` requires both the exe and every file
+  the manifest lists to still be there. A missing manifest (a legacy tools dir from before this
+  check existed, or an unpack interrupted before it got written — exe landed, a sibling decoder
+  DLL didn't) is treated as not-yet-installed and refetched once, which writes the manifest and
+  lets later runs genuinely skip (issue #32 follow-up: a present-but-partial exe used to pass as
+  "installed" and only `--force` could recover it). Pass `--force` to refetch a tool anyway even
+  when it's fully verified. `--skip-downloads` remains separate: it never downloads, and just
+  reports what's already there (by exe presence only, not manifest-verified). Each tool's download/unpack is isolated (one failed fetch is reported in the
   summary table and doesn't stop the others), but the command exits nonzero overall if any
   tool ended up missing. Every run merges its flags over what's already saved (issue #36):
   an omitted flag keeps its previous value, so registering one game's (or

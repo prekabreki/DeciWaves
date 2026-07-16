@@ -69,7 +69,8 @@ def _short_reason(exc: Exception) -> str:
     return msg
 
 
-def _download_and_unpack(url: str, dest_dir: Path, timeout: float = DOWNLOAD_TIMEOUT_SECONDS) -> None:
+def _download_and_unpack(url: str, dest_dir: Path, timeout: float = DOWNLOAD_TIMEOUT_SECONDS,
+                          manifest_path: Path | None = None) -> None:
     """Fetch `url` (a zip) and flatten every file it contains directly into
     dest_dir, discarding whatever subfolder structure the upstream zip used.
     vgmstream/VGAudio ship their exe (plus sibling decoder DLLs) at top level;
@@ -78,10 +79,21 @@ def _download_and_unpack(url: str, dest_dir: Path, timeout: float = DOWNLOAD_TIM
 
     Raises whatever urllib/zipfile raises on failure (DNS error, HTTP error,
     timeout, bad zip) -- the caller is responsible for catching this per-tool
-    so one bad download doesn't take down the whole run."""
+    so one bad download doesn't take down the whole run.
+
+    If *manifest_path* is given, it's written -- one extracted filename per
+    line, relative to dest_dir -- only AFTER every file has been successfully
+    written to disk. This is the "fully and successfully unpacked" record
+    `_fetch_tools`' skip-if-present check relies on: an interrupted run that
+    raises partway through (a bad zip, a truncated download) leaves whatever
+    files it already wrote on disk but never gets here, so no manifest is
+    written for that partial state -- the next run correctly treats it as
+    not-yet-installed and retries, instead of a present-but-incomplete exe
+    silently passing as "already installed" (issue #32 follow-up)."""
     dest_dir.mkdir(parents=True, exist_ok=True)
     with urllib.request.urlopen(url, timeout=timeout) as resp:
         data = resp.read()
+    extracted = []
     with zipfile.ZipFile(io.BytesIO(data)) as zf:
         for info in zf.infolist():
             if info.is_dir():
@@ -91,6 +103,9 @@ def _download_and_unpack(url: str, dest_dir: Path, timeout: float = DOWNLOAD_TIM
                 continue
             with zf.open(info) as src, open(dest_dir / name, "wb") as dst:
                 shutil.copyfileobj(src, dst)
+            extracted.append(name)
+    if manifest_path is not None:
+        manifest_path.write_text("\n".join(extracted) + "\n", encoding="utf-8")
 
 
 HZD_LOCATORS_NAME = "PackFileLocators.bin"
@@ -131,6 +146,34 @@ def _find_oodle(ds_install: str) -> str:
     return str(candidate) if candidate.is_file() else ""
 
 
+def _manifest_path_for(exe: str, tools_dir: Path) -> Path:
+    return tools_dir / f"{exe}.files.txt"
+
+
+def _tool_fully_installed(exe_path: Path, manifest_path: Path, tools_dir: Path) -> bool:
+    """True iff *exe_path* exists AND its sidecar manifest -- written by
+    `_download_and_unpack` only after every file in its zip was successfully
+    extracted -- exists and every file it lists is still present in
+    tools_dir.
+
+    A missing manifest (a legacy pre-issue-#32 tools_dir that predates this
+    check, or one interrupted mid-unpack before it got written) means "never
+    verified as complete", not "installed": the skip-if-present check below
+    must fall through to a real re-fetch in that case -- exactly once, since
+    that re-fetch writes the manifest, so later runs genuinely skip.
+    Previously a present exe ALONE was enough to skip (issue #32's original
+    fix) -- which silently treated a partial/interrupted unpack (exe landed,
+    a sibling decoder DLL didn't) as fully installed, and only --force could
+    recover it. This is the follow-up fix."""
+    if not exe_path.is_file() or not manifest_path.is_file():
+        return False
+    try:
+        names = [n for n in manifest_path.read_text(encoding="utf-8").splitlines() if n]
+    except OSError:
+        return False
+    return bool(names) and all((tools_dir / n).is_file() for n in names)
+
+
 def _fetch_tools(tools_dir: Path, skip_downloads: bool, force: bool = False):
     """Returns ([(label, status, path), ...], any_failed) for the summary
     table and exit-code decision. Each tool's download/unpack is isolated:
@@ -139,23 +182,25 @@ def _fetch_tools(tools_dir: Path, skip_downloads: bool, force: bool = False):
 
     --skip-downloads never downloads and never counts as a failure -- it
     only reports what's already present ("found"/"MISSING"). Otherwise, a
-    tool whose exe is already sitting in tools_dir is left alone instead of
-    re-fetched -- most runs used to re-download all ~200 MB of tools every
-    time, even when nothing was missing (issue #32) -- unless --force says
-    to refetch it anyway."""
+    tool that's already fully installed (exe present, and its manifest
+    confirms every extracted file is still there -- see
+    `_tool_fully_installed`) is left alone instead of re-fetched -- most runs
+    used to re-download all ~200 MB of tools every time, even when nothing
+    was missing (issue #32) -- unless --force says to refetch it anyway."""
     rows = []
     any_failed = False
     for label, url, exe in _TOOLS:
         exe_path = tools_dir / exe
+        manifest_path = _manifest_path_for(exe, tools_dir)
         if skip_downloads:
             status = "found" if exe_path.is_file() else "MISSING"
             rows.append((label, status, str(exe_path)))
             continue
-        if exe_path.is_file() and not force:
+        if not force and _tool_fully_installed(exe_path, manifest_path, tools_dir):
             rows.append((label, "found (skipped -- use --force to refetch)", str(exe_path)))
             continue
         try:
-            _download_and_unpack(url, tools_dir)
+            _download_and_unpack(url, tools_dir, manifest_path=manifest_path)
         except Exception as exc:  # fail-soft per tool: record and keep going
             status = f"FAILED: {label} ({_short_reason(exc)})"
             any_failed = True
