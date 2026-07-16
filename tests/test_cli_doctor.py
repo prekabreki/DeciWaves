@@ -108,6 +108,9 @@ def test_check_hzd_package_not_configured():
 
 
 def test_check_hzd_package_valid(tmp_path):
+    # A correct package dir -- the one containing PackFileLocators.bin --
+    # must pass (issue #34).
+    (tmp_path / "PackFileLocators.bin").write_bytes(b"x")
     ok, msg = doctor.check_hzd_package(str(tmp_path))
     assert ok and msg.startswith("[ok]")
 
@@ -115,6 +118,20 @@ def test_check_hzd_package_valid(tmp_path):
 def test_check_hzd_package_configured_but_broken(tmp_path):
     ok, msg = doctor.check_hzd_package(str(tmp_path / "missing"))
     assert not ok
+
+
+def test_check_hzd_package_install_root_is_not_ok(tmp_path):
+    # issue #34: an install-root-shaped dir (exists, but no PackFileLocators.bin
+    # -- e.g. the user pointed --hzd-package at the game root instead of
+    # <root>\LocalCacheDX12\package) must NOT be reported [ok]. Mirrors
+    # check_fw_package's streaming_graph.core requirement.
+    (tmp_path / "some_other_file.txt").write_bytes(b"x")  # dir exists, wrong shape
+    ok, msg = doctor.check_hzd_package(str(tmp_path))
+    assert not ok
+    assert msg.startswith("[--]")
+    assert "PackFileLocators.bin" in msg
+    assert "LocalCacheDX12" in msg  # names the expected subdir in the fix hint
+    assert "--hzd-package" in msg
 
 
 def test_check_fw_package_not_configured():
@@ -260,6 +277,7 @@ def test_run_doctor_exit_0_with_hzd_fw_only(tmp_path, monkeypatch, capsys):
         monkeypatch.delenv(var, raising=False)
     hzd = tmp_path / "hzd"
     hzd.mkdir()
+    (hzd / "PackFileLocators.bin").write_bytes(b"x")
     fw = tmp_path / "fw"
     fw.mkdir()
     (fw / "streaming_graph.core").write_bytes(b"x")

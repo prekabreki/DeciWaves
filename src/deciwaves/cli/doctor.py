@@ -74,9 +74,11 @@ def check_ds_install(ds_install: str) -> tuple[bool, str]:
 def check_hzd_package(hzd_package: str) -> tuple[bool, str]:
     if not hzd_package:
         return True, "[--] HZD package: not configured (fine if you don't own it)"
-    if Path(hzd_package).is_dir():
+    if Path(hzd_package, "PackFileLocators.bin").is_file():
         return True, f"[ok] HZD package: {hzd_package}"
-    return False, (f"[--] HZD package: {hzd_package!r} not found. "
+    return False, (f"[--] HZD package: {hzd_package!r} has no PackFileLocators.bin. "
+                    f"This must be the ...\\LocalCacheDX12\\package directory (the one "
+                    f"containing PackFileLocators.bin), not the game install root. "
                     f"Fix: run `deciwaves setup --hzd-package <...\\LocalCacheDX12\\package>`.")
 
 

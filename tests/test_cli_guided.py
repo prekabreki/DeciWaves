@@ -27,6 +27,7 @@ def _all_found_cfg(tmp_path):
     (ds / "data").mkdir(parents=True)
     hzd = tmp_path / "hzd"
     hzd.mkdir()
+    (hzd / "PackFileLocators.bin").write_bytes(b"x")
     fw = tmp_path / "fw"
     fw.mkdir()
     (fw / "streaming_graph.core").write_bytes(b"x")
