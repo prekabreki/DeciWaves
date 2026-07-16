@@ -35,6 +35,14 @@ _MARKUP = re.compile(r"<[^>]*>")
 
 SUBTITLE_TIER = "S"
 
+# The single default subtitle-manifest path -- subtitle_match.py, story_full.py,
+# and weave.py all import this rather than each hardcoding their own copy of the
+# consuming flag's default, so producer and consumers can never silently drift
+# apart again (issue #17: they used to disagree -- this file wrote
+# "subtitle-manifest.csv" while every consumer defaulted to
+# "subtitle-manifest-full.csv").
+DEFAULT_OUT = "out/fw/subtitle-manifest-full.csv"
+
 
 def clean_subtitle(s: str) -> str:
     """Strip ``<...>`` markup and collapse all whitespace (incl. ``\\n``) to
@@ -199,7 +207,7 @@ def main(argv=None):  # pragma: no cover - integration glue
                          "workspace root")
     ap.add_argument("--clip-index", default="out/fw/clip-index.csv")
     ap.add_argument("--transcripts", default="out/fw/transcripts.csv")
-    ap.add_argument("--out", default="out/fw/subtitle-manifest.csv")
+    ap.add_argument("--out", default=DEFAULT_OUT)
     ap.add_argument("--accept", type=float, default=70.0,
                     help="min assignment score to keep a multi-line pairing")
     ap.add_argument("--max-objects", type=int, default=None,

@@ -24,7 +24,14 @@ from deciwaves.engine.render import (
     ReelColumns,
 )
 
-BOUND_TIERS = {"1", "2"}
+# Default --manifest: the full-reel stage (story_full.py)'s own default --out.
+# Keep these in lockstep -- see test_render_default_manifest_matches_full_reel_stage_output.
+DEFAULT_MANIFEST = "out/fw/full-reel-manifest.csv"
+# Default --tiers: every tier the full-reel manifest actually ships, INCLUDING
+# "S" (subtitle-only, no gamescript match) -- that's most of the full reel's
+# lines; dropping it silently would defeat the point of the full-reel deliverable.
+DEFAULT_TIERS = "1,2,S"
+BOUND_TIERS = {t.strip() for t in DEFAULT_TIERS.split(",") if t.strip()}
 MONO_FMT = (1, SR, 2)        # FW fast-path clips are all mono / 48 kHz / s16
 
 
@@ -116,13 +123,13 @@ def _load_csv(path):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Render FW story reel to MP3")
-    ap.add_argument("--manifest", default="out/fw/asr-manifest.csv")
+    ap.add_argument("--manifest", default=DEFAULT_MANIFEST)
     ap.add_argument("--audio-root", default="out/fw",
                     help="dir the manifest 'wav' paths are relative to")
     ap.add_argument("--out-dir", default="out/fw/reels")
     ap.add_argument("--cache", default="out/fw/wav-cache")
     ap.add_argument("--errors", default="out/fw/render-errors.log")
-    ap.add_argument("--tiers", default="1,2",
+    ap.add_argument("--tiers", default=DEFAULT_TIERS,
                     help="comma-separated tiers to ship (e.g. '1' confident-only, 'D' for DLC)")
     ap.add_argument("--stem", default="fw_story_reel", help="output MP3 filename stem")
     ap.add_argument("--uniform-mono", action="store_true",

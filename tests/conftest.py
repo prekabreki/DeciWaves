@@ -72,3 +72,46 @@ def fw_streaming_graph_bytes():
     if not FW_STREAMING_GRAPH.is_file():
         pytest.skip("Forbidden West install not present")
     return FW_STREAMING_GRAPH.read_bytes()
+
+
+@pytest.fixture
+def parsed_stage_args():
+    """Call a stage's ``main(argv)`` only as far as its own
+    ``ArgumentParser.parse_args`` call, then abort -- returns the resulting
+    ``Namespace``.
+
+    Lets a test assert on a stage's REAL argparse defaults (or on what
+    another module's hand-built argv actually resolves to) without needing a
+    real install/manifest/types.json on disk to let ``main()`` run to
+    completion, and without re-declaring the stage's flags/defaults in the
+    test itself -- which would just be a second copy that happens to match
+    today (see issue #17's render/subtitle-bind default-drift bugs, which
+    this pattern is meant to make impossible to reintroduce silently).
+
+    The ``ArgumentParser.parse_args`` patch is scoped tightly around each
+    individual call (via ``pytest.MonkeyPatch.context()``), not the whole
+    test -- a caller like ``deciwaves fw run`` does its OWN argparse
+    parsing before ever reaching the nested stage's ``main()``, and that
+    outer parse must not be intercepted too.
+    """
+    import argparse
+
+    class _ParsedEarly(Exception):
+        def __init__(self, ns):
+            self.ns = ns
+
+    real_parse_args = argparse.ArgumentParser.parse_args
+
+    def _spy(self, args=None, namespace=None):
+        raise _ParsedEarly(real_parse_args(self, args, namespace))
+
+    def _run(main_fn, argv):
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(argparse.ArgumentParser, "parse_args", _spy)
+            try:
+                main_fn(argv)
+            except _ParsedEarly as exc:
+                return exc.ns
+        raise AssertionError(f"{main_fn} never reached ArgumentParser.parse_args")
+
+    return _run

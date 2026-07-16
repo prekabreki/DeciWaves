@@ -233,8 +233,16 @@ def _hzd_bind_argv(ctx: dict) -> list:
     drop, tail heal, same-path append) -- this only decides *whether* to pass it,
     making the README's "an interrupted bind picks up where it stopped" claim true
     for the chained `hzd run` (previously only true for a manually-rerun `hzd bind`
-    that passed --transcripts itself)."""
+    that passed --transcripts itself).
+
+    Also forwards --sample-cap (issue #35) when the user gave one explicitly --
+    ``ctx["sample_cap"]`` is ``None`` otherwise, in which case the flag is omitted
+    entirely so bind falls back to its own bounded default (300). 0 is forwarded
+    as-is (it's falsy but not None) -- asr_bind.py's own --sample-cap already
+    treats 0 as "unlimited, run a full pass"."""
     argv = ["--package", ctx["package"]]
+    if ctx.get("sample_cap") is not None:
+        argv += ["--sample-cap", str(ctx["sample_cap"])]
     if os.path.isfile(asr_bind.DEFAULT_TRANSCRIPTS_OUT):
         argv += ["--transcripts", asr_bind.DEFAULT_TRANSCRIPTS_OUT]
     return argv
@@ -247,6 +255,16 @@ def _run_hzd(cfg: dict, extra_argv: list) -> int:
                     "wem-metadata -> bind -> render.",
     )
     ap.add_argument("--package", help="HZD package/install path (default: from `deciwaves setup`)")
+    ap.add_argument("--sample-cap", type=int, default=None,
+                     help="forwarded to the bind stage: caps how many ambiguous "
+                          "fingerprint-collision buckets get ASR-transcribed (default: "
+                          "bind's own bounded default, 300 -- structural binding already "
+                          "resolves most rows without any ASR). 0 = unlimited (an "
+                          "uncapped full pass over every ambiguous bucket, hours on a full "
+                          "library). NOTE: if `bind` already completed in this workspace, "
+                          "passing a different --sample-cap here has no effect until you "
+                          "delete out/hzd/.done-bind and re-run -- the done-marker doesn't "
+                          "know its own flags changed.")
     ns = _parse_or_exit(ap, extra_argv)
     if isinstance(ns, int):
         return ns
@@ -255,7 +273,7 @@ def _run_hzd(cfg: dict, extra_argv: list) -> int:
     if not package:
         return _missing_config("hzd", "HZD package (hzd_package)", "--package")
 
-    ctx = {"package": package}
+    ctx = {"package": package, "sample_cap": ns.sample_cap}
     chain = [
         Stage("catalog", STAGES["hzd"]["catalog"][0], _hzd_package_argv),
         Stage("clip-index", STAGES["hzd"]["clip-index"][0], _hzd_package_argv),
@@ -290,14 +308,6 @@ def _fw_byo_message(package: str) -> str:
         "guided mode) don't need the flag at all."
     )
 
-# subtitle-bind's own --out default ("out/fw/subtitle-manifest.csv") is a quick-sample
-# name; match/full-reel/weave all default to reading the "-full" name, so the run chain
-# asks subtitle-bind to write that name directly rather than overriding three downstream
-# defaults.
-_FW_SUBTITLE_MANIFEST_FULL = "out/fw/subtitle-manifest-full.csv"
-_FW_FULL_REEL_MANIFEST = "out/fw/full-reel-manifest.csv"
-
-
 def _fw_extract_argv(ctx: dict) -> list:
     return ["--package", ctx["package"]]
 
@@ -307,7 +317,12 @@ def _fw_asr_argv(ctx: dict) -> list:
 
 
 def _fw_subtitle_bind_argv(ctx: dict) -> list:
-    return ["--package-dir", ctx["package"], "--out", _FW_SUBTITLE_MANIFEST_FULL]
+    # subtitle-bind's own --out default (`subtitle_bind.DEFAULT_OUT`) already
+    # matches what match/full-reel/weave read by default, so this stage needs
+    # no override -- see test_fw_subtitle_manifest_defaults.py for the lockstep
+    # test guarding that (issue #17: they used to disagree, and this function
+    # used to paper over it with an explicit --out).
+    return ["--package-dir", ctx["package"]]
 
 
 def _fw_match_argv(ctx: dict) -> list:
@@ -319,8 +334,11 @@ def _fw_full_reel_argv(ctx: dict) -> list:
 
 
 def _fw_render_argv(ctx: dict) -> list:
-    return ["--manifest", _FW_FULL_REEL_MANIFEST,
-            "--tiers", "1,2,S", "--stem", "fw_story_full", "--uniform-mono"]
+    # render's own --manifest/--tiers defaults (`render.DEFAULT_MANIFEST` /
+    # `render.DEFAULT_TIERS`) already match the full-reel stage's output and
+    # ship set, so this stage needs no override for them -- see
+    # test_fw_render.py's lockstep test (issue #17: they used to diverge).
+    return ["--stem", "fw_story_full", "--uniform-mono"]
 
 
 def _run_fw(cfg: dict, extra_argv: list) -> int:

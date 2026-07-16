@@ -98,6 +98,36 @@ def _patch_asr_stack(monkeypatch, dsar, decode_fail_marker=None, transcribe_fn=N
     monkeypatch.setattr(asr_mod, "transcribe", transcribe_fn)
 
 
+def _write_multi_bucket_fixture(tmp_path, n_buckets):
+    """`n_buckets` independent ambiguous buckets, each with 2 candidate lines sharing one
+    (a_bytes, b_samples) key but exactly 1 clip -- ambiguous because len(lines) > 1 (see
+    binding.relevant_buckets' skip condition), and exactly 1 clip per bucket so each
+    consumed bucket advances the --sample-cap loop's `len(want)` by exactly 1. That makes
+    the cap's bucket-vs-clip-count boundary arithmetic exact: N buckets <-> N clips, so a
+    --sample-cap of N consumes exactly N buckets, never overshooting mid-bucket."""
+    catalog = tmp_path / "catalog.csv"
+    wem_meta = tmp_path / "wem-metadata.csv"
+    clip_index = tmp_path / "clip-index.csv"
+
+    catalog_rows, wem_rows, clip_rows = [], [], []
+    for i in range(n_buckets):
+        a_bytes = 500 + i
+        for suffix in ("a", "b"):
+            line_id = f"L{i}{suffix}"
+            catalog_rows.append({"line_id": line_id, "category": "main_quest",
+                                  "subtitle_en": f"Line {i}{suffix}",
+                                  "speaker_name": "Aloy", "scene": "s1"})
+            wem_rows.append({"line_id": line_id, "a_bytes": str(a_bytes), "b_samples": "2000"})
+        clip_rows.append({"clip_row": str(i), "offset": str(1000 * (i + 1)),
+                           "a_bytes": str(a_bytes), "b_samples": "2000"})
+
+    _write_csv(catalog, catalog_rows,
+               ["line_id", "category", "subtitle_en", "speaker_name", "scene"])
+    _write_csv(wem_meta, wem_rows, ["line_id", "a_bytes", "b_samples"])
+    _write_csv(clip_index, clip_rows, ["clip_row", "offset", "a_bytes", "b_samples"])
+    return catalog, wem_meta, clip_index
+
+
 def _argv(tmp_path, catalog, wem_meta, clip_index, **extra):
     argv = ["--package", "FAKE_PKG",
             "--clip-index", str(clip_index),
@@ -455,3 +485,96 @@ def test_torn_sidecar_used_as_both_transcripts_and_transcripts_out_is_healed(tmp
     assert by_row["1"] == "prior ok"
     assert by_row["2"] == "new"                    # re-transcribed clip is its own intact row
     assert set(_manifest_clip_rows(tmp_path)) == {"0", "1", "2"}
+
+
+# ---------------------------------------------------------------------------
+# --sample-cap loud reporting (issue #35): a cap that truncates ASR work must never
+# be silent -- the stage must state exactly how many ambiguous buckets were left
+# untranscribed, and say nothing at all when the cap doesn't actually truncate.
+# ---------------------------------------------------------------------------
+
+def test_cap_boundary_exact_cap_buckets_prints_no_message(tmp_path, monkeypatch, capsys):
+    """Exactly as many ambiguous buckets as --sample-cap: every bucket is consumed (0
+    skipped), so no cap-applied message may appear."""
+    n_buckets = 3
+    catalog, wem_meta, clip_index = _write_multi_bucket_fixture(tmp_path, n_buckets)
+    dsar = FakeDsar()
+    _patch_asr_stack(monkeypatch, dsar)
+
+    rc = asr_bind.main(_argv(tmp_path, catalog, wem_meta, clip_index, sample_cap=n_buckets))
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "SAMPLE CAP" not in out
+    assert "left untranscribed" not in out
+    assert dsar.calls == [1000, 2000, 3000]   # every bucket's clip transcribed
+
+
+def test_cap_boundary_fewer_buckets_than_cap_prints_no_message(tmp_path, monkeypatch, capsys):
+    """Fewer ambiguous buckets than --sample-cap: the cap never even engages, so no
+    message may appear either."""
+    catalog, wem_meta, clip_index = _write_multi_bucket_fixture(tmp_path, n_buckets=2)
+    dsar = FakeDsar()
+    _patch_asr_stack(monkeypatch, dsar)
+
+    rc = asr_bind.main(_argv(tmp_path, catalog, wem_meta, clip_index, sample_cap=5))
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "SAMPLE CAP" not in out
+    assert "left untranscribed" not in out
+    assert dsar.calls == [1000, 2000]
+
+
+def test_cap_one_over_boundary_reports_exact_skipped_count(tmp_path, monkeypatch, capsys):
+    """cap+1 ambiguous buckets: exactly ONE bucket must be reported skipped, loudly,
+    with the exact count -- not just "cap applied" with no number."""
+    n_buckets = 4
+    sample_cap = 3
+    catalog, wem_meta, clip_index = _write_multi_bucket_fixture(tmp_path, n_buckets)
+    dsar = FakeDsar()
+    _patch_asr_stack(monkeypatch, dsar)
+
+    rc = asr_bind.main(_argv(tmp_path, catalog, wem_meta, clip_index, sample_cap=sample_cap))
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "SAMPLE CAP" in out
+    assert "1 ambiguous bucket(s) left untranscribed" in out
+    assert f"--sample-cap={sample_cap}" in out
+    # only the first `sample_cap` buckets' clips were ever decoded/transcribed -- the
+    # 4th bucket's clip (offset 4000) must never be attempted.
+    assert dsar.calls == [1000, 2000, 3000]
+
+
+def test_cap_skips_several_buckets_reports_exact_count(tmp_path, monkeypatch, capsys):
+    """Several buckets beyond the cap: the reported count must be the exact number
+    skipped, not a placeholder or a rounded figure."""
+    n_buckets = 7
+    sample_cap = 3
+    catalog, wem_meta, clip_index = _write_multi_bucket_fixture(tmp_path, n_buckets)
+    dsar = FakeDsar()
+    _patch_asr_stack(monkeypatch, dsar)
+
+    rc = asr_bind.main(_argv(tmp_path, catalog, wem_meta, clip_index, sample_cap=sample_cap))
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "4 ambiguous bucket(s) left untranscribed" in out   # 7 - 3 = 4 skipped
+    assert dsar.calls == [1000, 2000, 3000]
+
+
+def test_sample_cap_zero_means_unlimited_full_pass_no_cap_message(tmp_path, monkeypatch, capsys):
+    """--sample-cap 0 must mean unlimited: every ambiguous bucket gets transcribed
+    and no cap message is printed, however many buckets there are."""
+    n_buckets = 5
+    catalog, wem_meta, clip_index = _write_multi_bucket_fixture(tmp_path, n_buckets)
+    dsar = FakeDsar()
+    _patch_asr_stack(monkeypatch, dsar)
+
+    rc = asr_bind.main(_argv(tmp_path, catalog, wem_meta, clip_index, sample_cap=0))
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "SAMPLE CAP" not in out
+    assert dsar.calls == [1000, 2000, 3000, 4000, 5000]   # every bucket's clip transcribed

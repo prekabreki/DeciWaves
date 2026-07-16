@@ -421,6 +421,74 @@ def test_hzd_bind_argv_includes_transcripts_when_sidecar_present(tmp_path, monke
     assert _after(bind_argv, "--transcripts") == run_mod.asr_bind.DEFAULT_TRANSCRIPTS_OUT
 
 
+def test_hzd_bind_argv_omits_sample_cap_when_not_given(tmp_path, monkeypatch):
+    """No --sample-cap given to `hzd run`: bind's argv must not include it at all, so
+    the bind stage falls back to its own bounded default (300) -- issue #35."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    mods = _mods("hzd")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _hzd_outputs(mods)))
+
+    rc = run_mod.run_game("hzd", {"hzd_package": "PKG"}, [])
+    assert rc == 0
+
+    bind_argv = dict(calls)[mods["bind"]]
+    assert "--sample-cap" not in bind_argv
+
+
+def test_hzd_bind_argv_forwards_sample_cap_when_given(tmp_path, monkeypatch):
+    """`--sample-cap` passed to `hzd run` must reach the bind stage (issue #35) --
+    it's the flag that governs how much ASR work bind actually does; without
+    forwarding, a user-supplied cap would be silently ignored by the chain."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    mods = _mods("hzd")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _hzd_outputs(mods)))
+
+    rc = run_mod.run_game("hzd", {"hzd_package": "PKG"}, ["--sample-cap", "42"])
+    assert rc == 0
+
+    bind_argv = dict(calls)[mods["bind"]]
+    assert _after(bind_argv, "--sample-cap") == "42"
+
+
+def test_hzd_bind_argv_forwards_sample_cap_zero_for_full_pass(tmp_path, monkeypatch):
+    """0 must be forwarded as-is, never treated as falsy/omitted -- it's the
+    documented "unlimited full pass" sentinel asr_bind.py's --sample-cap already
+    understands (issue #35)."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    mods = _mods("hzd")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _hzd_outputs(mods)))
+
+    rc = run_mod.run_game("hzd", {"hzd_package": "PKG"}, ["--sample-cap", "0"])
+    assert rc == 0
+
+    bind_argv = dict(calls)[mods["bind"]]
+    assert _after(bind_argv, "--sample-cap") == "0"
+
+
+def test_hzd_run_help_documents_sample_cap_flag(tmp_path, monkeypatch, capsys):
+    """`deciwaves hzd run --help` must document --sample-cap and that 0 means an
+    unlimited full pass (issue #35) -- a forwarded flag `run --help` never mentions
+    is undiscoverable."""
+    monkeypatch.chdir(tmp_path)
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, {}))
+
+    with pytest.raises(SystemExit) as exc:
+        run_mod.run_game("hzd", {"hzd_package": "PKG"}, ["--help"])
+
+    assert exc.value.code == 0
+    assert calls == []
+    out = capsys.readouterr().out
+    assert "--sample-cap" in out
+    assert "unlimited" in out.lower()
+
+
 def test_hzd_bind_gpu_gate_aborts_without_whisperx(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("importlib.util.find_spec", lambda name: None)
@@ -604,7 +672,7 @@ def test_fw_gamescript_path_missing_exits_nonzero_and_names_path(tmp_path, monke
     assert bad_path in out
 
 
-def test_fw_full_chain_with_gamescript(tmp_path, monkeypatch):
+def test_fw_full_chain_with_gamescript(tmp_path, monkeypatch, parsed_stage_args):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
     gamescript = tmp_path / "gamescript.md"
@@ -625,10 +693,16 @@ def test_fw_full_chain_with_gamescript(tmp_path, monkeypatch):
     assert _after(match_argv, "--gamescript") == str(gamescript)
 
     render_argv = calls[-1][1]
-    assert _after(render_argv, "--tiers") == "1,2,S"
     assert _after(render_argv, "--stem") == "fw_story_full"
     assert "--uniform-mono" in render_argv
-    assert _after(render_argv, "--manifest") == "out/fw/full-reel-manifest.csv"
+    # --manifest/--tiers are no longer hand-wired here (issue #17): render's
+    # own defaults already match the full-reel stage's output and ship set,
+    # so this resolves render_argv through render's REAL parser rather than
+    # asserting a literal that would just be a second copy of the default.
+    from deciwaves.games.fw import render as render_mod
+    ns = parsed_stage_args(render_mod.main, render_argv)
+    assert ns.manifest == render_mod.DEFAULT_MANIFEST
+    assert ns.tiers == render_mod.DEFAULT_TIERS
 
 
 def test_fw_extract_rerun_invalidates_downstream_across_gamescript_gate(tmp_path, monkeypatch):
