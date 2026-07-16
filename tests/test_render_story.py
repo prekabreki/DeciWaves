@@ -411,6 +411,73 @@ def test_accumulate_episode_seconds_uncaught_exception_type_propagates(tmp_path)
             errors_path=str(tmp_path / "errors.log"), catch=KeyError)
 
 
+def test_accumulate_episode_seconds_parallel_matches_serial(tmp_path):
+    """The `jobs` knob (issue #41) only parallelizes the per-clip decode; the
+    accumulated results, per-episode seconds and failure count must be identical
+    to the serial (jobs=1) run, regardless of worker count."""
+    import time as _time
+
+    segs = [_seg(0, f"L{i}", scene=f"s{i % 3}", episode=i % 2) for i in range(30)]
+    durs = {s.line_id: float(i + 1) for i, s in enumerate(segs)}
+
+    def dur_of(s):
+        # jitter so completion order != input order under a pool
+        _time.sleep((hash(s.line_id) % 5) * 0.001)
+        return f"wav_{s.line_id}", durs[s.line_id]
+
+    serial = rs.accumulate_episode_seconds(
+        segs, dur_of, gap_key=lambda s: s.scene, err_key=lambda s: s.line_id,
+        errors_path=str(tmp_path / "e_serial.log"), catch=Exception, jobs=1)
+    parallel = rs.accumulate_episode_seconds(
+        segs, dur_of, gap_key=lambda s: s.scene, err_key=lambda s: s.line_id,
+        errors_path=str(tmp_path / "e_parallel.log"), catch=Exception, jobs=8)
+
+    assert parallel[0] == serial[0]        # results dict
+    assert parallel[1] == serial[1]        # ep_secs
+    assert parallel[2] == serial[2] == 0   # n_failed
+
+
+def test_accumulate_episode_seconds_parallel_failure_is_fail_soft(tmp_path):
+    """Under concurrency a clip whose decode raises (in `catch`) is logged and
+    skipped; the pool keeps running and every other clip still decodes."""
+    segs = [_seg(0, f"L{i}", scene="s", episode=0) for i in range(20)]
+    bad = {"L3", "L7", "L11"}
+
+    def dur_of(s):
+        if s.line_id in bad:
+            raise ac.ClipError(f"decode failed for {s.line_id}")
+        return f"wav_{s.line_id}", 1.0
+
+    errors = tmp_path / "errors.log"
+    results, ep_secs, n_failed = rs.accumulate_episode_seconds(
+        segs, dur_of, gap_key=lambda s: s.scene, err_key=lambda s: s.line_id,
+        errors_path=str(errors), catch=ac.ClipError, jobs=8)
+
+    assert n_failed == 3
+    assert set(results) == {s.line_id for s in segs} - bad
+    # errors file is line-atomic: exactly 3 well-formed lines, none interleaved
+    lines = [ln for ln in errors.read_text(encoding="utf-8").splitlines() if ln]
+    assert len(lines) == 3
+    assert {ln.split("\t")[0] for ln in lines} == bad
+    for ln in lines:
+        assert len(ln.split("\t")) == 3    # line_id \t err_key \t message, uncorrupted
+
+
+def test_accumulate_episode_seconds_parallel_uncaught_still_propagates(tmp_path):
+    """An exception type outside `catch` still aborts, even under a pool."""
+    segs = [_seg(0, f"L{i}", episode=0) for i in range(10)]
+
+    def dur_of(s):
+        if s.line_id == "L4":
+            raise ValueError("not in catch")
+        return None, 1.0
+
+    with pytest.raises(ValueError):
+        rs.accumulate_episode_seconds(
+            segs, dur_of, gap_key=lambda s: s.scene, err_key=lambda s: s.line_id,
+            errors_path=str(tmp_path / "errors.log"), catch=KeyError, jobs=8)
+
+
 def test_accumulate_episode_seconds_empty_segs():
     results, ep_secs, n_failed = rs.accumulate_episode_seconds(
         [], lambda s: (None, 0.0), gap_key=lambda s: s.scene,

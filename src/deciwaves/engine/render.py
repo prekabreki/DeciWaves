@@ -16,6 +16,7 @@ import wave
 from collections import namedtuple
 
 from deciwaves.engine.atomic_io import atomic_write
+from deciwaves.engine.parallel import default_jobs, ordered_parallel
 
 BUDGET_SECONDS = 290_000_000 * 8 / 128_000  # = 18125.0 (ideal 128 kbps, no overhead)
 
@@ -179,7 +180,7 @@ def _ffmpeg_concat(wav_list, out_mp3, list_path, norm_dir, kbps=DEFAULT_BITRATE_
 
 
 def accumulate_episode_seconds(segs, dur_of, *, gap_key, err_key, errors_path,
-                               catch=Exception):
+                               catch=Exception, jobs=1):
     """Decode/measure each segment in `segs`, accumulating the per-episode duration
     that :func:`pack_episodes` packs against.
 
@@ -204,6 +205,14 @@ def accumulate_episode_seconds(segs, dur_of, *, gap_key, err_key, errors_path,
     `err_key(seg)` picks the second error-log column (DS logs `stream_path`, HZD logs
     `clip_row`, FW logs `wav`).
 
+    `jobs` runs the (subprocess-bound) `dur_of` calls in a worker pool of that size
+    (see :func:`engine.parallel.ordered_parallel`); ``jobs=1`` (default) runs them
+    inline, exactly the old serial loop. Only `dur_of` is parallelized: the gap
+    accounting, the `results`/`ep_secs` mutation and every write to `errors_path` all
+    happen on the calling thread, in segment order, so the output is byte-identical to
+    the serial run and needs no lock. A `dur_of` failure outside `catch` still aborts,
+    at the same segment the serial loop would have raised on.
+
     Returns `(results, ep_secs, n_failed)`: `results` maps `line_id -> (payload,
     duration_seconds)` for every segment that succeeded -- this is the `durations`
     argument :func:`assemble_reels` expects; `ep_secs` maps `episode -> accumulated
@@ -213,14 +222,25 @@ def accumulate_episode_seconds(segs, dur_of, *, gap_key, err_key, errors_path,
     ep_secs: dict = {}
     prev_key_by_ep: dict = {}
     n_failed = 0
+
+    def _measure(s):
+        # Run in a worker thread (jobs>1). Capture the exception rather than raise
+        # so the main thread classifies it against `catch` in segment order --
+        # keeping the fail-soft/abort decision identical to the serial loop.
+        try:
+            return s, dur_of(s), None
+        except Exception as e:  # noqa: BLE001 - re-classified against `catch` below
+            return s, None, e
+
     with open(errors_path, "w", encoding="utf-8") as ferr:
-        for s in segs:
-            try:
-                payload, dur = dur_of(s)
-            except catch as e:
+        for s, payload_dur, exc in ordered_parallel(segs, _measure, jobs):
+            if exc is not None:
+                if not isinstance(exc, catch):
+                    raise exc
                 n_failed += 1
-                ferr.write(f"{s.line_id}\t{err_key(s)}\t{e}\n")
+                ferr.write(f"{s.line_id}\t{err_key(s)}\t{exc}\n")
                 continue
+            payload, dur = payload_dur
             results[s.line_id] = (payload, dur)
             key = gap_key(s)
             if s.episode in prev_key_by_ep:
@@ -327,6 +347,10 @@ def main(argv=None):
                     help="MP3 CBR bitrate in kbps (drives both encode and the "
                          "byte-budget packing math). Lower = fewer files; speech is "
                          "highly compressible so ~96 stays ~transparent")
+    ap.add_argument("--jobs", type=int, default=default_jobs(),
+                    help="number of clips to decode concurrently (each spawns one "
+                         f"vgmstream-cli). Default min(8, cpu_count)={default_jobs()}; "
+                         "--jobs 1 forces the old serial decode")
     args = ap.parse_args(argv)
 
     # imports deferred into main() (consistent with cutscene_audio.py): avoids
@@ -373,7 +397,7 @@ def main(argv=None):
 
     decoded, ep_secs, n_failed = accumulate_episode_seconds(
         decode_segs, _decode, gap_key=lambda s: s.scene, err_key=lambda s: s.stream_path,
-        errors_path=args.errors, catch=audio_clip.ClipError)
+        errors_path=args.errors, catch=audio_clip.ClipError, jobs=args.jobs)
 
     n_decoded = len(decoded)
     print(f"render: decoded {n_decoded} clips, {n_failed} failed (see {args.errors})")

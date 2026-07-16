@@ -252,6 +252,49 @@ def test_clip_wav_cleans_temp_wem_when_vgmstream_missing(tmp_path):
     assert leftover == [], f"temp .wem leaked: {leftover}"
 
 
+def test_clip_wav_concurrent_same_stream_no_corruption_no_leftover(tmp_path, monkeypatch):
+    """Two workers decoding the SAME stream_path at once (a cutscene track voicing
+    several lines shares one cache key) must not corrupt the cached wav nor leave a
+    scratch .wem behind. Both the transient .wem and the atomic tmp are per-call
+    unique, and the atomic replace tolerates the same-dst race (issue #41)."""
+    import threading
+
+    def fake_run(args, **kwargs):
+        out = args[args.index("-o") + 1]      # vgmstream: [-o, <tmp>, <wem>]
+        with wave.open(out, "wb") as w:
+            w.setnchannels(1); w.setsampwidth(2); w.setframerate(48000)
+            w.writeframes(b"\x00\x00" * 4800)  # 0.1 s
+        return _FakeProc(0)
+
+    monkeypatch.setattr(ac.subprocess, "run", fake_run)
+
+    idx = _FakeIdxRaw()
+    stream = "shared/cutscene.core.stream"
+    results, errors = [], []
+    barrier = threading.Barrier(10)
+
+    def worker():
+        try:
+            barrier.wait()
+            results.append(ac.clip_wav(idx, stream, str(tmp_path), vgmstream="vgmstream-cli"))
+        except Exception as e:  # pragma: no cover - only on a real race bug
+            errors.append(e)
+
+    threads = [threading.Thread(target=worker) for _ in range(10)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert errors == [], f"concurrent clip_wav raced: {errors}"
+    wav_path = os.path.join(str(tmp_path), ac._key(stream) + ".wav")
+    assert all(w == wav_path for w, _ in results)
+    # intact + parseable (a torn/interleaved write would fail wave.open or mis-size)
+    assert abs(ac.wav_duration_seconds(wav_path) - 0.1) < 1e-3
+    leftover = [f for f in os.listdir(tmp_path) if f.endswith(".wem")]
+    assert leftover == [], f"scratch .wem leaked: {leftover}"
+
+
 def test_clip_wav_resolves_vgmstream_at_spawn_time_not_import_time(tmp_path, monkeypatch):
     """Regression for issue #25: this test file's `from deciwaves.engine import
     audio_clip as ac` (top of file) already imported `ac` long before this test runs,
