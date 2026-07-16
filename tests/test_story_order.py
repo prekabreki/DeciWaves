@@ -87,6 +87,15 @@ def test_order_cutscene_groups_default_fallback_orders_by_cs_number():
     assert so.order_cutscene_groups(groups) == ["cs2", "cs7", "cs10", "cs71", "weird_group"]
 
 
+def test_order_cutscene_groups_default_fallback_places_cs53_near_cs03_cs04():
+    # Issue #40: cs53 is real main-story but the transcript doesn't reliably anchor it.
+    # Using the real (non-monkeypatched) em.CS_ORDER_HINT table, confirm the default
+    # (no-transcript, all-unanchored) order lands cs53 between cs03 and cs04 rather than
+    # after every other main-story group at raw cs_number(53).
+    groups = {"cs00": None, "cs03": None, "cs53": None, "cs04": None, "cs10": None}
+    assert so.order_cutscene_groups(groups) == ["cs00", "cs03", "cs53", "cs04", "cs10"]
+
+
 def test_order_cutscene_groups_hint_beats_cs_number(monkeypatch):
     # cs71's real CS_ORDER_HINT (980.0) already sorts after every low cs-number, so a mix
     # using it can't tell whether the `elif g in em.CS_ORDER_HINT` branch actually fired --
