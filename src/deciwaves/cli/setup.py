@@ -34,9 +34,6 @@ from deciwaves.cli import config
 from deciwaves.cli.config import FFMPEG_URL, VGAUDIO_URL, VGMSTREAM_URL  # noqa: F401
 from deciwaves.games.hzd.profile import HZD_LOCATORS_NAME, is_valid_hzd_package_dir
 
-# (label, url, exe expected to land directly in the tools dir once unpacked).
-_TOOLS = tuple((t.key, t.url, t.exe) for t in config.TOOLS)
-
 OODLE_DLL_NAME = "oo2core_7_win64.dll"
 
 DOWNLOAD_TIMEOUT_SECONDS = 30
@@ -193,28 +190,28 @@ def _fetch_tools(tools_dir: Path, skip_downloads: bool, force: bool = False):
     was missing (issue #32) -- unless --force says to refetch it anyway."""
     rows = []
     any_failed = False
-    for label, url, exe in _TOOLS:
-        exe_path = tools_dir / exe
-        manifest_path = _manifest_path_for(exe, tools_dir)
+    for tool in config.TOOLS:
+        exe_path = tools_dir / tool.exe
+        manifest_path = _manifest_path_for(tool.exe, tools_dir)
         if skip_downloads:
             status = "found" if exe_path.is_file() else "MISSING"
-            rows.append((label, status, str(exe_path)))
+            rows.append((tool.key, status, str(exe_path)))
             continue
         if not force and _tool_fully_installed(exe_path, manifest_path, tools_dir):
-            rows.append((label, "found (skipped -- use --force to refetch)", str(exe_path)))
+            rows.append((tool.key, "found (skipped -- use --force to refetch)", str(exe_path)))
             continue
         try:
-            _download_and_unpack(url, tools_dir, manifest_path=manifest_path)
+            _download_and_unpack(tool.url, tools_dir, manifest_path=manifest_path)
         except Exception as exc:  # fail-soft per tool: record and keep going
-            status = f"FAILED: {label} ({_short_reason(exc)})"
+            status = f"FAILED: {tool.key} ({_short_reason(exc)})"
             any_failed = True
         else:
             if exe_path.is_file():
                 status = "fetched"
             else:
-                status = f"FAILED: {label} (exe not found after unpack)"
+                status = f"FAILED: {tool.key} (exe not found after unpack)"
                 any_failed = True
-        rows.append((label, status, str(exe_path)))
+        rows.append((tool.key, status, str(exe_path)))
     return rows, any_failed
 
 
