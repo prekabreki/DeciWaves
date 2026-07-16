@@ -80,8 +80,12 @@ def main(argv=None):
                     help="0 = scan the whole pack; >0 caps records scanned during harvest")
     args = ap.parse_args(argv)
 
-    from deciwaves.games.hzd.profile import build_profile
+    from deciwaves.games.hzd.profile import build_profile, hzd_package_error
     from deciwaves.games.hzd.inventory import harvest_sentence_cores
+    err = hzd_package_error(args.package)
+    if err:
+        print(err)
+        return 1
     profile = build_profile(args.package)
     fw = profile.pack_reader
 

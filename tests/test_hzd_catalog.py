@@ -1,6 +1,7 @@
 """HZD identification pipeline: classification + profile (pure, no install needed)."""
+from deciwaves.games.hzd import catalog
 from deciwaves.games.hzd.catalog import classify_hzd, select_sentence_cores
-from deciwaves.games.hzd.profile import build_profile
+from deciwaves.games.hzd.profile import build_profile, hzd_package_error
 
 
 # --- classify_hzd: (category, scene) from a sentence-core virtual path ---
@@ -110,3 +111,48 @@ def test_build_profile_fields():
     assert p.out_dir == "out/hzd"
     assert p.transcript_path == ""  # disabled by default; BYO transcript via --transcript
     assert p.pack_reader is None  # None when package_dir not given
+
+
+# ---------------------------------------------------------------------------
+# hzd_package_error: actionable failure when --package doesn't point at the
+# LocalCacheDX12\package dir, instead of a bare FileNotFoundError traceback
+# from fw_locators.py (issue #34). Mirrors games.fw.subtitle_bind.types_json_error.
+# ---------------------------------------------------------------------------
+
+def test_hzd_package_error_none_when_locators_present(tmp_path):
+    (tmp_path / "PackFileLocators.bin").write_bytes(b"x")
+    assert hzd_package_error(str(tmp_path)) is None
+
+
+def test_hzd_package_error_message_when_missing(tmp_path):
+    # install-root-shaped dir: exists, but no PackFileLocators.bin inside.
+    msg = hzd_package_error(str(tmp_path))
+    assert msg is not None
+    assert "--hzd-package" in msg
+    assert "PackFileLocators.bin" in msg
+    assert "LocalCacheDX12" in msg
+    # ASCII-only (Windows console safety)
+    msg.encode("ascii")
+
+
+def test_hzd_package_error_message_when_dir_missing_entirely(tmp_path):
+    msg = hzd_package_error(str(tmp_path / "does-not-exist"))
+    assert msg is not None
+    assert "--hzd-package" in msg
+    assert "PackFileLocators.bin" in msg
+
+
+def test_catalog_main_missing_package_fails_actionably(tmp_path, monkeypatch, capsys):
+    # The observed bug (issue #34): `hzd run`/`hzd catalog --package <install root>`
+    # used to die with a raw FileNotFoundError traceback from fw_locators.py. It
+    # must instead print an actionable message and return nonzero.
+    monkeypatch.chdir(tmp_path)
+    bad_package = tmp_path / "install_root"  # exists, but no PackFileLocators.bin
+    bad_package.mkdir()
+    rc = catalog.main(["--package", str(bad_package)])
+    assert rc == 1
+
+    captured = capsys.readouterr()
+    assert "--hzd-package" in captured.out
+    assert "PackFileLocators.bin" in captured.out
+    assert captured.err == ""  # no traceback
