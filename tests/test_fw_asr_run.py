@@ -95,6 +95,29 @@ def test_run_resume_skips_done(tmp_path):
     assert ids == ["g1_0", "g1_1"]             # appended, no duplicate header/row
 
 
+def test_run_resumes_correctly_after_a_zero_byte_transcripts_file(tmp_path):
+    """A crash right after creating (but before writing to) transcripts.csv can
+    leave it 0 bytes. run() must still write a real header before appending --
+    an exists()-only "new file" check treats a 0-byte file as already-headered,
+    so the first real data row silently becomes the CSV's fieldnames."""
+    _write_clip_index(
+        [{"line_id": "g1_0", "wav": "audio/a.wav"},
+         {"line_id": "g1_1", "wav": "audio/b.wav"}],
+        tmp_path / "clips.csv",
+    )
+    rows = asr_run.load_clip_index(tmp_path / "clips.csv")
+    out = tmp_path / "transcripts.csv"
+    out.write_bytes(b"")   # simulate a 0-byte crash artifact
+
+    n_ok, n_err = asr_run.run(rows, out, tmp_path,
+                              transcribe_fn=lambda w: FakeTranscript(f"text {Path(w).name}"),
+                              log=lambda m: None)
+    assert (n_ok, n_err) == (2, 0)
+    got_rows = list(csv.DictReader(open(out, encoding="utf-8")))
+    assert {r["line_id"] for r in got_rows} == {"g1_0", "g1_1"}
+    assert asr_run.read_done_ids(out) == {"g1_0", "g1_1"}
+
+
 def test_select_clips_by_file_index():
     rows = [{"line_id": "a", "file_index": "15"},
             {"line_id": "b", "file_index": "101"},
