@@ -178,6 +178,65 @@ def test_clip_wav_error_includes_stderr_clause_when_present(tmp_path, monkeypatc
     assert "stderr: missing sample rate" in msg
 
 
+def test_clip_wav_interrupted_vgmstream_does_not_poison_cache(tmp_path, monkeypatch):
+    """Regression for issue #18: a vgmstream run that partially writes the
+    output then fails (simulating Ctrl-C / a crash mid-decode) must not leave
+    a truncated .wav sitting at the FINAL cache path -- clip_wav's own
+    `isfile and getsize > 44` check would otherwise treat that truncated file
+    as a valid cache hit on every later run, silently serving corrupt audio."""
+    def fake_run(args, **kwargs):
+        out_path = args[args.index("-o") + 1]
+        # >44 bytes: would pass clip_wav's own cache-validity check if it
+        # ever ended up at the real cache path.
+        with open(out_path, "wb") as f:
+            f.write(b"RIFF" + b"\x00" * 60)
+        return _FakeProc(1, stderr="simulated crash mid-decode")
+
+    monkeypatch.setattr(ac.subprocess, "run", fake_run)
+
+    with pytest.raises(ac.ClipError):
+        ac.clip_wav(_FakeIdxRaw(), "some/stream.core.stream", str(tmp_path),
+                    vgmstream="vgmstream-cli")
+
+    wav_path = os.path.join(str(tmp_path), ac._key("some/stream.core.stream") + ".wav")
+    assert not os.path.isfile(wav_path), \
+        "failed decode must not poison the WAV cache at the final path"
+    assert os.listdir(str(tmp_path)) == [], \
+        "no tmp .wav or .wem should be left behind after a failed decode"
+
+
+@needs_ffmpeg
+def test_apply_keep_spans_interrupted_write_does_not_poison_cache(tmp_path, monkeypatch):
+    """Regression for issue #18: an atrim-concat run that partially writes the
+    destination then fails must not leave a truncated file at the cache path
+    that a later run's `isfile and getsize > 44` check would accept."""
+    src = tmp_path / "track.wav"
+    _synth(src, [("tone", 5.0)])
+    cache_dir = tmp_path / "kept"
+
+    real_run = ac.subprocess.run
+
+    def flaky_run(args, **kwargs):
+        out_path = args[-1]  # ffmpeg output path is the last arg
+        with open(out_path, "wb") as f:
+            f.write(b"GARBAGE-NOT-REALLY-A-WAV-FILE-BUT-OVER-44-BYTES-LONG")
+        return _FakeProc(1, stderr="simulated ffmpeg crash mid-write")
+
+    monkeypatch.setattr(ac.subprocess, "run", flaky_run)
+    with pytest.raises(ac.ClipError):
+        ac.apply_keep_spans(str(src), [(1.0, 2.0)], str(cache_dir))
+
+    assert not os.path.isdir(cache_dir) or os.listdir(cache_dir) == [], \
+        "failed atrim-concat must not poison the cache with a truncated file"
+
+    # Cache must not be permanently poisoned: a real, successful run afterwards
+    # must still work (no leftover .tmp blocking/confusing later writes).
+    monkeypatch.setattr(ac.subprocess, "run", real_run)
+    out, dur = ac.apply_keep_spans(str(src), [(1.0, 2.0)], str(cache_dir))
+    assert os.path.isfile(out)
+    assert abs(dur - 1.0) < 0.1
+
+
 def test_clip_wav_cleans_temp_wem_when_vgmstream_missing(tmp_path):
     import os
     class FakeIdx:
@@ -191,3 +250,68 @@ def test_clip_wav_cleans_temp_wem_when_vgmstream_missing(tmp_path):
         pass  # FileNotFoundError or ClipError both acceptable
     leftover = [f for f in os.listdir(tmp_path) if f.endswith(".wem")]
     assert leftover == [], f"temp .wem leaked: {leftover}"
+
+
+def test_clip_wav_concurrent_same_stream_no_corruption_no_leftover(tmp_path, monkeypatch):
+    """Two workers decoding the SAME stream_path at once (a cutscene track voicing
+    several lines shares one cache key) must not corrupt the cached wav nor leave a
+    scratch .wem behind. Both the transient .wem and the atomic tmp are per-call
+    unique, and the atomic replace tolerates the same-dst race (issue #41)."""
+    import threading
+
+    def fake_run(args, **kwargs):
+        out = args[args.index("-o") + 1]      # vgmstream: [-o, <tmp>, <wem>]
+        with wave.open(out, "wb") as w:
+            w.setnchannels(1); w.setsampwidth(2); w.setframerate(48000)
+            w.writeframes(b"\x00\x00" * 4800)  # 0.1 s
+        return _FakeProc(0)
+
+    monkeypatch.setattr(ac.subprocess, "run", fake_run)
+
+    idx = _FakeIdxRaw()
+    stream = "shared/cutscene.core.stream"
+    results, errors = [], []
+    barrier = threading.Barrier(10)
+
+    def worker():
+        try:
+            barrier.wait()
+            results.append(ac.clip_wav(idx, stream, str(tmp_path), vgmstream="vgmstream-cli"))
+        except Exception as e:  # pragma: no cover - only on a real race bug
+            errors.append(e)
+
+    threads = [threading.Thread(target=worker) for _ in range(10)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert errors == [], f"concurrent clip_wav raced: {errors}"
+    wav_path = os.path.join(str(tmp_path), ac._key(stream) + ".wav")
+    assert all(w == wav_path for w, _ in results)
+    # intact + parseable (a torn/interleaved write would fail wave.open or mis-size)
+    assert abs(ac.wav_duration_seconds(wav_path) - 0.1) < 1e-3
+    leftover = [f for f in os.listdir(tmp_path) if f.endswith(".wem")]
+    assert leftover == [], f"scratch .wem leaked: {leftover}"
+
+
+def test_clip_wav_resolves_vgmstream_at_spawn_time_not_import_time(tmp_path, monkeypatch):
+    """Regression for issue #25: this test file's `from deciwaves.engine import
+    audio_clip as ac` (top of file) already imported `ac` long before this test runs,
+    so setting DECIWAVES_VGMSTREAM here -- after import -- must still be picked up.
+    clip_wav's `vgmstream=VGMSTREAM` default arg used to freeze the env var at def
+    time (module import time), so a later env change was silently ignored; the fix
+    re-resolves it at the moment vgmstream-cli is actually spawned."""
+    monkeypatch.setenv("DECIWAVES_VGMSTREAM", r"C:\fake\vgmstream-cli.exe")
+    seen = []
+
+    def fake_run(args, **kwargs):
+        seen.append(args[0])
+        return _FakeProc(1, stderr="simulated failure; only checking argv[0]")
+
+    monkeypatch.setattr(ac.subprocess, "run", fake_run)
+    with pytest.raises(ac.ClipError):
+        ac.clip_wav(_FakeIdxRaw(), "some/stream.core.stream", str(tmp_path))
+    assert seen == [r"C:\fake\vgmstream-cli.exe"], (
+        "clip_wav's default vgmstream path must re-resolve DECIWAVES_VGMSTREAM at "
+        "call time, not freeze it at import/def time")

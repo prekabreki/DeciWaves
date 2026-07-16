@@ -1,6 +1,4 @@
 import os
-import subprocess
-import sys
 
 import pytest
 
@@ -115,21 +113,3 @@ def test_non_run_stage_help_does_not_execute_the_stage(tmp_path, capsys):
 
     assert exc.value.code == 0
     assert not (tmp_path / "out").exists()
-
-
-def test_lazy_stage_import():
-    """`deciwaves.cli.main` must not eagerly import any stage module -- the CLI applies
-    config-derived env (tool PATH/env vars) in `_apply_config_env()` before any stage
-    module import, and `engine.audio_clip` / `games.fw.extract` / `games.hzd.atrac9`
-    resolve their tool paths at import time. Run in a fresh subprocess so sys.modules
-    isn't already polluted by other test files in this same pytest run.
-    """
-    script = (
-        "import sys\n"
-        "import deciwaves.cli.main\n"
-        "assert 'deciwaves.games.ds.catalog' not in sys.modules, sorted(m for m in sys.modules if m.startswith('deciwaves'))\n"
-        "print('OK')\n"
-    )
-    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "OK" in result.stdout

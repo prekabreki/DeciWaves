@@ -12,6 +12,7 @@ from __future__ import annotations
 import struct
 import hashlib
 import ctypes
+import threading
 from dataclasses import dataclass
 
 MASK64 = 0xFFFFFFFFFFFFFFFF
@@ -92,13 +93,24 @@ def _decrypt_chunk_data(key_block: bytes, data: bytearray):
 
 
 _oodle = None
+_oodle_lock = threading.Lock()
 
 
 def _load_oodle(dll_path: str):
+    # Lock-guarded lazy init: the DS render worker pool calls oodle_decompress
+    # from several threads. Without the lock two threads could both observe
+    # `_oodle is None` and, worse, one could read the freshly-assigned global
+    # before the other finished setting `.restype`, calling OodleLZ_Decompress
+    # with the default (32-bit) return type and misreading the decompressed
+    # size. The decompress call itself is a stateless C function (ctypes drops
+    # the GIL around it), so only the one-time init needs guarding.
     global _oodle
     if _oodle is None:
-        _oodle = ctypes.WinDLL(dll_path)
-        _oodle.OodleLZ_Decompress.restype = ctypes.c_int64
+        with _oodle_lock:
+            if _oodle is None:
+                lib = ctypes.WinDLL(dll_path)
+                lib.OodleLZ_Decompress.restype = ctypes.c_int64
+                _oodle = lib
     return _oodle
 
 

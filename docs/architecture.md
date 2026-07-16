@@ -96,16 +96,40 @@ The DS and HZD pipelines share this shape (FW's is described in its own section 
 4. **Render** (`engine/render.py`) — packs the ordered playlist into MP3 files sized to
    stay under a fixed per-file budget (comfortably under 290 MB per file at a given
    bitrate), inserting small silence gaps between lines and a longer one between scenes,
-   and writes a tracklist CSV alongside each MP3 so the reel is navigable.
+   and writes a tracklist CSV alongside each MP3 so the reel is navigable. The
+   measure-durations → per-episode gap accounting → pack → concat → tracklist shape used
+   to be copy-pasted once per game; it's now two public helpers every game's `main()`
+   calls instead: `accumulate_episode_seconds(segs, dur_of, ...)` does the
+   decode/measure loop and per-episode gap bookkeeping given a game-specific `dur_of`
+   callable, and `assemble_reels(spine, ep_secs, durations, columns=..., stem=..., ...)`
+   packs, concatenates, and writes the tracklist, with the tracklist's column shape
+   (`columns`, a `ReelColumns(header, row_of)`) supplied per game rather than hardcoded.
+   Each game's own decode/measure function (DS's inline clip decode, HZD's
+   `decode_spine_clips`, FW's bare `wave.open` duration read) is the only game-specific
+   code left in that half of the pipeline.
+
+   The per-clip decode — the wall-clock cost of a render — runs in a bounded worker
+   pool (`engine/parallel.py`), sized by each decode stage's `--jobs` flag
+   (`min(8, cpu_count)` by default; `--jobs 1` restores the old fully-serial decode).
+   `accumulate_episode_seconds` parallelizes only the `dur_of` calls (the decoder
+   subprocess and its archive read); the gap accounting and every error-log write stay
+   on the calling thread in segment order, so the output is byte-identical to a serial
+   run. The FW `extract` stage and HZD `clip-index` stage use the same pool. The pack
+   readers this touches are safe under it: DS `BinArchive` and HZD/FW `DsarArchive` both
+   reopen the file per read (no shared seek), and cache writes are atomic
+   (`engine/atomic_io.py`, per-call-unique tmp names) with a per-output-path lock
+   (`engine.parallel.KeyedLocks`) so a cache entry shared by several lines is produced
+   exactly once.
 
 HZD reuses the general shape of catalog/render — `games/hzd/render.py`'s own docstring
-notes it reuses `engine.render`'s game-agnostic packing/concat (`pack_episodes`, silence
-gaps, `_ffmpeg_concat`) — but it does **not** reuse `engine.selection`: nothing under
-`games/hzd/` imports `filter_and_dedup` or anything else from that module. Instead HZD has
-its own binding stage in place of both DS's transcript anchoring and DS's
-`engine.selection` dedup — its structural (A, B)-bucket join (see below) binds at most one
-line to one clip per bucket by construction, which is a different mechanism from, not a
-reuse of, `filter_and_dedup`. The two games don't share `story_order.py` itself.
+notes it reuses `engine.render`'s game-agnostic assembly kit
+(`accumulate_episode_seconds`, `assemble_reels`) — but it does **not** reuse
+`engine.selection`: nothing under `games/hzd/` imports `filter_and_dedup` or anything else
+from that module. Instead HZD has its own binding stage in place of both DS's transcript
+anchoring and DS's `engine.selection` dedup — its structural (A, B)-bucket join (see below)
+binds at most one line to one clip per bucket by construction, which is a different
+mechanism from, not a reuse of, `filter_and_dedup`. The two games don't share
+`story_order.py` itself.
 
 ## Command-line interface
 
@@ -145,10 +169,11 @@ guided interactive flow (see below).
   `%LOCALAPPDATA%/DeciWaves/config.json` (overridable via `DECIWAVES_CONFIG_DIR`).
   Before dispatching to any stage, `main()` calls `_apply_config_env()`, which prepends
   the saved `tools_dir` onto `PATH` and sets `DECIWAVES_VGMSTREAM` / `DECIWAVES_VGAUDIO`
-  when the corresponding executables are found there. This has to happen *before* the
-  stage module is imported: `engine/audio_clip.py`, `games/fw/extract.py`, and
-  `games/hzd/atrac9.py` all read those environment variables to resolve their tool-path
-  constants at import time, not lazily.
+  when the corresponding executables are found there. `engine/audio_clip.py`,
+  `games/fw/extract.py`, and `games/hzd/atrac9.py` all read those environment variables
+  via `engine/tool_paths.py`'s `resolve(env_var, exe)` at the moment the decoder
+  subprocess is actually spawned, so stage-module import order relative to
+  `_apply_config_env()` doesn't matter.
 - **`setup`.** `deciwaves setup` (`deciwaves/cli/setup.py`) fetches `vgmstream-cli`,
   `VGAudioCli`, and `ffmpeg` into a tools directory (default
   `%LOCALAPPDATA%\DeciWaves\tools`), locates `oo2core_7_win64.dll` under a supplied

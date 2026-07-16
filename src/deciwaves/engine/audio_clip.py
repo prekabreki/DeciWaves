@@ -9,18 +9,19 @@ from __future__ import annotations
 import hashlib
 import os
 import re
-import shutil
 import struct
 import subprocess
+import uuid
 import wave
 
-# Resolution order: explicit env override -> PATH -> bare name (fails loudly at
-# call time if truly absent). No more repo-relative vendor/ default -- tool setup
-# is the caller's job (see README's Install/Troubleshooting sections); Task 6's
-# CLI prepends a tools dir to PATH.
-VGMSTREAM = (os.environ.get("DECIWAVES_VGMSTREAM")
-             or shutil.which("vgmstream-cli") or "vgmstream-cli")
-# resolved at import time — the CLI applies config env before importing stage modules
+from deciwaves.engine.atomic_io import atomic_write
+from deciwaves.engine.parallel import KeyedLocks
+from deciwaves.engine.tool_paths import resolve
+
+# One lock per cache output path, so the render worker pool decodes/trims each
+# distinct cache file exactly once even when several clips map to it (see
+# engine.parallel.KeyedLocks). Distinct outputs never contend.
+_cache_locks = KeyedLocks()
 
 
 class ClipError(Exception):
@@ -90,39 +91,52 @@ def trim_long_silences(src, cache_dir, min_silence=10.0, threshold_db=-30.0, kee
     if os.path.isfile(dst) and os.path.getsize(dst) > 44:
         return dst, wav_duration_seconds(dst)
 
-    silences = _detect_silences(src, threshold_db, min_silence)
-    if not silences:
-        return src, wav_duration_seconds(src)
+    with _cache_locks(dst):
+        # A peer worker may have produced this trim while we waited for the lock.
+        if os.path.isfile(dst) and os.path.getsize(dst) > 44:
+            return dst, wav_duration_seconds(dst)
 
-    total = wav_duration_seconds(src)
-    # Keep all non-silence plus `keep` s of each long gap; drop [s+keep, e].
-    keeps, prev = [], 0.0
-    for s, e in silences:
-        end = min(s + keep, e)
-        if end > prev:
-            keeps.append((prev, end))
-        prev = e
-    if total > prev:
-        keeps.append((prev, total))
+        silences = _detect_silences(src, threshold_db, min_silence)
+        if not silences:
+            return src, wav_duration_seconds(src)
 
-    _atrim_concat(src, keeps, dst)
-    return dst, wav_duration_seconds(dst)
+        total = wav_duration_seconds(src)
+        # Keep all non-silence plus `keep` s of each long gap; drop [s+keep, e].
+        keeps, prev = [], 0.0
+        for s, e in silences:
+            end = min(s + keep, e)
+            if end > prev:
+                keeps.append((prev, end))
+            prev = e
+        if total > prev:
+            keeps.append((prev, total))
+
+        _atrim_concat(src, keeps, dst)
+        return dst, wav_duration_seconds(dst)
 
 
 def _atrim_concat(src, keeps, dst):
     """Build `dst` by concatenating the [start, end] intervals `keeps` of `src`
     via an ffmpeg atrim+concat filter graph. Channel layout / sample rate are
-    preserved (normalize canonicalizes later). Raises ClipError on failure."""
+    preserved (normalize canonicalizes later). Raises ClipError on failure.
+
+    Written via atomic_write: ffmpeg targets a tmp path, moved into place at
+    `dst` only on success, so an interrupted/failed run never leaves a
+    truncated file at the cache path (see engine.atomic_io)."""
     parts = "".join(
         f"[0:a]atrim=start={a}:end={b},asetpts=N/SR/TB[k{i}];"
         for i, (a, b) in enumerate(keeps))
     labels = "".join(f"[k{i}]" for i in range(len(keeps)))
     fc = f"{parts}{labels}concat=n={len(keeps)}:v=0:a=1[out]"
-    proc = subprocess.run(
-        ["ffmpeg", "-y", "-i", src, "-filter_complex", fc, "-map", "[out]", dst],
-        capture_output=True, text=True)
-    if proc.returncode != 0 or not os.path.isfile(dst):
-        raise ClipError(f"atrim-concat failed for {src}: {proc.stderr[-300:]}")
+
+    def _run(tmp):
+        proc = subprocess.run(
+            ["ffmpeg", "-y", "-i", src, "-filter_complex", fc, "-map", "[out]", tmp],
+            capture_output=True, text=True)
+        if proc.returncode != 0 or not os.path.isfile(tmp):
+            raise ClipError(f"atrim-concat failed for {src}: {proc.stderr[-300:]}")
+
+    atomic_write(dst, _run)
 
 
 def apply_keep_spans(src, spans, cache_dir):
@@ -140,36 +154,60 @@ def apply_keep_spans(src, spans, cache_dir):
     dst = os.path.join(cache_dir, f"{stem}.{tag}{ext or '.wav'}")
     if os.path.isfile(dst) and os.path.getsize(dst) > 44:
         return dst, wav_duration_seconds(dst)
-    _atrim_concat(src, spans, dst)
-    return dst, wav_duration_seconds(dst)
+    with _cache_locks(dst):
+        if os.path.isfile(dst) and os.path.getsize(dst) > 44:  # peer produced it meanwhile
+            return dst, wav_duration_seconds(dst)
+        _atrim_concat(src, spans, dst)
+        return dst, wav_duration_seconds(dst)
 
 
-def clip_wav(idx, stream_path, cache_dir, vgmstream=VGMSTREAM):
+def clip_wav(idx, stream_path, cache_dir, vgmstream=None):
+    if vgmstream is None:
+        vgmstream = resolve("DECIWAVES_VGMSTREAM", "vgmstream-cli")
     os.makedirs(cache_dir, exist_ok=True)
     wav_path = os.path.join(cache_dir, _key(stream_path) + ".wav")
     if os.path.isfile(wav_path) and os.path.getsize(wav_path) > 44:
         return wav_path, wav_duration_seconds(wav_path)
-    try:
-        raw = idx.read(stream_path)
-    except KeyError as e:
-        raise ClipError(f"stream not in install: {stream_path}") from e
-    wem_path = os.path.join(cache_dir, _key(stream_path) + ".wem")
-    try:
-        trimmed = trim_riff(raw)
-    except ClipError as e:
-        raise ClipError(f"bad RIFF in {stream_path}: {e}") from e
-    with open(wem_path, "wb") as f:
-        f.write(trimmed)
-    try:
-        proc = subprocess.run([vgmstream, "-o", wav_path, wem_path],
-                              capture_output=True, text=True)
-    finally:
-        if os.path.isfile(wem_path):
-            os.remove(wem_path)
-    if proc.returncode != 0 or not os.path.isfile(wav_path):
-        detail = _returncode_detail(proc.returncode)
-        stderr = (proc.stderr or "").strip()
-        if stderr:
-            detail = f"{detail}; stderr: {stderr}"
-        raise ClipError(f"vgmstream failed for {stream_path}: {detail}")
-    return wav_path, wav_duration_seconds(wav_path)
+
+    # Serialize per output path: several playlist lines can share one cutscene
+    # stream_path (hence one wav_path), so decode it once here -- peers block,
+    # then hit the re-check below -- instead of racing to write+read the same
+    # file under the pool (see engine.parallel.KeyedLocks).
+    with _cache_locks(wav_path):
+        if os.path.isfile(wav_path) and os.path.getsize(wav_path) > 44:
+            return wav_path, wav_duration_seconds(wav_path)
+        try:
+            raw = idx.read(stream_path)
+        except KeyError as e:
+            raise ClipError(f"stream not in install: {stream_path}") from e
+        # Unique per call: the .wem is a throwaway input to vgmstream, not a
+        # cache. A random token gives each call its own transient file so nothing
+        # is clobbered even if this path is ever reached concurrently. (The
+        # decoded `<key>.wav` output stays stable + cache-keyed.)
+        wem_path = os.path.join(cache_dir, _key(stream_path) + f".{uuid.uuid4().hex}.wem")
+        try:
+            trimmed = trim_riff(raw)
+        except ClipError as e:
+            raise ClipError(f"bad RIFF in {stream_path}: {e}") from e
+        with open(wem_path, "wb") as f:
+            f.write(trimmed)
+
+        def _run(tmp):
+            proc = subprocess.run([vgmstream, "-o", tmp, wem_path],
+                                  capture_output=True, text=True)
+            if proc.returncode != 0 or not os.path.isfile(tmp):
+                detail = _returncode_detail(proc.returncode)
+                stderr = (proc.stderr or "").strip()
+                if stderr:
+                    detail = f"{detail}; stderr: {stderr}"
+                raise ClipError(f"vgmstream failed for {stream_path}: {detail}")
+
+        try:
+            # atomic_write: vgmstream targets a tmp path, moved into place only on
+            # success, so a crash/interrupt mid-decode never poisons the cache
+            # with a truncated .wav (see engine.atomic_io).
+            atomic_write(wav_path, _run)
+        finally:
+            if os.path.isfile(wem_path):
+                os.remove(wem_path)
+        return wav_path, wav_duration_seconds(wav_path)

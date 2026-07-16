@@ -1,4 +1,6 @@
 import struct
+
+from deciwaves.games.hzd import atrac9
 from deciwaves.games.hzd.atrac9 import fact_sample_count, trim_riff
 
 
@@ -19,3 +21,34 @@ def test_fact_absent_returns_none():
 def test_trim_riff_cuts_trailing():
     data = _riff_with_fact(10) + b"GARBAGE_TAIL"
     assert trim_riff(data) == data[: struct.unpack("<I", data[4:8])[0] + 8]
+
+
+def test_decode_wem_to_wav_resolves_vgaudio_at_spawn_time_not_import_time(tmp_path, monkeypatch):
+    """Regression for issue #25: this test file's `from deciwaves.games.hzd.atrac9
+    import ...` (top of file) already imported `atrac9` long before this test runs, so
+    setting DECIWAVES_VGAUDIO here -- after import -- must still be picked up.
+    atrac9's module-level `VGAUDIO` constant used to freeze the env var at import
+    time, so a later env change was silently ignored; the fix re-resolves it at the
+    moment VGAudioCli is actually spawned."""
+    monkeypatch.setenv("DECIWAVES_VGAUDIO", r"C:\fake\VGAudioCli.exe")
+    seen = []
+
+    class _FakeProc:
+        returncode = 0
+        stderr = ""
+
+    def fake_run(args, **kwargs):
+        seen.append(args[0])
+        # decode_wem_to_wav now writes atomically (tmp -> os.replace), so the
+        # stub must produce the output file the real VGAudio would, or the move
+        # into place has nothing to move. `-o <out>` is the last arg.
+        with open(args[args.index("-o") + 1], "wb") as f:
+            f.write(b"\x00" * 64)
+        return _FakeProc()
+
+    monkeypatch.setattr(atrac9.subprocess, "run", fake_run)
+    wem = _riff_with_fact(10)
+    atrac9.decode_wem_to_wav(wem, str(tmp_path / "out.wav"))
+    assert seen == [r"C:\fake\VGAudioCli.exe"], (
+        "decode_wem_to_wav must re-resolve DECIWAVES_VGAUDIO at call time, not "
+        "freeze it into a module-level constant at import time")

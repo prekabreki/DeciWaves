@@ -151,6 +151,45 @@ def test_decode_spine_clips_skips_bad_read_and_continues(tmp_path, monkeypatch):
     assert "no chunk contains offset 100" in err_text
 
 
+def test_decode_spine_clips_parallel_matches_serial_and_is_fail_soft(tmp_path, monkeypatch):
+    """--jobs>1 must yield the same decoded set / ep_secs / skip count as serial,
+    and a per-clip decode failure under the pool is logged + skipped, not fatal
+    (issue #41)."""
+    import time as _time
+
+    spine = [
+        SpineItem(episode=i % 2, scene=f"mq0{i % 3}", line_index=i, speaker="aloy",
+                  subtitle=f"line {i}", line_id=f"L{i}", clip_row=i, offset=i * 100,
+                  a_bytes=10)
+        for i in range(24)
+    ]
+    fail_offsets = {300, 700, 1100}   # three clips' reads raise ValueError
+
+    def decode(wem_bytes, wav_path):
+        _write_silent_wav(wav_path)
+
+    monkeypatch.setattr("deciwaves.games.hzd.render.decode_wem_to_wav", decode)
+
+    def run(jobs, tag):
+        dsar = _FakeDsar(fail_offsets=fail_offsets)
+        # add jitter so worker completion order differs from spine order
+        orig = dsar.read
+        def jittered(offset, length):
+            _time.sleep((offset // 100 % 4) * 0.001)
+            return orig(offset, length)
+        dsar.read = jittered
+        cache = tmp_path / f"cache_{tag}"; cache.mkdir()
+        errors = tmp_path / f"err_{tag}.log"
+        return decode_spine_clips(spine, dsar, str(cache), str(errors), jobs=jobs)
+
+    s_decoded, s_ep, s_skip = run(1, "serial")
+    p_decoded, p_ep, p_skip = run(8, "parallel")
+
+    assert set(p_decoded) == set(s_decoded)
+    assert p_ep == s_ep
+    assert p_skip == s_skip == 3
+
+
 def test_decode_spine_clips_no_failures_no_skips(tmp_path, monkeypatch):
     spine = [SpineItem(episode=0, scene="mq01", line_index=0, speaker="aloy", subtitle="a",
                        line_id="L0", clip_row=0, offset=0, a_bytes=10)]
