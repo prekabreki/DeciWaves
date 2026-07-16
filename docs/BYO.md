@@ -137,8 +137,9 @@ stage, through its `--transcript` flag:
 default numeric cutscene order. Anchoring with a transcript means running the order stage
 yourself with the flag set (and pointing its other inputs, the catalog and the cutscene track
 list, at the files you want - see `deciwaves ds order --help`), then re-rendering. Passing an
-empty path, or none, disables anchoring and falls back to numeric order; a path that doesn't
-exist prints a notice and does the same.
+empty path, or none, disables anchoring and falls back to numeric order; a path you *do* pass
+that doesn't exist is treated as a mistake - the order stage errors and exits nonzero naming
+the path, rather than silently falling back.
 
 This is copyrighted game prose. DeciWaves does not ship it and never will; supply your own from
 the game you own.
