@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import csv
 import os
-import tempfile
+
+from deciwaves.engine.atomic_io import atomic_write
 
 CSV_COLUMNS = ["line_id", "core_path", "line_index", "category", "scene",
                "speaker_code", "speaker_name", "subtitle_en", "wem_path_en", "language"]
@@ -61,9 +62,11 @@ def prune_incomplete_rows(csv_path, processed_path, key_column="core_path"):
 
     Call this once at startup, before computing what's "done", so the CSV only ever
     holds rows for cores the sidecar confirms are complete -- making the sidecar the
-    single, non-drifting resume authority. The rewrite is atomic (write a temp file,
-    then `os.replace()`) so a crash during the prune itself can't corrupt the CSV: the
-    original file is left untouched until the replacement is fully written.
+    single, non-drifting resume authority. The rewrite is atomic (via
+    ``engine.atomic_io.atomic_write``: a temp file in the CSV's own directory,
+    moved into place with `os.replace()` only once fully written) so a crash during
+    the prune itself can't corrupt the CSV: the original file is left untouched
+    until the replacement is fully written.
 
     One case is deliberately NOT pruned (finding 3): the sidecar FILE is entirely
     absent while the CSV holds data rows. An empty ``processed`` set would otherwise
@@ -96,12 +99,14 @@ def prune_incomplete_rows(csv_path, processed_path, key_column="core_path"):
     dropped = len(rows) - len(kept)
     if dropped == 0:
         return 0
-    tmp_path = csv_path + ".tmp"
-    with open(tmp_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(kept)
-    os.replace(tmp_path, csv_path)
+
+    def _write(tmp_path):
+        with open(tmp_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(kept)
+
+    atomic_write(csv_path, _write)
     return dropped
 
 
@@ -111,11 +116,13 @@ def write_core_paths_sidecar(sidecar_path, core_paths, header=None) -> None:
     scan/harvest that produced it -- see issue #31 (HZD's wem-metadata stage used to
     re-run catalog's whole content scan).
 
-    Written via write-to-a-temp-file-then-``os.replace`` in the sidecar's own directory,
-    so a reader (``read_core_paths_sidecar``) never observes a partially-written file --
-    it sees either the previous sidecar or the complete new one, never a torn one. On any
-    failure the temp file is cleaned up and the exception re-raised; the target path is
-    left untouched (either absent, or holding the last complete write).
+    Written atomically via ``engine.atomic_io.atomic_write`` (a temp file in the
+    sidecar's own directory, moved into place with ``os.replace`` only once fully
+    written), so a reader (``read_core_paths_sidecar``) never observes a
+    partially-written file -- it sees either the previous sidecar or the complete
+    new one, never a torn one. On any failure the temp file is cleaned up and the
+    exception re-raised; the target path is left untouched (either absent, or
+    holding the last complete write).
 
     ``header``, if given, is written verbatim as the sidecar's first line (expected to
     start with ``#`` so ``read_core_paths_sidecar`` skips it as a comment rather than a
@@ -127,20 +134,15 @@ def write_core_paths_sidecar(sidecar_path, core_paths, header=None) -> None:
     """
     out_dir = os.path.dirname(sidecar_path) or "."
     os.makedirs(out_dir, exist_ok=True)
-    fd, tmp_path = tempfile.mkstemp(dir=out_dir, prefix=".catalog-cores-", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
+
+    def _write(tmp_path):
+        with open(tmp_path, "w", encoding="utf-8") as f:
             if header is not None:
                 f.write(header.rstrip("\n") + "\n")
             for p in core_paths:
                 f.write(p + "\n")
-        os.replace(tmp_path, sidecar_path)
-    except BaseException:
-        try:
-            os.remove(tmp_path)
-        except OSError:
-            pass
-        raise
+
+    atomic_write(sidecar_path, _write)
 
 
 def read_core_paths_sidecar(sidecar_path):
