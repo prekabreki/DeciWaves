@@ -15,7 +15,11 @@ from deciwaves.games.fw import extract as fx
 VGAUDIO = resolve("DECIWAVES_VGAUDIO", "VGAudioCli")
 
 
-def test_load_done_unions_manifest_and_processed(tmp_path):
+def test_resume_authority_is_sidecar_only_not_manifest_union(tmp_path):
+    """Issue #43 (mirrors issue #21 for ds/hzd): a manifest row for a line_id absent
+    from the processed sidecar is an unconfirmed/torn write (e.g. a crash between the
+    buffered CSV write and the sidecar write below it), not a second, independent
+    "done" signal -- it must be pruned, not unioned in."""
     manifest = tmp_path / "clip-index.csv"
     with open(manifest, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=fx.MANIFEST_COLS)
@@ -23,14 +27,18 @@ def test_load_done_unions_manifest_and_processed(tmp_path):
         w.writerow({"line_id": "g1_0000", "group_id": 1, "lssr_index": 0,
                     "file_index": 15, "offset": 0, "clip_bytes": 10, "wav": "audio/x.wav"})
     processed = tmp_path / "processed.txt"
-    processed.write_text("g2_0000\ng3_0001\n", encoding="utf-8")
+    processed.write_text("", encoding="utf-8")  # exists, but does NOT confirm g1_0000
 
-    done = fx.load_done(str(manifest), str(processed))
-    assert done == {"g1_0000", "g2_0000", "g3_0001"}
+    dropped = fx.prune_incomplete_rows(str(manifest), str(processed), key_column="line_id")
+
+    assert dropped == 1
+    with open(manifest, newline="", encoding="utf-8") as f:
+        assert list(csv.DictReader(f)) == []
+    assert fx.processed_core_paths(str(processed)) == set()
 
 
-def test_load_done_missing_files(tmp_path):
-    assert fx.load_done(str(tmp_path / "nope.csv"), str(tmp_path / "nope.txt")) == set()
+def test_processed_core_paths_missing_files(tmp_path):
+    assert fx.processed_core_paths(str(tmp_path / "nope.txt")) == set()
 
 
 def test_extract_fails_fast_on_missing_vgaudio(tmp_path):
@@ -187,7 +195,11 @@ def test_extract_parallel_failure_is_fail_soft_and_errors_line_atomic(tmp_path, 
     processed = [ln for ln in
                  open(os.path.join(out, "clip-index-processed.txt"), encoding="utf-8")
                  .read().splitlines() if ln]
-    assert len(processed) == 30           # every line reached a terminal outcome
+    # Issue #43: a failed line is NOT a terminal outcome here -- it's deliberately
+    # left OFF the processed sidecar so it's retried on the next resume, unlike a
+    # hard per-core failure in the ds/hzd catalogs.
+    assert len(processed) == 27
+    assert set(processed) == {ln.line_id for ln in lines} - bad
 
 
 def test_extract_parallel_resume_and_limit(tmp_path, monkeypatch):
@@ -209,6 +221,93 @@ def test_extract_parallel_resume_and_limit(tmp_path, monkeypatch):
     assert len(ids) == len(set(ids)) == 16   # 8 + 8, no dupes
 
 
+# --- resume semantics redesign (issue #43): sidecar-only authority, retry-on-resume ---
+
+def test_extract_retries_a_failed_line_on_resume(tmp_path, monkeypatch):
+    """A per-line decode failure must not be permanently marked done -- it stays
+    eligible and is picked up again on the next resume, and once it succeeds it
+    ends up in the manifest exactly once."""
+    lines = _fake_lines(5)
+    vg = tmp_path / "vg.exe"; vg.write_bytes(b"x")
+    out = str(tmp_path / "fw")
+
+    _install_fw_stubs(monkeypatch, lines, fail_line_ids={"g1_0002"}, jitter=0.0)
+    s1 = fx.extract("pkg", out, decode=True, vgaudio=str(vg), jobs=1)
+    assert (s1.ok, s1.failed) == (4, 1)
+    assert {r["line_id"] for r in _read_rows(out)} == {ln.line_id for ln in lines} - {"g1_0002"}
+    processed1 = fx.processed_core_paths(os.path.join(out, "clip-index-processed.txt"))
+    assert "g1_0002" not in processed1
+
+    # Second run, decoder now succeeds for everyone: only the previously-failed
+    # line should still be outstanding.
+    _install_fw_stubs(monkeypatch, lines, jitter=0.0)   # fresh line iterator
+    s2 = fx.extract("pkg", out, decode=True, vgaudio=str(vg), jobs=1)
+    assert (s2.ok, s2.failed) == (1, 0)
+    assert s2.skipped == 4
+
+    rows = _read_rows(out)
+    ids = [r["line_id"] for r in rows]
+    assert len(ids) == len(set(ids)) == 5           # recovered line appears exactly once
+    assert ids.count("g1_0002") == 1
+    assert set(ids) == {ln.line_id for ln in lines}
+    processed2 = fx.processed_core_paths(os.path.join(out, "clip-index-processed.txt"))
+    assert processed2 == {ln.line_id for ln in lines}
+
+    # A line that no longer fails must not linger in the errors log across resumes.
+    err_lines = [ln for ln in
+                 open(os.path.join(out, "extract-errors.log"), encoding="utf-8")
+                 .read().splitlines() if ln]
+    assert err_lines == []
+
+
+def test_extract_errors_log_does_not_grow_across_resumes_for_a_persistent_failure(tmp_path, monkeypatch):
+    """A line that keeps failing run after run must have exactly one entry in
+    extract-errors.log, not one appended per resume (retry-on-resume would
+    otherwise grow the log unboundedly for a persistently-failing line)."""
+    lines = _fake_lines(3)
+    vg = tmp_path / "vg.exe"; vg.write_bytes(b"x")
+    out = str(tmp_path / "fw")
+
+    for _ in range(3):
+        _install_fw_stubs(monkeypatch, lines, fail_line_ids={"g1_0001"}, jitter=0.0)
+        fx.extract("pkg", out, decode=True, vgaudio=str(vg), jobs=1)
+
+    err_lines = [ln for ln in
+                 open(os.path.join(out, "extract-errors.log"), encoding="utf-8")
+                 .read().splitlines() if ln]
+    assert len(err_lines) == 1
+    assert err_lines[0].startswith("g1_0001\t")
+
+
+def test_extract_prunes_a_manifest_row_unconfirmed_by_the_sidecar(tmp_path, monkeypatch):
+    """A manifest row can outlive its sidecar confirmation if a crash lands between
+    the buffered CSV write and the processed-sidecar write. On the next run, that
+    unconfirmed row must be pruned (not trusted as done) and the line re-extracted
+    exactly once -- never a duplicate row."""
+    lines = _fake_lines(2)
+    vg = tmp_path / "vg.exe"; vg.write_bytes(b"x")
+    out = str(tmp_path / "fw")
+    os.makedirs(os.path.join(out, "audio"), exist_ok=True)
+
+    stale_wav = os.path.join("audio", "g1_0000.wav")
+    with open(os.path.join(out, "clip-index.csv"), "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=fx.MANIFEST_COLS)
+        w.writeheader()
+        w.writerow({"line_id": "g1_0000", "group_id": 1, "lssr_index": 0,
+                    "file_index": 15, "offset": 0, "clip_bytes": 32, "wav": stale_wav})
+    # processed sidecar exists but never confirmed g1_0000 -- the torn-write case.
+    open(os.path.join(out, "clip-index-processed.txt"), "w", encoding="utf-8").close()
+
+    _install_fw_stubs(monkeypatch, lines, jitter=0.0)
+    stats = fx.extract("pkg", out, decode=True, vgaudio=str(vg), jobs=1)
+
+    assert stats.ok == 2   # both lines re-extracted; the stale row didn't count as done
+    rows = _read_rows(out)
+    ids = [r["line_id"] for r in rows]
+    assert len(ids) == len(set(ids)) == 2
+    assert ids.count("g1_0000") == 1
+
+
 def test_extract_resumes_correctly_after_a_zero_byte_manifest(tmp_path, monkeypatch):
     """A prior run that crashed right after creating (but before writing to) the
     manifest file can leave it 0 bytes. A resume must still write a real header
@@ -228,8 +327,7 @@ def test_extract_resumes_correctly_after_a_zero_byte_manifest(tmp_path, monkeypa
     rows = _read_rows(out)
     assert len(rows) == 3
     assert {r["line_id"] for r in rows} == {ln.line_id for ln in lines}
-    done = fx.load_done(os.path.join(out, "clip-index.csv"),
-                        os.path.join(out, "clip-index-processed.txt"))
+    done = fx.processed_core_paths(os.path.join(out, "clip-index-processed.txt"))
     assert done == {ln.line_id for ln in lines}
 
 

@@ -2,17 +2,32 @@
 
 Resolves every fast-path-provable English line (:mod:`engine.pack.fw_fast_extract`),
 reads its self-describing RIFF/ATRAC9 clip from the package stream store, and
-decodes it to a WAV with VGAudio. **Resumable** (skips line_ids already in the
-manifest / processed log) and **fail-soft** (per-line errors logged, the run
-never aborts) -- mirrors the HZD catalog batch conventions
-(``engine.catalog_io.done_core_paths`` / ``processed_core_paths``).
+decodes it to a WAV with VGAudio. **Resumable** and **fail-soft** (per-line errors
+logged, the run never aborts).
+
+Resume semantics (issue #43, mirroring the ds/hzd catalog fix in issue #21 -- see
+``engine.catalog_io``): the processed sidecar (``clip-index-processed.txt``) is the
+SOLE resume authority, not a union with the manifest CSV. A line_id is written to
+the sidecar only once its manifest row is written, so a crash between the two can
+leave the CSV holding a row for a line the sidecar never confirmed;
+``prune_incomplete_rows`` (reused here with ``key_column="line_id"``) drops any such
+unconfirmed row before resume decides what's left to do -- exactly like
+``games.ds.catalog`` / ``games.hzd.catalog`` do for ``core_path``.
+
+A per-line decode FAILURE is deliberately never written to the processed sidecar:
+unlike a hard per-core parse failure in the ds/hzd catalogs (permanent, never
+retried), it stays eligible and is retried on the next resume -- most fw decode
+failures are expected to be transient (a controller design decision). Consequently
+``extract-errors.log`` is rewritten from scratch each run rather than appended
+across runs, so it always reflects only the CURRENT run's failures: a
+persistently-failing line gets exactly one entry, not one appended per resume.
 
 Output (all gitignored under ``out/fw/``)::
 
     out/fw/audio/<line_id>.wav         decoded clips
     out/fw/clip-index.csv              manifest (see MANIFEST_COLS)
-    out/fw/clip-index-processed.txt    every line_id reaching a terminal outcome
-    out/fw/extract-errors.log          per-line failures (line_id \\t error)
+    out/fw/clip-index-processed.txt    line_ids confirmed done (sole resume authority)
+    out/fw/extract-errors.log          this run's per-line failures (line_id \\t error)
 
 Speaker / subtitle / story order are added downstream (ASR vs
 ``docs/forbidden_west_gamescript.md`` -- the proven HZD path). FW clips are plain
@@ -33,6 +48,7 @@ import tempfile
 from dataclasses import dataclass
 
 from deciwaves.engine.atomic_io import atomic_write
+from deciwaves.engine.catalog_io import processed_core_paths, prune_incomplete_rows
 from deciwaves.engine.parallel import default_jobs, ordered_parallel
 from deciwaves.engine.pack.fw_streaming_graph import StreamingGraph
 from deciwaves.engine.pack.fw_stream import FwStreamStore
@@ -74,20 +90,6 @@ def decode_clip(clip_bytes: bytes, wav_path: str, vgaudio: str = None) -> None:
         os.unlink(tmp)
 
 
-def load_done(manifest_path: str, processed_path: str) -> set[str]:
-    """line_ids already extracted (manifest rows) or terminally processed
-    (failures/skips). Union = skip on resume, mirroring the HZD pattern."""
-    done: set[str] = set()
-    if os.path.isfile(manifest_path):
-        with open(manifest_path, "r", newline="", encoding="utf-8") as f:
-            for row in csv.DictReader(f):
-                done.add(row["line_id"])
-    if os.path.isfile(processed_path):
-        with open(processed_path, "r", encoding="utf-8") as f:
-            done.update(ln.strip() for ln in f if ln.strip())
-    return done
-
-
 @dataclass
 class ExtractStats:
     resolved: int = 0   # total fast-path lines
@@ -108,8 +110,10 @@ def extract(package_dir: str, out_dir: str = "out/fw", *,
     the calling thread, in line order (via engine.parallel.ordered_parallel), so
     the three output files are byte-identical to the serial run and need no lock.
     A clip's line_id is written to the processed log only *after* its worker
-    returned -- i.e. after its WAV is fully on disk (atomic decode) -- so a crash
-    mid-pool never records a not-yet-finished clip as done.
+    returned successfully -- i.e. after its WAV is fully on disk (atomic decode) --
+    so a crash mid-pool never records a not-yet-finished clip as done, and a
+    per-line decode failure is never recorded there at all (see module docstring:
+    it stays eligible and is retried on the next resume).
     """
     if vgaudio is None:
         vgaudio = resolve("DECIWAVES_VGAUDIO", "VGAudioCli")
@@ -132,7 +136,14 @@ def extract(package_dir: str, out_dir: str = "out/fw", *,
 
     graph = StreamingGraph.from_file(os.path.join(package_dir, "streaming_graph.core"))
     store = FwStreamStore(package_dir, graph.files)
-    done = load_done(manifest_path, processed_path)
+    # The processed sidecar is the SOLE resume authority (issue #43, mirroring #21
+    # for ds/hzd): drop any manifest row a crash left unconfirmed before computing
+    # what's left to do, or a torn row would wrongly count as done forever.
+    dropped = prune_incomplete_rows(manifest_path, processed_path, key_column="line_id")
+    if dropped:
+        print(f"resume: dropped {dropped} row(s) left by an incomplete previous run "
+              f"(line(s) not confirmed done in {processed_path})")
+    done = processed_core_paths(processed_path)
     stats = ExtractStats()
 
     def _todo():
@@ -170,20 +181,27 @@ def extract(package_dir: str, out_dir: str = "out/fw", *,
             return ln, None, f"{type(exc).__name__}: {exc}"
 
     new_manifest = not os.path.isfile(manifest_path) or os.path.getsize(manifest_path) == 0
+    # errors_path is opened "w" (rewritten from scratch), NOT "a": failed lines are
+    # retried on every resume, so appending across runs would grow one duplicate
+    # entry per resume for a persistently-failing line. Truncating means the log
+    # always reflects only the current run's failures (module docstring).
     with open(manifest_path, "a", newline="", encoding="utf-8") as mf, \
             open(processed_path, "a", encoding="utf-8") as pf, \
-            open(errors_path, "a", encoding="utf-8") as ef:
+            open(errors_path, "w", encoding="utf-8") as ef:
         writer = csv.DictWriter(mf, fieldnames=MANIFEST_COLS)
         if new_manifest:
             writer.writeheader()
         for ln, row, err in ordered_parallel(todo, _work, jobs):
             if err is None:
                 writer.writerow(row)
+                # Recorded done only after the WAV is on disk, and only on success:
+                # a failed line is deliberately left OFF the sidecar so it's retried
+                # on the next resume instead of being permanently skipped.
+                pf.write(ln.line_id + "\n")
                 stats.ok += 1
             else:
                 ef.write(f"{ln.line_id}\t{err}\n")
                 stats.failed += 1
-            pf.write(ln.line_id + "\n")   # recorded done only after the WAV is on disk
             if stats.ok % 50 == 0:
                 mf.flush(); pf.flush(); ef.flush()
     return stats
