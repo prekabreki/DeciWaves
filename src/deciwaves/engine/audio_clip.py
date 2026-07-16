@@ -9,20 +9,12 @@ from __future__ import annotations
 import hashlib
 import os
 import re
-import shutil
 import struct
 import subprocess
 import wave
 
 from deciwaves.engine.atomic_io import atomic_write
-
-# Resolution order: explicit env override -> PATH -> bare name (fails loudly at
-# call time if truly absent). No more repo-relative vendor/ default -- tool setup
-# is the caller's job (see README's Install/Troubleshooting sections); Task 6's
-# CLI prepends a tools dir to PATH.
-VGMSTREAM = (os.environ.get("DECIWAVES_VGMSTREAM")
-             or shutil.which("vgmstream-cli") or "vgmstream-cli")
-# resolved at import time — the CLI applies config env before importing stage modules
+from deciwaves.engine.tool_paths import resolve
 
 
 class ClipError(Exception):
@@ -154,7 +146,9 @@ def apply_keep_spans(src, spans, cache_dir):
     return dst, wav_duration_seconds(dst)
 
 
-def clip_wav(idx, stream_path, cache_dir, vgmstream=VGMSTREAM):
+def clip_wav(idx, stream_path, cache_dir, vgmstream=None):
+    if vgmstream is None:
+        vgmstream = resolve("DECIWAVES_VGMSTREAM", "vgmstream-cli")
     os.makedirs(cache_dir, exist_ok=True)
     wav_path = os.path.join(cache_dir, _key(stream_path) + ".wav")
     if os.path.isfile(wav_path) and os.path.getsize(wav_path) > 44:

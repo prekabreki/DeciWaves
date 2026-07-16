@@ -9,9 +9,10 @@ import wave
 
 import pytest
 
+from deciwaves.engine.tool_paths import resolve
 from deciwaves.games.fw import extract as fx
 
-VGAUDIO = fx.VGAUDIO
+VGAUDIO = resolve("DECIWAVES_VGAUDIO", "VGAudioCli")
 
 
 def test_load_done_unions_manifest_and_processed(tmp_path):
@@ -86,3 +87,28 @@ def test_extract_decodes_real_wav(fw_package_dir, tmp_path):
         with wave.open(wav_path, "rb") as w:
             assert w.getframerate() == 48000
             assert w.getnframes() > 0
+
+
+def test_decode_clip_resolves_vgaudio_at_spawn_time_not_import_time(tmp_path, monkeypatch):
+    """Regression for issue #25: this test file's `from deciwaves.games.fw import
+    extract as fx` (top of file) already imported `fx` long before this test runs, so
+    setting DECIWAVES_VGAUDIO here -- after import -- must still be picked up.
+    decode_clip's `vgaudio=VGAUDIO` default arg used to freeze the env var at def time
+    (module import time), so a later env change was silently ignored; the fix
+    re-resolves it at the moment VGAudioCli is actually spawned."""
+    monkeypatch.setenv("DECIWAVES_VGAUDIO", r"C:\fake\VGAudioCli.exe")
+    seen = []
+
+    class _FakeProc:
+        returncode = 0
+        stderr = ""
+
+    def fake_run(args, **kwargs):
+        seen.append(args[0])
+        return _FakeProc()
+
+    monkeypatch.setattr(fx.subprocess, "run", fake_run)
+    fx.decode_clip(b"\x00" * 8, str(tmp_path / "out.wav"))
+    assert seen == [r"C:\fake\VGAudioCli.exe"], (
+        "decode_clip's default vgaudio path must re-resolve DECIWAVES_VGAUDIO at "
+        "call time, not freeze it at import/def time")

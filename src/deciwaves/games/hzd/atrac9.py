@@ -1,16 +1,11 @@
 """ATRAC9 RIFF helpers for HZDR clips: cheap sample-count read + VGAudio decode."""
 from __future__ import annotations
 import os
-import shutil
 import struct
 import subprocess
 import tempfile
 
-# Resolution order: explicit env override -> PATH -> bare name. Same pattern/env var
-# as games.fw.extract.VGAUDIO (one VGAudio install serves both games).
-VGAUDIO = (os.environ.get("DECIWAVES_VGAUDIO")
-           or shutil.which("VGAudioCli") or "VGAudioCli")
-# resolved at import time — the CLI applies config env before importing stage modules
+from deciwaves.engine.tool_paths import resolve
 
 
 class Atrac9Error(Exception):
@@ -37,11 +32,12 @@ def fact_sample_count(header_bytes):
 
 
 def decode_wem_to_wav(wem_bytes, wav_path):
+    vgaudio = resolve("DECIWAVES_VGAUDIO", "VGAudioCli")
     payload = trim_riff(wem_bytes)
     with tempfile.NamedTemporaryFile(suffix=".at9", delete=False) as t:
         t.write(payload); tmp = t.name
     try:
-        r = subprocess.run([VGAUDIO, "-i", tmp, "-o", wav_path],
+        r = subprocess.run([vgaudio, "-i", tmp, "-o", wav_path],
                            capture_output=True, text=True)
         if r.returncode != 0:
             raise Atrac9Error(f"VGAudioCli failed: {r.stderr.strip()}")

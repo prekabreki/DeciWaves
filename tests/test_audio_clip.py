@@ -250,3 +250,25 @@ def test_clip_wav_cleans_temp_wem_when_vgmstream_missing(tmp_path):
         pass  # FileNotFoundError or ClipError both acceptable
     leftover = [f for f in os.listdir(tmp_path) if f.endswith(".wem")]
     assert leftover == [], f"temp .wem leaked: {leftover}"
+
+
+def test_clip_wav_resolves_vgmstream_at_spawn_time_not_import_time(tmp_path, monkeypatch):
+    """Regression for issue #25: this test file's `from deciwaves.engine import
+    audio_clip as ac` (top of file) already imported `ac` long before this test runs,
+    so setting DECIWAVES_VGMSTREAM here -- after import -- must still be picked up.
+    clip_wav's `vgmstream=VGMSTREAM` default arg used to freeze the env var at def
+    time (module import time), so a later env change was silently ignored; the fix
+    re-resolves it at the moment vgmstream-cli is actually spawned."""
+    monkeypatch.setenv("DECIWAVES_VGMSTREAM", r"C:\fake\vgmstream-cli.exe")
+    seen = []
+
+    def fake_run(args, **kwargs):
+        seen.append(args[0])
+        return _FakeProc(1, stderr="simulated failure; only checking argv[0]")
+
+    monkeypatch.setattr(ac.subprocess, "run", fake_run)
+    with pytest.raises(ac.ClipError):
+        ac.clip_wav(_FakeIdxRaw(), "some/stream.core.stream", str(tmp_path))
+    assert seen == [r"C:\fake\vgmstream-cli.exe"], (
+        "clip_wav's default vgmstream path must re-resolve DECIWAVES_VGMSTREAM at "
+        "call time, not freeze it at import/def time")

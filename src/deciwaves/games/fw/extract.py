@@ -26,7 +26,6 @@ from __future__ import annotations
 import argparse
 import csv
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -35,12 +34,7 @@ from dataclasses import dataclass
 from deciwaves.engine.pack.fw_streaming_graph import StreamingGraph
 from deciwaves.engine.pack.fw_stream import FwStreamStore
 from deciwaves.engine.pack.fw_fast_extract import iter_english_lines
-
-# Resolution order: explicit env override -> PATH -> bare name. See audio_clip.VGMSTREAM
-# for the same pattern; Task 6's CLI prepends a tools dir to PATH.
-VGAUDIO = (os.environ.get("DECIWAVES_VGAUDIO")
-           or shutil.which("VGAudioCli") or "VGAudioCli")
-# resolved at import time — the CLI applies config env before importing stage modules
+from deciwaves.engine.tool_paths import resolve
 
 MANIFEST_COLS = ["line_id", "group_id", "lssr_index", "file_index", "offset", "clip_bytes", "wav"]
 
@@ -49,12 +43,14 @@ class DecodeError(Exception):
     pass
 
 
-def decode_clip(clip_bytes: bytes, wav_path: str, vgaudio: str = VGAUDIO) -> None:
+def decode_clip(clip_bytes: bytes, wav_path: str, vgaudio: str = None) -> None:
     """Decode a self-describing RIFF/ATRAC9 *clip_bytes* to *wav_path* via VGAudio.
 
     FW dialogue clips are already plain ATRAC9 RIFF (no Wwise wrapper), so the
     bytes are written straight to a temp ``.at9`` and converted -- no trim.
     """
+    if vgaudio is None:
+        vgaudio = resolve("DECIWAVES_VGAUDIO", "VGAudioCli")
     with tempfile.NamedTemporaryFile(suffix=".at9", delete=False) as t:
         t.write(clip_bytes)
         tmp = t.name
@@ -91,8 +87,10 @@ class ExtractStats:
 
 def extract(package_dir: str, out_dir: str = "out/fw", *,
             limit: int | None = None, decode: bool = True,
-            vgaudio: str = VGAUDIO) -> ExtractStats:
+            vgaudio: str = None) -> ExtractStats:
     """Run the fast-path batch extraction. Returns counts. Idempotent/resumable."""
+    if vgaudio is None:
+        vgaudio = resolve("DECIWAVES_VGAUDIO", "VGAudioCli")
     # Fail fast on the dominant whole-environment failure: a missing/misconfigured
     # VGAudio. Without this, the per-line except below would log every one of the
     # ~61k lines as a failure AND mark each "processed", silently poisoning resume so
