@@ -103,6 +103,23 @@ def test_game_help_alone_still_shows_generic_stage_list(capsys):
         assert stage_name in out
 
 
+@pytest.mark.parametrize("game", ["ds", "hzd", "fw"])
+def test_game_help_shows_each_stage_curated_description(game, capsys):
+    """STAGES' per-stage help strings (the second element of each
+    `(module_path, help_text)` tuple) used to be dead data -- nothing ever
+    printed them (main.py's own dispatch discarded it into `_help`, see
+    STAGES[args.cmd][stage]). They must now actually reach the user, as the
+    game subparser's epilog (issue #32)."""
+    with pytest.raises(SystemExit) as exc:
+        cli.main([game, "--help"])
+
+    assert exc.value.code == 0
+    out = capsys.readouterr().out
+    for stage_name, (_mod, help_text) in cli.STAGES[game].items():
+        assert stage_name in out
+        assert help_text in out, f"{game} {stage_name}'s curated help text missing from --help output"
+
+
 def test_non_run_stage_help_does_not_execute_the_stage(tmp_path, capsys):
     """`deciwaves ds catalog --help` must not execute the catalog stage. Drives the
     REAL catalog module (no faking `_import_stage`): catalog.py's own argparse

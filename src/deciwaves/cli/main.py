@@ -46,6 +46,19 @@ def _stage_choices(game: str) -> tuple:
     args.stage, so the two stay in sync."""
     return (*STAGES[game], "run")
 
+def _stage_list_epilog(game: str) -> str:
+    """Render STAGES[game]'s curated per-stage help_text as `deciwaves <game>
+    --help`'s epilog. These strings used to be dead data -- STAGES[game][stage]
+    is a (module_path, help_text) pair, but the only place that ever read it
+    (main()'s dispatch, below) discarded help_text into a `_help` throwaway
+    and used just the module path (issue #32). Surfacing them here is the fix:
+    a stage's one-line description is now genuinely user-visible, not just a
+    comment-shaped string sitting in a dict."""
+    width = max(len(name) for name in _stage_choices(game))
+    lines = [f"  {name:<{width}}  {help_text}" for name, (_mod, help_text) in STAGES[game].items()]
+    lines.append(f"  {'run':<{width}}  chain {game}'s stages end-to-end (see `deciwaves {game} run --help`)")
+    return "stages:\n" + "\n".join(lines)
+
 def _apply_config_env():
     cfg = config.load()
     if cfg.get("tools_dir") and os.path.isdir(cfg["tools_dir"]):
@@ -68,7 +81,8 @@ def main(argv=None) -> int:
         sub.add_parser(name, add_help=False)
     game_parsers = {}
     for game, stages in STAGES.items():
-        gp = sub.add_parser(game)
+        gp = sub.add_parser(game, epilog=_stage_list_epilog(game),
+                             formatter_class=argparse.RawDescriptionHelpFormatter)
         stage_names = _stage_choices(game)
         # nargs=REMAINDER so a stage name -- "run" especially -- plus ALL of its
         # own following argv (including a "--help") is captured as one opaque
