@@ -40,10 +40,15 @@ def processed_core_paths(processed_path):
         return {ln.strip() for ln in f if ln.strip()}
 
 
-def prune_incomplete_rows(csv_path, processed_path):
-    """Rewrite *csv_path* in place, dropping every row whose ``core_path`` is absent
-    from the *processed* sidecar. Returns the number of rows dropped (0 if nothing
-    needed pruning -- including when *csv_path* doesn't exist yet).
+def prune_incomplete_rows(csv_path, processed_path, key_column="core_path"):
+    """Rewrite *csv_path* in place, dropping every row whose *key_column* value is
+    absent from the *processed* sidecar. Returns the number of rows dropped (0 if
+    nothing needed pruning -- including when *csv_path* doesn't exist yet).
+
+    *key_column* defaults to ``"core_path"`` (the ds/hzd catalogs' resume key) but
+    is overridable: ``games.fw.extract`` reuses this same helper keyed on
+    ``"line_id"`` instead of duplicating the prune logic for its own manifest shape
+    (issue #43).
 
     Why this exists (issue #21): a core's rows are written per-line but the CSV file
     is only `flush()`-ed once the whole core is done, and the sidecar line for that
@@ -78,16 +83,16 @@ def prune_incomplete_rows(csv_path, processed_path):
         rows = list(reader)
     if not os.path.isfile(processed_path):
         if rows:
-            distinct = list(dict.fromkeys(row["core_path"] for row in rows))
+            distinct = list(dict.fromkeys(row[key_column] for row in rows))
             print(f"WARNING: resume sidecar {processed_path} is missing but {csv_path} "
                   f"has {len(rows)} data row(s) -- treating the CSV as authoritative "
                   f"(looks restored/copied without its sidecar). Reconstructing the "
-                  f"sidecar from {len(distinct)} distinct core(s) and skipping the "
-                  f"incomplete-row prune.")
+                  f"sidecar from {len(distinct)} distinct {key_column}(s) and skipping "
+                  f"the incomplete-row prune.")
             write_core_paths_sidecar(processed_path, distinct)
         return 0
     processed = processed_core_paths(processed_path)
-    kept = [row for row in rows if row["core_path"] in processed]
+    kept = [row for row in rows if row[key_column] in processed]
     dropped = len(rows) - len(kept)
     if dropped == 0:
         return 0
