@@ -1,15 +1,21 @@
-"""HZD render: asr-manifest.csv -> ordered main-quest MP3 reel (<=290 MB files).
+"""HZD render: asr-manifest.csv -> ordered story MP3 reel (<=290 MB files).
 
-Main-quest spine only: bound story lines whose scene is a main quest (`mq##`), ordered
-by quest number then in-scene line_index. Quests sort cleanly into canonical story order
-(papooserider -> giftfromthepast -> ... -> thefaceofextinction), so no episode_map or
-transcript anchoring is needed for this spine (side/DLC content is a later pass).
+Two modes, both bound-story-lines-only, ordered by quest/scene then in-scene
+line_index:
+  * ``--spine-only``: main-quest lines only (scene `mq##`), sorted purely on quest
+    number -- main quests already sort cleanly into canonical story order
+    (papooserider -> giftfromthepast -> ... -> thefaceofextinction), so no
+    episode_map is needed for this narrower reel.
+  * default: the full story reel -- main quests PLUS every side/DLC scene, interleaved
+    at its unlock point via ``games.hzd.episode_map.HZD_EPISODE_MAP`` (questline
+    prefix -> unlock rank); a questline absent from that map sorts last rather than
+    being dropped.
 
 Reuses engine.render's game-agnostic assembly kit (accumulate_episode_seconds ->
 assemble_reels -> MP3 128k, tracklist sidecars); the HZD-specific part is decoding each
 clip from package.01 by (offset, length) via VGAudio.
 
-    deciwaves hzd render --package <pkg dir>
+    deciwaves hzd render --package <pkg dir> [--spine-only]
 """
 from __future__ import annotations
 
@@ -26,8 +32,8 @@ from deciwaves.engine.render import (
 from deciwaves.engine.parallel import KeyedLocks, default_jobs
 from deciwaves.engine.pack.fw_package import FwPackage
 from deciwaves.games.hzd.atrac9 import decode_wem_to_wav, Atrac9Error
+from deciwaves.games.hzd.profile import VOICE_ARCHIVE as ARCHIVE
 
-ARCHIVE = "package.01.00.core.stream"
 BOUND_TIERS = {"S", "1", "2", "E"}   # E = recovered by bucket elimination (mis-bind fix)
 
 

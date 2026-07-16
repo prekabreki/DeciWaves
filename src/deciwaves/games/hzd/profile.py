@@ -36,6 +36,10 @@ HZD_FAMILY_PREFIXES: dict[str, str] = {
 # (e.g. "collectab" is a prefix of "collectables") and keep plain substring matching.
 HZD_ANCHORED_PREFIXES: frozenset[str] = frozenset({"mq", "sq", "ec", "dlc"})
 
+# The DSAR archive holding every dialogue clip's encoded ATRAC9 payload -- shared by
+# every stage that decodes or fingerprints clips (clip_index, asr_bind, render).
+VOICE_ARCHIVE = "package.01.00.core.stream"
+
 
 def hzd_package_error(package_dir: str) -> str | None:
     """Return an actionable error message if *package_dir* doesn't contain

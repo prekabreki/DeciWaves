@@ -6,8 +6,8 @@ import os
 from deciwaves.engine.parallel import default_jobs, ordered_parallel
 from deciwaves.engine.pack.fw_package import FwPackage
 from deciwaves.games.hzd.atrac9 import fact_sample_count
+from deciwaves.games.hzd.profile import VOICE_ARCHIVE as ARCHIVE
 
-ARCHIVE = "package.01.00.core.stream"
 COLUMNS = ["clip_row", "offset", "a_bytes", "b_samples"]
 
 
@@ -42,7 +42,7 @@ def build_clip_index(dsar, entries, out_path, errors_path, header_len=2048, jobs
             a, b = clip_ab(dsar, e, header_len=header_len)
             return i, e.offset, a, b, None
         except ValueError as exc:  # fail-soft: reported by the main thread below
-            return i, None, None, None, str(exc)
+            return i, None, None, None, f"{type(exc).__name__}: {exc}"
 
     skipped = 0
     with open(out_path, "w", newline="") as f, \
