@@ -254,6 +254,27 @@ def test_sidecar_is_sole_resume_authority_after_prune(tmp_path):
     assert todo == ["crashed/core/sentences", "new/core/sentences"]
 
 
+def test_prune_incomplete_rows_supports_a_custom_key_column(tmp_path):
+    """Issue #43: games.fw.extract's manifest keys rows on "line_id", not
+    "core_path" -- prune_incomplete_rows must generalize via key_column instead of
+    fw needing its own parallel copy of this pruning logic."""
+    csv_path = tmp_path / "clip-index.csv"
+    proc_path = tmp_path / "clip-index-processed.txt"
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=["line_id", "wav"])
+        w.writeheader()
+        w.writerow({"line_id": "done_line", "wav": "audio/done_line.wav"})
+        w.writerow({"line_id": "torn_line", "wav": "audio/torn_line.wav"})
+    _write_processed(proc_path, ["done_line"])  # torn_line never confirmed
+
+    dropped = prune_incomplete_rows(str(csv_path), str(proc_path), key_column="line_id")
+
+    assert dropped == 1
+    with open(csv_path, newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    assert [r["line_id"] for r in rows] == ["done_line"]
+
+
 # ---------------------------------------------------------------------------
 # write_core_paths_sidecar / read_core_paths_sidecar (issue #31): lets a downstream
 # stage (HZD's wem-metadata) reuse the core-path list a catalog stage's harvest
