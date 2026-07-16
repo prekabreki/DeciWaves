@@ -20,6 +20,33 @@ def test_check_tool_found_via_env(tmp_path, monkeypatch):
     assert msg.startswith("[ok]")
 
 
+def test_check_tool_env_var_bare_name_resolves_on_path(tmp_path, monkeypatch):
+    """Finding 5: a DECIWAVES_* env var set to a bare command name that lives on
+    PATH must PASS doctor -- engine/tool_paths.resolve() hands that value straight
+    to subprocess.run, where PATH lookup works, so doctor's is_file()-only check
+    used to fail a genuinely-working config. Restores the env-on-PATH coverage the
+    deleted test_check_tool_found_via_env used to give."""
+    (tmp_path / "vgmstream-cli.exe").write_bytes(b"x")
+    monkeypatch.setenv("PATH", str(tmp_path))
+    monkeypatch.setenv("PATHEXT", ".EXE")
+    monkeypatch.setenv("DECIWAVES_VGMSTREAM", "vgmstream-cli")  # bare name, on PATH
+    ok, msg = doctor.check_tool("vgmstream-cli", "vgmstream-cli", "DECIWAVES_VGMSTREAM", "")
+    assert ok
+    assert "vgmstream-cli" in msg
+    assert "DECIWAVES_VGMSTREAM" in msg
+
+
+def test_check_tool_env_var_garbage_bare_name_not_on_path_fails(tmp_path, monkeypatch):
+    """The other half of finding 5: an env value that is neither an existing file
+    nor resolvable on PATH must still fail (the failure message is unchanged)."""
+    monkeypatch.setenv("PATH", str(tmp_path))  # empty dir, nothing to resolve
+    monkeypatch.setenv("PATHEXT", ".EXE")
+    monkeypatch.setenv("DECIWAVES_VGMSTREAM", "not-a-real-tool-name")
+    ok, msg = doctor.check_tool("vgmstream-cli", "vgmstream-cli", "DECIWAVES_VGMSTREAM", "")
+    assert not ok
+    assert "DECIWAVES_VGMSTREAM" in msg
+
+
 def test_check_tool_env_var_points_to_missing_file(monkeypatch):
     """An env var that's SET but points nowhere real must not pass doctor's
     check silently -- doctor's whole job is to catch exactly this before a
