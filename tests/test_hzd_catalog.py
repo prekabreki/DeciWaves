@@ -510,3 +510,50 @@ def test_load_catalog_dict_multiple_collisions_reports_exact_count(tmp_path, cap
 
     printed = capsys.readouterr().out
     assert "3" in printed   # 2 + 1 = 3 total collisions
+
+
+# ---------------------------------------------------------------------------
+# Bare pre-#47 fallback-id detection (review finding): a half-resumed pre-#47
+# workspace's catalog.csv can hold OLD bare `sentence#N` ids for already-processed
+# cores (catalog resumes append-only) while wem-metadata.csv is rewritten fully every
+# run with NEW namespaced ids -- the join between the two on line_id silently misses
+# for those rows, dropping unnamed lines from already-processed cores out of the reel.
+# The line_id collision counter above never fires on this surface (it only counts
+# collisions WITHIN catalog.csv), so this is a separate, loud detector.
+# ---------------------------------------------------------------------------
+
+def test_load_catalog_dict_detects_bare_pre47_fallback_ids(tmp_path, capsys):
+    from deciwaves.games.hzd.catalog import load_catalog_dict
+
+    path = tmp_path / "catalog.csv"
+    _write_catalog_csv(path, [
+        {"line_id": "sentence#0", "core_path": "core/a/sentences"},
+        {"line_id": "sentence#5", "core_path": "core/b/sentences"},
+        {"line_id": "MQ04_a", "core_path": "core/c/sentences"},
+    ])
+
+    load_catalog_dict(str(path))
+
+    printed = capsys.readouterr().out
+    assert "2" in printed
+    assert "pre-#47" in printed
+    assert "regenerat" in printed.lower()
+
+
+def test_load_catalog_dict_namespaced_and_named_ids_report_no_bare_warning(tmp_path, capsys):
+    """Proper names and NEW namespaced fallback ids (`<hash8>#sentence#N`) must never
+    trip the bare-id detector -- only the un-namespaced pre-#47 form does."""
+    from deciwaves.games.hzd.catalog import load_catalog_dict
+
+    path = tmp_path / "catalog.csv"
+    _write_catalog_csv(path, [
+        {"line_id": "MQ04_a", "core_path": "core/a/sentences"},
+        {"line_id": "a1b2c3d4#sentence#0", "core_path": "core/b/sentences"},
+        {"line_id": "b2c3d4e5#sentence#1", "core_path": "core/c/sentences"},
+    ])
+
+    load_catalog_dict(str(path))
+
+    printed = capsys.readouterr().out
+    assert "pre-#47" not in printed
+    assert printed == ""

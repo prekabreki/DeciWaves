@@ -29,6 +29,7 @@ from __future__ import annotations
 import argparse
 import csv
 import os
+import re
 import sys
 
 from deciwaves.engine.catalog_io import (
@@ -41,6 +42,9 @@ from deciwaves.games.hzd.profile import (
 
 _SENTENCES_PREFIX = "localized/sentences/"
 _SENTENCES_SUFFIX = "/sentences"
+
+# Bare pre-#47 fallback id (no core-hash8 prefix) -- see load_catalog_dict below.
+_BARE_FALLBACK_ID_RE = re.compile(r"^sentence#\d+$")
 
 
 def select_sentence_cores(harvested_paths) -> list[str]:
@@ -59,13 +63,26 @@ def load_catalog_dict(csv_path: str) -> dict:
     now COUNTED and reported loudly instead of silently swallowed -- since namespacing
     (see ``games.hzd.sentence_fw._fallback_line_id``) should make real collisions ~0,
     any reported here is either a stale (pre-#47) workspace or a genuine regression.
+
+    Separately, also counts and loudly reports any BARE ``sentence#N`` id (no
+    core-hash8 prefix) -- catalog.csv resumes append-only, so a HALF-resumed pre-#47
+    workspace can hold old bare ids for already-processed cores while
+    ``wem_metadata.csv`` (rewritten fully every run) has the new namespaced form for
+    the same lines. The line_id collision counter above never fires on that surface
+    (there's no collision WITHIN catalog.csv), yet the join between the two CSVs on
+    line_id silently misses for those rows -- an unnamed line from an already-processed
+    core can drop out of the reel with no error at all. This is the loud guard on that
+    failure mode; regenerating catalog.csv AND wem-metadata.csv together clears it.
     """
     with open(csv_path, newline="", encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
     catalog: dict = {}
     collisions = 0
+    bare_fallback_ids = 0
     for r in rows:
         lid = r["line_id"]
+        if _BARE_FALLBACK_ID_RE.match(lid):
+            bare_fallback_ids += 1
         if lid in catalog:
             collisions += 1
         catalog[lid] = r
@@ -74,6 +91,12 @@ def load_catalog_dict(csv_path: str) -> dict:
               f"some rows were silently overwritten (last write wins). If this "
               f"workspace predates issue #47 it may hold un-namespaced sentence#N "
               f"fallback ids; regenerate it (re-run `hzd catalog` onward) to fix.")
+    if bare_fallback_ids:
+        print(f"WARNING: {csv_path}: {bare_fallback_ids} pre-#47 un-namespaced "
+              f"sentence#N fallback line_id(s) detected -- catalog.csv and "
+              f"wem-metadata.csv must be regenerated TOGETHER (re-run `hzd catalog` "
+              f"then `hzd wem-metadata`), or unnamed lines from already-processed "
+              f"cores may silently drop out of the reel.")
     return catalog
 
 
