@@ -102,6 +102,24 @@ def test_assign_bucket_partial_bucket_skips_elimination():
     assert out["c2"] == (None, "3", 0.0)      # left unbound, not paired by (false) exclusion
 
 
+def test_assign_bucket_consolation_assignment_is_never_tier1():
+    """The tier margin must be judged against the ASSIGNED line, not the clip's own
+    top-2 gap. Clip A is the clear (100) top match for LX, claiming it first. Clip B's
+    OWN top choice is also LX (92.86) -- already taken -- so B is a consolation
+    assignment to LY (80.77), its second choice. B's own top-2 gap (92.86-80.77=12.09)
+    clears the default margin, so the old code (which measured the gap against
+    `ranked[0]`/`ranked[1]` regardless of which line was actually assigned) called this
+    tier '1'. Since LY isn't B's top-ranked line, it must be tier '2'."""
+    lines = [{"line_id": "LX", "subtitle_en": "bring the supplies to the camp now"},
+             {"line_id": "LY", "subtitle_en": "bring the supplies to the outpost now"}]
+    transcripts = {"A": "bring the supplies to the camp now",
+                   "B": "bring the supplies to the camp soon"}
+    out = assign_bucket(lines, ["A", "B"], transcripts, strong=75.0)
+    assert out["A"] == ("LX", "1", 100.0)               # clear top match, tier 1 stands
+    assert out["B"][0] == "LY"                          # consolation assignment
+    assert out["B"][1] == "2"                           # must NOT be tier 1
+
+
 def test_assign_bucket_partial_bucket_still_binds_confident():
     """The partial-bucket guard suppresses only by-exclusion pairing, not genuine matches:
     a strong unique match is still bound even when clips < lines."""

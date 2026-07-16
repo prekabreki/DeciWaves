@@ -49,7 +49,14 @@ def assign_bucket(lines, clip_rows, transcripts, strong=90.0, margin=8.0):
         ranked = by_clip[cr]
         runner = ranked[1][0] if len(ranked) > 1 else 0.0
         generic = len(normalize(transcripts.get(cr, "")).split()) <= 2
-        tier = "2" if (ranked[0][0] - runner < margin or generic) else "1"
+        if lid != ranked[0][1]:
+            # `lid` is a consolation assignment (this clip's true top choice was
+            # claimed by an earlier, higher-scoring triple) -- the top-2 gap below
+            # describes the clip's OWN ranking, not how confident THIS assignment
+            # is, so it can't justify tier "1" here.
+            tier = "2"
+        else:
+            tier = "2" if (ranked[0][0] - runner < margin or generic) else "1"
         result[cr] = (lid, tier, s)
         used_c.add(cr); used_l.add(lid)
     # Leftover pairing: in an exact-(A,B) bucket the remaining clips ARE the remaining lines,
