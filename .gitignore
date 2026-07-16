@@ -40,3 +40,11 @@ hzd_bindings.csv
 
 # MCP / tooling scratch dirs
 /.playwright-mcp/
+
+# Maintainer-local, never part of the public repo. Untracked today; ignored so a stray
+# `git add -A` on this now-live dev repo cannot accidentally stage them. (The public flip
+# exposes history + tracked files only, never the working dir, so these cannot leak via the
+# flip regardless — this is belt-and-suspenders.)
+/AUDIT.md
+/handoff.md
+/.claude/
