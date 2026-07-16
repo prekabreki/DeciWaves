@@ -270,12 +270,25 @@ def _run_hzd(cfg: dict, extra_argv: list) -> int:
 # fw
 # ---------------------------------------------------------------------------
 
-_FW_BYO_MESSAGE = (
-    "fw: no gamescript configured. extract/asr/subtitle-bind are done; speaker + "
-    "story-order matching needs your own copy of the Forbidden West gamescript -- "
-    "BYO, this repo can't ship game text. Re-run with --gamescript <path> to "
-    "continue with match -> full-reel -> render."
-)
+def _fw_byo_message(package: str) -> str:
+    """The BYO stop message printed when neither an explicit --gamescript nor a
+    configured fw_gamescript was found (issue #23: the message must show the
+    EXACT re-run command, not just a generic "pass --gamescript" hint, so guided
+    mode's primary UX has something concrete to act on). ``package`` is filled in
+    for real (it's whatever this run actually used, whether from --package or
+    from the configured fw_package) since a re-run needs it too; the gamescript
+    path itself stays a placeholder -- it's BYO, this repo never has a real one
+    to show.
+    """
+    return (
+        "fw: no gamescript configured. extract/asr/subtitle-bind are done; speaker + "
+        "story-order matching needs your own copy of the Forbidden West gamescript -- "
+        "BYO, this repo can't ship game text (see docs/BYO.md). Re-run with:\n"
+        f"    deciwaves fw run --package {package} --gamescript <path-to-gamescript>\n"
+        "to continue with match -> full-reel -> render, or persist it once with "
+        "`deciwaves setup --fw-gamescript <path-to-gamescript>` so future runs (and "
+        "guided mode) don't need the flag at all."
+    )
 
 # subtitle-bind's own --out default ("out/fw/subtitle-manifest.csv") is a quick-sample
 # name; match/full-reel/weave all default to reading the "-full" name, so the run chain
@@ -318,7 +331,9 @@ def _run_fw(cfg: dict, extra_argv: list) -> int:
     )
     ap.add_argument("--package", help="FW package/install path (default: from `deciwaves setup`)")
     ap.add_argument("--gamescript", help="path to your own Forbidden West gamescript transcript "
-                                          "(BYO -- required to run match/full-reel/render)")
+                                          "(BYO, optional -- required only to run "
+                                          "match/full-reel/render; default: from "
+                                          "`deciwaves setup --fw-gamescript`)")
     ns = _parse_or_exit(ap, extra_argv)
     if isinstance(ns, int):
         return ns
@@ -327,7 +342,12 @@ def _run_fw(cfg: dict, extra_argv: list) -> int:
     if not package:
         return _missing_config("fw", "FW package (fw_package)", "--package")
 
-    ctx = {"package": package, "gamescript": ns.gamescript}
+    # An explicit --gamescript beats a saved fw_gamescript config value; an
+    # explicitly-given empty/None flag falls back to the saved config, same
+    # `or`-based precedence as package/data_dir/oodle above (issue #23).
+    gamescript = ns.gamescript or cfg.get("fw_gamescript", "")
+
+    ctx = {"package": package, "gamescript": gamescript}
     # The chain is executed in two `_run_chain` calls (split around the BYO
     # --gamescript gate below), but it is one declared pipeline -- pass the
     # full, ordered stage list as `full_chain` to both calls so marker
@@ -348,10 +368,18 @@ def _run_fw(cfg: dict, extra_argv: list) -> int:
 
     gamescript = ctx["gamescript"]
     if not gamescript:
-        print(_FW_BYO_MESSAGE)
+        print(_fw_byo_message(package))
         return 0
     if not os.path.isfile(gamescript):
-        print(f"deciwaves fw run: --gamescript path not found: {gamescript}")
+        # Loud and nonzero whether this path came from an explicit --gamescript
+        # (issue #38) or from a configured-but-now-missing fw_gamescript -- in
+        # both cases it was explicitly pointed at this path, just possibly
+        # earlier via `deciwaves setup --fw-gamescript` (issue #23), so a silent
+        # BYO-style skip here would be wrong: unlike "never configured", this is
+        # "configured and broken", which must fail the run the same way a
+        # missing --ds-install/--hzd-package/--fw-package does.
+        print(f"deciwaves fw run: gamescript not found: {gamescript} "
+              f"(check --gamescript, or re-run `deciwaves setup --fw-gamescript <path>`)")
         return 1
 
     return _run_chain("fw", chunk2, ctx, full_chain=full_chain)

@@ -667,6 +667,93 @@ def test_fw_extract_rerun_invalidates_downstream_across_gamescript_gate(tmp_path
     assert [m for m, _ in calls] == [mods[s] for s in all_stages]
 
 
+def test_fw_run_uses_configured_gamescript_when_no_flag(tmp_path, monkeypatch):
+    """No --gamescript flag: fw_gamescript from config is used automatically,
+    the same precedence pattern as ds_install/hzd_package/fw_package (#23)."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    gamescript = tmp_path / "gamescript.md"
+    gamescript.write_text("Aloy: Hello.\n", encoding="utf-8")
+
+    mods = _mods("fw")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _fw_outputs(mods)))
+
+    cfg = {"fw_package": "PKG", "fw_gamescript": str(gamescript)}
+    rc = run_mod.run_game("fw", cfg, [])
+    assert rc == 0
+
+    called = [m for m, _ in calls]
+    assert called == [mods["extract"], mods["asr"], mods["subtitle-bind"],
+                       mods["match"], mods["full-reel"], mods["render"]]
+    match_argv = dict(calls)[mods["match"]]
+    assert _after(match_argv, "--gamescript") == str(gamescript)
+
+
+def test_fw_explicit_gamescript_flag_overrides_configured(tmp_path, monkeypatch):
+    """An explicit --gamescript beats a saved fw_gamescript config value."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    configured = tmp_path / "configured-gamescript.md"
+    configured.write_text("Aloy: Hello.\n", encoding="utf-8")
+    explicit = tmp_path / "explicit-gamescript.md"
+    explicit.write_text("Aloy: Hi.\n", encoding="utf-8")
+
+    mods = _mods("fw")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _fw_outputs(mods)))
+
+    cfg = {"fw_package": "PKG", "fw_gamescript": str(configured)}
+    rc = run_mod.run_game("fw", cfg, ["--gamescript", str(explicit)])
+    assert rc == 0
+
+    match_argv = dict(calls)[mods["match"]]
+    assert _after(match_argv, "--gamescript") == str(explicit)
+
+
+def test_fw_configured_gamescript_missing_exits_nonzero_and_names_path(tmp_path, monkeypatch, capsys):
+    """A configured-but-now-missing fw_gamescript must fail loud (nonzero), the
+    same as an explicitly-given missing --gamescript path (#38) -- it was
+    explicitly configured, just earlier, via `deciwaves setup --fw-gamescript`."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    mods = _mods("fw")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _fw_outputs(mods)))
+
+    missing = str(tmp_path / "gone-gamescript.md")
+    cfg = {"fw_package": "PKG", "fw_gamescript": missing}
+    rc = run_mod.run_game("fw", cfg, [])
+    assert rc != 0
+
+    called = [m for m, _ in calls]
+    assert called == [mods["extract"], mods["asr"], mods["subtitle-bind"]]
+    assert mods["match"] not in called
+
+    out = capsys.readouterr().out
+    assert missing in out
+
+
+def test_fw_byo_message_shows_exact_rerun_command(tmp_path, monkeypatch, capsys):
+    """The BYO message (#23) must show the exact command to re-run with -- the
+    real --package path this run used, plus a placeholder for the still-BYO
+    gamescript -- not just a generic "pass --gamescript" hint."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    mods = _mods("fw")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _fw_outputs(mods)))
+
+    rc = run_mod.run_game("fw", {"fw_package": "PKG"}, [])
+    assert rc == 0
+
+    out = capsys.readouterr().out
+    assert "deciwaves fw run" in out
+    assert "--package PKG" in out
+    assert "--gamescript" in out
+    assert "deciwaves setup --fw-gamescript" in out
+
+
 def test_fw_asr_gpu_gate_aborts_without_whisperx(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("importlib.util.find_spec", lambda name: None)
