@@ -303,9 +303,12 @@ def _run_fw(cfg: dict, extra_argv: list) -> int:
         return rc
 
     gamescript = ctx["gamescript"]
-    if not gamescript or not os.path.isfile(gamescript):
+    if not gamescript:
         print(_FW_BYO_MESSAGE)
         return 0
+    if not os.path.isfile(gamescript):
+        print(f"deciwaves fw run: --gamescript path not found: {gamescript}")
+        return 1
 
     chunk2 = [
         Stage("match", STAGES["fw"]["match"][0], _fw_match_argv),

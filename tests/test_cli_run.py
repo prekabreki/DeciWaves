@@ -530,18 +530,26 @@ def test_fw_byo_stop_without_gamescript(tmp_path, monkeypatch, capsys):
     assert "--gamescript" in out
 
 
-def test_fw_byo_stop_when_gamescript_path_missing(tmp_path, monkeypatch, capsys):
+def test_fw_gamescript_path_missing_exits_nonzero_and_names_path(tmp_path, monkeypatch, capsys):
+    """An explicitly-given --gamescript path that doesn't exist must be reported and
+    fail the run -- not silently treated like no --gamescript at all (#38). Otherwise
+    anything scripted on the exit code believes match/full-reel/render actually ran."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
     mods = _mods("fw")
     calls = []
     monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _fw_outputs(mods)))
 
-    rc = run_mod.run_game("fw", {"fw_package": "PKG"}, ["--gamescript", str(tmp_path / "nope.md")])
-    assert rc == 0
+    bad_path = str(tmp_path / "nope.md")
+    rc = run_mod.run_game("fw", {"fw_package": "PKG"}, ["--gamescript", bad_path])
+    assert rc != 0
 
     called = [m for m, _ in calls]
     assert called == [mods["extract"], mods["asr"], mods["subtitle-bind"]]
+    assert mods["match"] not in called
+
+    out = capsys.readouterr().out
+    assert bad_path in out
 
 
 def test_fw_full_chain_with_gamescript(tmp_path, monkeypatch):
