@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from deciwaves.cli import config
+from deciwaves.engine import tool_paths
 
 
 class Availability(enum.Enum):
@@ -75,6 +76,15 @@ class CheckResult(NamedTuple):
 def check_tool(display: str, exe: str, env_var: str | None, tools_dir: str) -> tuple[bool, str]:
     """Resolve *exe* the same way the pipeline will: env var -> tools_dir -> PATH.
 
+    The actual env var -> tools_dir -> PATH order is delegated to
+    ``engine.tool_paths.locate()`` -- the same function ``resolve()`` (what
+    stages call at decode-subprocess-spawn time) is built on -- instead of
+    reimplementing it here (issue #51 item 1: this used to be a second,
+    independent copy of that order). This function's own job is the
+    doctor-specific part on top: validating that a SET env var actually
+    resolves to something usable, and turning the result into a
+    human-readable report line.
+
     An env var that's set but resolves to nothing usable is reported as a
     failure, not silently accepted: ``engine/tool_paths.py``'s own ``resolve()``
     uses the env var unconditionally when set (broken or not), so this is exactly
@@ -84,22 +94,18 @@ def check_tool(display: str, exe: str, env_var: str | None, tools_dir: str) -> t
     (``shutil.which``) works at spawn time, so doctor must not fail it just
     because it isn't an absolute file path -- that rejected a working config.
     """
-    if env_var and os.environ.get(env_var):
-        p = os.environ[env_var]
+    found = tool_paths.locate(env_var, exe, tools_dir)
+    if found.source == "env":
+        p = found.path
         if not Path(p).is_file() and not shutil.which(p):
             return False, (f"[--] {display}: env {env_var} is set to {p}, but that "
                             f"file doesn't exist (and it isn't on PATH). Fix: unset "
                             f"{env_var} or point it at the real executable.")
         return True, f"[ok] {display}: {p} (env {env_var})"
-    if tools_dir:
-        names = {exe} if exe.lower().endswith(".exe") else {exe, exe + ".exe"}
-        for name in names:
-            candidate = Path(tools_dir) / name
-            if candidate.is_file():
-                return True, f"[ok] {display}: {candidate} (tools_dir)"
-    found = shutil.which(exe)
-    if found:
-        return True, f"[ok] {display}: {found} (PATH)"
+    if found.source == "tools_dir":
+        return True, f"[ok] {display}: {found.path} (tools_dir)"
+    if found.source == "PATH":
+        return True, f"[ok] {display}: {found.path} (PATH)"
     return False, (f"[--] {display}: not found. "
                     f"Fix: run `deciwaves setup` to fetch it (or put it on PATH).")
 
