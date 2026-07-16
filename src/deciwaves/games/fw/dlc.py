@@ -38,7 +38,7 @@ def build_dlc_rows(dlc_clips, transcripts_by_id, min_words, quest=DLC_QUEST):
     default of 0 previously meant a direct caller got NO bark filtering — the
     opposite of this module's purpose. Pass min_words=0 explicitly to keep everything.
     """
-    from deciwaves.games.hzd.match import normalize
+    from deciwaves.engine.text_normalize import normalize
     rows = []
     for c in sorted(dlc_clips, key=lambda c: (int(c["group_id"]), int(c["lssr_index"]))):
         t = transcripts_by_id.get(c["line_id"])

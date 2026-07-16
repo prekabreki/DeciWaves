@@ -30,8 +30,8 @@ from dataclasses import dataclass
 import numpy as np
 from rapidfuzz import fuzz, process
 
+from deciwaves.engine.text_normalize import normalize
 from deciwaves.games.fw.manifest import MANIFEST_COLS
-from deciwaves.games.hzd.match import normalize
 
 # A gamescript "line" is a speaker's whole turn — often several sentences — but
 # the game shows one subtitle card per sentence. Split on sentence boundaries so

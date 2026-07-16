@@ -1,13 +1,8 @@
 """Transcript -> candidate-subtitle matching with tiered confidence."""
 from __future__ import annotations
-import re
 from rapidfuzz import fuzz
 
-_MARKUP = re.compile(r"<[^>]*>")        # HZD subtitle directives: <subtitle-delay=..>, <split..>
-_PUNCT = re.compile(r"[^\w\s]")
-def normalize(s):
-    s = _MARKUP.sub(" ", s)             # drop markup before punctuation (not spoken)
-    return re.sub(r"\s+", " ", _PUNCT.sub("", s.lower())).strip()
+from deciwaves.engine.text_normalize import normalize
 
 
 def _score(t, sub):

@@ -27,8 +27,8 @@ import csv
 import os
 import re
 
+from deciwaves.engine.text_normalize import normalize
 from deciwaves.games.fw.manifest import MANIFEST_COLS
-from deciwaves.games.hzd.match import normalize
 
 # Subtitle timing/markup tokens like ``<time0.17>``; also strip newline breaks.
 _MARKUP = re.compile(r"<[^>]*>")

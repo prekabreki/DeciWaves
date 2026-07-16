@@ -1,10 +1,7 @@
-from deciwaves.games.hzd.match import normalize, assign_bucket
+from deciwaves.games.hzd.match import assign_bucket
 
 C = [{"line_id": "L1", "subtitle_en": "I'll find a way to stop it."},
      {"line_id": "L2", "subtitle_en": "We should head north now."}]
-
-def test_normalize():
-    assert normalize("I'LL, find  a Way!") == "ill find a way"
 
 def test_tier1_unique_strong():
     out = assign_bucket(C, ["c1"], {"c1": "ill find a way to stop it"})
@@ -81,11 +78,6 @@ def test_assign_bucket_greedy_leftover_pairing():
     out = assign_bucket(lines, ["c1", "c2"], transcripts)
     assert out["c1"] == ("NORA", "E", out["c1"][2])   # stronger partial match claims NORA
     assert out["c2"][0] == "ALOY" and out["c2"][1] == "E"   # remainder by exclusion
-
-
-def test_normalize_strips_subtitle_markup():
-    """HZD subtitle directives (<subtitle-delay=..>, <split..>) are not spoken -> stripped."""
-    assert normalize("<subtitle-delay=0.4>Nora!<split50>Make way for Aloy!") == "nora make way for aloy"
 
 
 def test_assign_bucket_no_double_assignment():
