@@ -74,6 +74,33 @@ def test_unknown_stage_errors(capsys):
     assert cli.main(["ds", "frobnicate"]) == 2
 
 
+def test_doctor_unknown_flag_returns_2_not_raw_systemexit(capsys):
+    """`deciwaves doctor`'s own argparse usage errors must honor the same
+    "usage errors return 2" contract as the top-level parser and the `run`
+    subcommand (which already wraps SystemExit via run.py's _parse_or_exit) --
+    not propagate as an uncaught SystemExit (issue #33)."""
+    assert cli.main(["doctor", "--bogus"]) == 2
+    assert "--bogus" in capsys.readouterr().err
+
+
+def test_setup_unknown_flag_returns_2_not_raw_systemexit(capsys):
+    assert cli.main(["setup", "--bogus"]) == 2
+    assert "--bogus" in capsys.readouterr().err
+
+
+def test_stage_own_unknown_flag_returns_2_not_raw_systemexit(tmp_path, capsys):
+    """A stage's OWN argparse usage error (dispatched directly, not through
+    `run`) must also return 2 rather than propagate SystemExit -- distinct
+    from test_unknown_stage_errors (an invalid STAGE NAME, handled by
+    main()'s own gp.error() already) and from
+    test_game_run_unknown_flag_still_exits_2_without_running_any_stage
+    (which goes through run.py's own _parse_or_exit)."""
+    rc = cli.main(["--workspace", str(tmp_path), "ds", "catalog",
+                   "--data-dir", "X", "--oodle", "Y", "--bogus"])
+    assert rc == 2
+    assert "--bogus" in capsys.readouterr().err
+
+
 @pytest.mark.parametrize("game", ["ds", "hzd", "fw"])
 def test_game_run_help_reaches_run_specific_parser(game, tmp_path, monkeypatch, capsys):
     """`deciwaves <game> run --help` must print run.py's own, run-specific help

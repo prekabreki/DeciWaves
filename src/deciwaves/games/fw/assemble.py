@@ -15,10 +15,20 @@ from deciwaves.games.fw.manifest import MANIFEST_COLS
 
 
 def combine(manifests):
-    """Concatenate manifest row-lists in order; re-rank gamescript_index 0..N."""
+    """Concatenate manifest row-lists in order; re-rank gamescript_index 0..N.
+
+    A line_id shared across manifests (e.g. a full-reel manifest that already
+    folds DLC in, combined with a separately-generated dlc manifest) is kept
+    once, first occurrence wins -- a later duplicate is silently dropped
+    rather than doubling that line in the final reel.
+    """
     rows = []
+    seen: set = set()
     for manifest in manifests:
         for r in manifest:
+            if r["line_id"] in seen:
+                continue
+            seen.add(r["line_id"])
             row = dict(r)
             row["gamescript_index"] = len(rows)
             rows.append(row)

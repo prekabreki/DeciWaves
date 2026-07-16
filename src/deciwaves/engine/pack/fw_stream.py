@@ -18,6 +18,7 @@ import struct
 import threading
 
 from deciwaves.engine.pack.dsar_archive import DsarArchive
+from deciwaves.engine.pack.fw_fast_extract import strip_cache_prefix
 
 
 class FwStreamStore:
@@ -26,7 +27,7 @@ class FwStreamStore:
     def __init__(self, package_dir: str, files: list[str]):
         self.package_dir = package_dir
         # strip the "cache:package/" device prefix -> path relative to package dir
-        self.files = [f.replace("cache:package/", "") for f in files]
+        self.files = [strip_cache_prefix(f) for f in files]
         self._dsar: dict[int, DsarArchive | None] = {}
         # Guards the lazy _dsar cache: the FW extract worker pool calls
         # read_riff_clip from several threads at once. Without the lock two

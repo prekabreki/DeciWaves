@@ -98,6 +98,23 @@ def test_eoferror_in_game_selection_prints_usage(monkeypatch, capsys):
     assert "no subcommand" in out.lower()
 
 
+def test_keyboardinterrupt_in_game_selection_prints_usage(monkeypatch, capsys):
+    """A Ctrl+C at the game-selection prompt must be handled like EOFError --
+    a clean usage message + nonzero exit, never a raw KeyboardInterrupt
+    traceback."""
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+
+    def _raise_kbi(prompt=""):
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr("builtins.input", _raise_kbi)
+
+    rc = guided.run_guided({})
+    assert rc == 2  # same exit code as the EOFError/non-TTY case
+    out = capsys.readouterr().out
+    assert "no subcommand" in out.lower()
+
+
 def test_selects_game_and_dispatches_with_default_workspace(monkeypatch, tmp_path):
     monkeypatch.setattr("sys.stdin.isatty", lambda: True)
     monkeypatch.chdir(tmp_path)

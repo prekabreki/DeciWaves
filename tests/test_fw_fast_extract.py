@@ -12,10 +12,12 @@ from deciwaves.engine.pack.fw_stream import FwStreamStore
 from deciwaves.engine.pack.fw_rtti import TypeRegistry
 from deciwaves.engine.pack.fw_object_reader import GroupReader, read_group_spans
 from deciwaves.engine.pack.fw_fast_extract import (
-    iter_english_lines, english_file_indices, FastLine)
+    iter_english_lines, english_file_indices, FastLine, strip_cache_prefix)
 
-TYPES_JSON = os.path.join("vendor", "odradek", "odradek-game-hfw",
-                          "src", "main", "resources", "types.json")
+# Override with DECIWAVES_FW_TYPES_JSON; falls back to the old dev-checkout
+# layout (an odradek vendor checkout) for backward compatibility.
+TYPES_JSON = os.environ.get("DECIWAVES_FW_TYPES_JSON") or os.path.join(
+    "vendor", "odradek", "odradek-game-hfw", "src", "main", "resources", "types.json")
 
 # Retail Horizon Forbidden West CE, validated 2026-06-27 (scratchpad analysis):
 # the fast path resolves exactly this many English clips arithmetically, across
@@ -33,6 +35,33 @@ def fw_graph(fw_package_dir):
 
 def test_english_file_indices_include_base_parts_and_dlc(fw_graph):
     assert english_file_indices(fw_graph) == EXPECTED_EN_FILES
+
+
+# --- strip_cache_prefix: anchored strip, not a bare str.replace -----------
+
+def test_strip_cache_prefix_strips_leading_prefix_only():
+    """A bare str.replace('cache:package/', '') would ALSO strip a second,
+    non-leading occurrence of the same substring further into the path --
+    only the genuine leading device prefix should be removed."""
+    path = "cache:package/some/cache:package/nested.core"
+    assert strip_cache_prefix(path) == "some/cache:package/nested.core"
+
+
+def test_strip_cache_prefix_leaves_unprefixed_path_unchanged():
+    assert strip_cache_prefix("en/package.01.00.core.stream") == "en/package.01.00.core.stream"
+
+
+class _FakeGraph:
+    def __init__(self, files):
+        self.files = files
+
+
+def test_english_file_indices_only_strips_leading_device_prefix():
+    graph = _FakeGraph([
+        "cache:package/en/package.01.00.core.stream",   # leading prefix -> matches
+        "cache:package/fr/package.01.00.core.stream",   # non-English -> excluded
+    ])
+    assert english_file_indices(graph) == {0}
 
 
 def test_fast_path_resolves_expected_line_count(fw_graph):

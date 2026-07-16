@@ -28,7 +28,7 @@ def test_orders_anchored_groups_then_unanchored_then_dlc():
             _s("g200_0000", "dlc line")]             # DLC
     anchors = [_a("g50_0000", 500, "Aloy", "Late Quest"),
                _a("g10_0000", 20, "Varl", "Early Quest")]
-    rows = build_full_reel(subs, anchors, dlc_line_ids={"g200_0000"})
+    rows, _anchored = build_full_reel(subs, anchors, dlc_line_ids={"g200_0000"})
     assert [r["line_id"] for r in rows] == [
         "g10_0000", "g50_0000", "g99_0000", "g200_0000"]
     assert [r["gamescript_index"] for r in rows] == [0, 1, 2, 3]  # continuous
@@ -37,7 +37,7 @@ def test_orders_anchored_groups_then_unanchored_then_dlc():
 def test_matched_lines_keep_speaker_quest_tier():
     subs = [_s("g10_0000", "the line as subtitled")]
     anchors = [_a("g10_0000", 20, "Varl", "Early Quest", tier="1")]
-    rows = build_full_reel(subs, anchors, dlc_line_ids=set())
+    rows, _anchored = build_full_reel(subs, anchors, dlc_line_ids=set())
     assert rows[0]["speaker"] == "Varl"
     assert rows[0]["quest"] == "Early Quest"
     assert rows[0]["tier"] == "1"
@@ -47,7 +47,7 @@ def test_matched_lines_keep_speaker_quest_tier():
 
 def test_unanchored_lines_have_no_speaker_and_subtitle_tier():
     subs = [_s("g99_0000", "scene line")]
-    rows = build_full_reel(subs, [], dlc_line_ids=set())
+    rows, _anchored = build_full_reel(subs, [], dlc_line_ids=set())
     assert rows[0]["speaker"] == ""
     assert rows[0]["tier"] == "S"
     assert rows[0]["quest"].startswith("(unsorted scenes")
@@ -57,7 +57,7 @@ def test_unsorted_block_chunked_into_sized_episodes():
     # the unsorted block must split into bounded episodes so no single episode
     # overflows the render's <=290MB-per-file packing unit.
     subs = [_s(f"g{900 + i}_0000", f"line {i}") for i in range(5)]
-    rows = build_full_reel(subs, [], dlc_line_ids=set(), unsorted_chunk=2)
+    rows, _anchored = build_full_reel(subs, [], dlc_line_ids=set(), unsorted_chunk=2)
     quests = [r["quest"] for r in rows]
     assert quests == ["(unsorted scenes 1)", "(unsorted scenes 1)",
                       "(unsorted scenes 2)", "(unsorted scenes 2)",
@@ -70,7 +70,7 @@ def test_scene_mates_of_anchored_group_travel_with_it_in_lssr_order():
     subs = [_s("g10_0002", "third"), _s("g10_0000", "first"),
             _s("g10_0001", "second"), _s("g50_0000", "later")]
     anchors = [_a("g10_0000", 20, "Aloy", "Q"), _a("g50_0000", 500, "Aloy", "Q2")]
-    rows = build_full_reel(subs, anchors, dlc_line_ids=set())
+    rows, _anchored = build_full_reel(subs, anchors, dlc_line_ids=set())
     assert [r["line_id"] for r in rows][:3] == [
         "g10_0000", "g10_0001", "g10_0002"]  # lssr order within the scene
 
@@ -80,7 +80,7 @@ def test_scene_mate_inherits_its_anchored_groups_quest():
     # not "(unsorted scenes)" — so the whole scene packs as one episode.
     subs = [_s("g10_0000", "matched"), _s("g10_0001", "scene mate")]
     anchors = [_a("g10_0000", 20, "Aloy", "The Embassy")]
-    rows = build_full_reel(subs, anchors, dlc_line_ids=set())
+    rows, _anchored = build_full_reel(subs, anchors, dlc_line_ids=set())
     mate = next(r for r in rows if r["line_id"] == "g10_0001")
     assert mate["quest"] == "The Embassy"
     assert mate["speaker"] == "" and mate["tier"] == "S"
@@ -88,12 +88,27 @@ def test_scene_mate_inherits_its_anchored_groups_quest():
 
 def test_dlc_block_ordered_by_group_then_lssr_and_labeled_epilogue():
     subs = [_s("g201_0001", "b"), _s("g200_0000", "a"), _s("g201_0000", "c")]
-    rows = build_full_reel(subs, [], dlc_line_ids={"g200_0000", "g201_0000", "g201_0001"})
+    rows, _anchored = build_full_reel(subs, [], dlc_line_ids={"g200_0000", "g201_0000", "g201_0001"})
     assert [r["line_id"] for r in rows] == ["g200_0000", "g201_0000", "g201_0001"]
     assert all(r["quest"] == "Burning Shores (Epilogue)" for r in rows)
 
 
 def test_output_uses_manifest_schema():
     subs = [_s("g10_0000", "x")]
-    rows = build_full_reel(subs, [_a("g10_0000", 1, "Aloy", "Q")], dlc_line_ids=set())
+    rows, _anchored = build_full_reel(subs, [_a("g10_0000", 1, "Aloy", "Q")], dlc_line_ids=set())
     assert list(rows[0].keys()) == MANIFEST_COLS
+
+
+def test_anchored_count_excludes_unsorted_rows_regardless_of_chunk_number():
+    # 5 unanchored rows split across chunks (unsorted_chunk=2 -> 3 distinct
+    # per-chunk quest strings), plus 1 truly anchored row. The returned
+    # anchored count must be exactly 1 -- previously it was derived by
+    # string-comparing quest against the literal UNSORTED_QUEST constant,
+    # which chunk-renamed rows no longer equal, so they were wrongly counted
+    # as "story-positioned".
+    subs = ([_s(f"g{900 + i}_0000", f"line {i}") for i in range(5)]
+            + [_s("g10_0000", "anchored")])
+    anchors = [_a("g10_0000", 20, "Aloy", "Q")]
+    rows, anchored = build_full_reel(subs, anchors, dlc_line_ids=set(), unsorted_chunk=2)
+    assert len(rows) == 6
+    assert anchored == 1

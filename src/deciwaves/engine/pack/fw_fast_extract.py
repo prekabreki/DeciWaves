@@ -38,6 +38,15 @@ LANGS = 12
 # Files table (verified: indices 15, 16, 101 on retail).
 _EN_STREAM_RE = re.compile(r"(^|/)en/package\.\d+\.\d+\.core\.stream$")
 
+_CACHE_PREFIX = "cache:package/"
+
+
+def strip_cache_prefix(path: str) -> str:
+    """Strip the ``cache:package/`` device prefix, anchored to the start of
+    *path* -- a bare ``str.replace`` would also remove a second, non-leading
+    occurrence of the same substring elsewhere in the path."""
+    return path[len(_CACHE_PREFIX):] if path.startswith(_CACHE_PREFIX) else path
+
 
 @dataclass(frozen=True)
 class FastLine:
@@ -53,7 +62,7 @@ def english_file_indices(graph: StreamingGraph) -> set[int]:
     DLC). The device prefix ``cache:package/`` is stripped before matching."""
     return {
         i for i, f in enumerate(graph.files)
-        if _EN_STREAM_RE.search(f.replace("cache:package/", ""))
+        if _EN_STREAM_RE.search(strip_cache_prefix(f))
     }
 
 

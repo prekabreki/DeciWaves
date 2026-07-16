@@ -39,6 +39,28 @@ STAGES = {
 def _import_stage(module_name):
     return importlib.import_module(module_name).main
 
+
+def _dispatch(fn, *args):
+    """Call ``fn(*args)``, converting a usage-error ``SystemExit`` (nonzero
+    code) into a plain return value instead of letting it propagate.
+
+    Mirrors the "usage errors return 2" contract this module's own
+    top-level parser and invalid-stage-name handling already apply to
+    themselves (see the two other ``except SystemExit`` blocks in
+    ``main()``) -- but a dispatched target's OWN internal
+    ``argparse.parse_args`` call (doctor's, setup's, or any stage module's)
+    used to bypass that contract entirely and raise a raw ``SystemExit``
+    straight out of ``main()`` (issue #33). A clean ``--help``/``--version``
+    exit (code 0, or no code at all) still propagates as a real
+    ``SystemExit`` -- only an error code gets swallowed into a return value.
+    """
+    try:
+        return fn(*args)
+    except SystemExit as e:
+        if not e.code:
+            raise
+        return e.code
+
 def _stage_choices(game: str) -> tuple:
     """A game's stage names plus the synthetic `run` stage (STAGES doesn't list
     it -- it's handled separately below, dispatching to cli.run instead of a
@@ -140,9 +162,9 @@ def main(argv=None) -> int:
         from deciwaves.cli.guided import run_guided
         return run_guided(cfg, workspace=str(Path(args.workspace).resolve()))
     if args.cmd == "setup":
-        from deciwaves.cli.setup import run_setup; return run_setup(rest)
+        from deciwaves.cli.setup import run_setup; return _dispatch(run_setup, rest)
     if args.cmd == "doctor":
-        from deciwaves.cli.doctor import run_doctor; return run_doctor(rest)
+        from deciwaves.cli.doctor import run_doctor; return _dispatch(run_doctor, rest)
 
     # args.stage is the REMAINDER list captured above: the stage name plus that
     # stage's own argv. REMAINDER doesn't support argparse `choices` validation
@@ -170,9 +192,9 @@ def main(argv=None) -> int:
     extra_argv = config.absolutize_existing_paths(extra_argv)
     config.enter_workspace(args.workspace)
     if stage == "run":
-        from deciwaves.cli.run import run_game; return run_game(args.cmd, cfg, extra_argv)
+        from deciwaves.cli.run import run_game; return _dispatch(run_game, args.cmd, cfg, extra_argv)
     mod, _help = STAGES[args.cmd][stage]
-    return _import_stage(mod)(extra_argv) or 0
+    return _dispatch(lambda: _import_stage(mod)(extra_argv) or 0)
 
 if __name__ == "__main__":
     raise SystemExit(main())

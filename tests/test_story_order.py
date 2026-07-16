@@ -2,15 +2,7 @@ import csv
 
 from deciwaves.games.ds import story_order as so
 from deciwaves.games.ds import episode_map as em
-
-
-def _row(**kw):
-    base = dict(line_id="id", core_path="c", line_index="0", category="terminal",
-                scene="lines_pr201", speaker_code="", speaker_name="The Engineer",
-                subtitle_en="Hello there friend.", wem_path_en="loc/x.wem.english",
-                language="english")
-    base.update(kw)
-    return base
+from conftest import catalog_row as _row
 
 
 def _crow(scene, stream, status="resolved", ti="0"):
@@ -181,6 +173,36 @@ def test_build_playlist_without_transcript_anchoring(tmp_path):
     rc = so.main(["--catalog", str(cat), "--cutscene-tracks", str(tracks),
                  "--out", str(out), "--transcript", ""])
     assert rc == 0 and out.exists()
+
+
+def test_stale_dupes_file_removed_on_clean_rerun(tmp_path):
+    """A prior run's render-dupes.csv (from back when there WERE dupes) must not
+    linger and look current after a later, clean re-run that drops zero dupes --
+    the dupes file is only ever written when `dropped` is non-empty, so a stale
+    file must be actively removed, not silently left in place."""
+    cat = tmp_path / "catalog.csv"
+    with open(cat, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=["line_id", "core_path", "line_index", "category",
+                                          "scene", "speaker_code", "speaker_name",
+                                          "subtitle_en", "wem_path_en", "language"])
+        w.writeheader()
+        w.writerow(_row())   # a single row -> nothing to dedup, zero dupes
+
+    tracks = tmp_path / "cutscene_tracks.csv"
+    with open(tracks, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=["scene", "status", "track_index", "voice_track_stream"])
+        w.writeheader()
+        w.writerow(_crow("sq_cs00_s00100", "a/b_voice_track.english.core.stream"))
+
+    out = tmp_path / "playlist.csv"
+    dupes = tmp_path / "render-dupes.csv"
+    dupes.write_text("line_id\nstale-from-a-previous-run\n", encoding="utf-8")
+
+    rc = so.main(["--catalog", str(cat), "--cutscene-tracks", str(tracks),
+                 "--out", str(out), "--transcript", "", "--dupes", str(dupes)])
+
+    assert rc == 0
+    assert not dupes.exists(), "stale dupes file must not survive a clean (zero-dupe) re-run"
 
 
 def test_playlist_round_trip(tmp_path):

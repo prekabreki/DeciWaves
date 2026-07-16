@@ -209,6 +209,58 @@ def test_extract_parallel_resume_and_limit(tmp_path, monkeypatch):
     assert len(ids) == len(set(ids)) == 16   # 8 + 8, no dupes
 
 
+def test_extract_resumes_correctly_after_a_zero_byte_manifest(tmp_path, monkeypatch):
+    """A prior run that crashed right after creating (but before writing to) the
+    manifest file can leave it 0 bytes. A resume must still write a real header
+    before appending -- an is_file()-only "new manifest" check treats a 0-byte
+    file as already-headered, so the first real data row silently becomes the
+    CSV's fieldnames on the next load, corrupting resume."""
+    lines = _fake_lines(3)
+    _install_fw_stubs(monkeypatch, lines, jitter=0.0)
+    vg = tmp_path / "vg.exe"; vg.write_bytes(b"x")
+    out = str(tmp_path / "fw")
+    os.makedirs(out, exist_ok=True)
+    open(os.path.join(out, "clip-index.csv"), "w").close()   # simulate a 0-byte crash artifact
+
+    stats = fx.extract("pkg", out, decode=True, vgaudio=str(vg), jobs=1)
+    assert stats.ok == 3
+
+    rows = _read_rows(out)
+    assert len(rows) == 3
+    assert {r["line_id"] for r in rows} == {ln.line_id for ln in lines}
+    done = fx.load_done(os.path.join(out, "clip-index.csv"),
+                        os.path.join(out, "clip-index-processed.txt"))
+    assert done == {ln.line_id for ln in lines}
+
+
+def test_main_prints_errors_log_path_when_there_are_failures(tmp_path, monkeypatch, capsys):
+    lines = _fake_lines(3)
+    _install_fw_stubs(monkeypatch, lines, fail_line_ids={"g1_0001"})
+    vg = tmp_path / "vg.exe"; vg.write_bytes(b"x")
+    monkeypatch.setenv("DECIWAVES_VGAUDIO", str(vg))
+    out = str(tmp_path / "fw")
+
+    rc = fx.main(["--package", "pkg", "--out-dir", out])
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "failed=1" in captured.out
+    assert os.path.join(out, "extract-errors.log") in captured.out
+
+
+def test_main_omits_errors_log_path_when_no_failures(tmp_path, monkeypatch, capsys):
+    lines = _fake_lines(2)
+    _install_fw_stubs(monkeypatch, lines)
+    vg = tmp_path / "vg.exe"; vg.write_bytes(b"x")
+    monkeypatch.setenv("DECIWAVES_VGAUDIO", str(vg))
+    out = str(tmp_path / "fw")
+
+    rc = fx.main(["--package", "pkg", "--out-dir", out])
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "failed=0" in captured.out
+    assert "extract-errors.log" not in captured.out
+
+
 def test_decode_clip_resolves_vgaudio_at_spawn_time_not_import_time(tmp_path, monkeypatch):
     """Regression for issue #25: this test file's `from deciwaves.games.fw import
     extract as fx` (top of file) already imported `fx` long before this test runs, so

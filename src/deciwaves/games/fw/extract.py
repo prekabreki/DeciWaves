@@ -169,7 +169,7 @@ def extract(package_dir: str, out_dir: str = "out/fw", *,
         except Exception as exc:  # fail-soft: reported by the main thread below
             return ln, None, f"{type(exc).__name__}: {exc}"
 
-    new_manifest = not os.path.isfile(manifest_path)
+    new_manifest = not os.path.isfile(manifest_path) or os.path.getsize(manifest_path) == 0
     with open(manifest_path, "a", newline="", encoding="utf-8") as mf, \
             open(processed_path, "a", encoding="utf-8") as pf, \
             open(errors_path, "a", encoding="utf-8") as ef:
@@ -205,8 +205,12 @@ def main(argv=None) -> int:
     a = ap.parse_args(argv)
     stats = extract(a.package, a.out_dir, limit=a.limit, decode=not a.no_decode,
                     jobs=a.jobs)
-    print(f"resolved={stats.resolved} ok={stats.ok} skipped={stats.skipped} "
-          f"failed={stats.failed}")
+    msg = (f"resolved={stats.resolved} ok={stats.ok} skipped={stats.skipped} "
+           f"failed={stats.failed}")
+    if stats.failed:
+        errors_path = os.path.join(a.out_dir, "extract-errors.log")
+        msg += f" (see {errors_path})"
+    print(msg)
     return 0
 
 

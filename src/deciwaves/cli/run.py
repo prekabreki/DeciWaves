@@ -85,6 +85,25 @@ def _invalidate_downstream_markers(game: str, full_chain: list[Stage], stage_nam
             pass  # nothing to invalidate -- fresh run, or already invalidated
 
 
+def _blocking_gpu_stage(game: str, chain: list[Stage]) -> Stage | None:
+    """The first not-yet-done GPU-gated stage in ``chain`` that would fail for
+    lack of the ASR extra, or ``None`` if none would.
+
+    Used to scan the whole chain UPFRONT, before any stage runs, instead of
+    discovering the gate mid-chain after earlier (possibly hours-long) stages
+    already ran (issue #33) -- a stage whose done-marker already exists is not
+    "blocking" even if it's GPU-gated (it already ran, whether whisperx was
+    installed at the time or not; deleting its marker to force a re-run is the
+    user's call, same as any other stage).
+    """
+    if importlib.util.find_spec("whisperx") is not None:
+        return None
+    for st in chain:
+        if st.gpu and not os.path.isfile(_done_marker(game, st.name)):
+            return st
+    return None
+
+
 def _run_chain(game: str, chain: list[Stage], ctx: dict, full_chain: list[Stage] | None = None) -> int:
     """Run ``chain`` in order, skipping stages whose done-marker already exists.
 
@@ -92,16 +111,21 @@ def _run_chain(game: str, chain: list[Stage], ctx: dict, full_chain: list[Stage]
     compute "later stages" for marker invalidation (see
     ``_invalidate_downstream_markers``); it defaults to ``chain`` itself for
     games whose whole pipeline runs through a single `_run_chain` call.
+
+    The whole chain's GPU gate is checked upfront (see ``_blocking_gpu_stage``)
+    before any stage runs -- so a missing ASR extra aborts immediately, not
+    after wasting however long the earlier stages take.
     """
     full_chain = chain if full_chain is None else full_chain
+    blocking = _blocking_gpu_stage(game, chain)
+    if blocking is not None:
+        print(_gpu_gate_message(blocking.name))
+        return 1
     for st in chain:
         marker = _done_marker(game, st.name)
         if os.path.isfile(marker):
             print(f"skip {st.name} ({marker} exists -- delete it to force a re-run)")
             continue
-        if st.gpu and importlib.util.find_spec("whisperx") is None:
-            print(_gpu_gate_message(st.name))
-            return 1
         try:
             argv = st.build_argv(ctx)
         except StageConfigError as exc:

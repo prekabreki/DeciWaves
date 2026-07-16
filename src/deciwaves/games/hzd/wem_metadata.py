@@ -86,7 +86,7 @@ def main(argv=None):
     profile = build_profile(a.package)
     fw = profile.pack_reader
 
-    os.makedirs(os.path.dirname(a.out), exist_ok=True)
+    os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
 
     paths = read_core_paths_sidecar(a.cores)
     if paths is None:

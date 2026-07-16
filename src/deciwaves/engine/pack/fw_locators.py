@@ -54,6 +54,11 @@ class FwLocators:
                 self._ordered.append(Entry(name, h, off, length))
                 # first packfile wins on duplicate hash (mirror DS PackIndex.setdefault)
                 self._by_hash.setdefault(h, Locator(name, off, length))
+        if pos != len(data):
+            raise ValueError(
+                f"trailing garbage after PackFileLocators parse: "
+                f"{len(data) - pos} unexpected bytes"
+            )
 
     def lookup(self, path_hash: int) -> Locator | None:
         return self._by_hash.get(path_hash)
@@ -79,3 +84,9 @@ class FwLocators:
 
     def __len__(self) -> int:
         return len(self._by_hash)
+
+    @property
+    def duplicate_count(self) -> int:
+        """How many raw records were collapsed by first-packfile-wins
+        deduping (``len(entries()) - len(self)``)."""
+        return len(self._ordered) - len(self._by_hash)

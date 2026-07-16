@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import json
 import struct
-from functools import lru_cache
 
 from deciwaves.engine.pack.bin_archive import murmurhash3_x64_128
 
@@ -74,6 +73,7 @@ class TypeRegistry:
             self.types: dict[str, dict] = json.load(f)
         # on-disk type id -> name (every type name hashed once)
         self._by_hash: dict[int, str] = {type_hash(n): n for n in self.types}
+        self._ordered_attrs_cache: dict[str, tuple[tuple[str, str], ...]] = {}
 
     def name_for_hash(self, h: int) -> str:
         return self._by_hash[h]
@@ -84,20 +84,27 @@ class TypeRegistry:
     def define(self, name: str) -> dict:
         return self.types[name]
 
-    @lru_cache(maxsize=None)
     def ordered_attrs(self, name: str) -> tuple[tuple[str, str], ...]:
         """Serialised ``(attr_name, attr_type)`` for compound *name*, in
         on-disk order. Collect (bases-first), sort by offset (with all attrs
         present, including non-serialised, so ties resolve as the game does),
-        then drop ``flags & ATTR_DONT_SERIALIZE_BINARY``."""
+        then drop ``flags & ATTR_DONT_SERIALIZE_BINARY``.
+
+        Cached per-instance (not ``functools.lru_cache``, which keys on
+        ``self`` and would pin every ``TypeRegistry`` -- and its loaded
+        ``types.json`` -- alive for the process lifetime)."""
+        if name in self._ordered_attrs_cache:
+            return self._ordered_attrs_cache[name]
         collected: list[tuple[str, str, int, int]] = []
         self._collect(name, 0, collected)
         # sort by offset (index 2); _quicksort_by_offset reads item[2]
         _quicksort_by_offset(collected)
-        return tuple(
+        result = tuple(
             (n, t) for (n, t, _off, flags) in collected
             if not (flags & ATTR_DONT_SERIALIZE_BINARY)
         )
+        self._ordered_attrs_cache[name] = result
+        return result
 
     def _collect(self, name: str, base_offset: int, out: list) -> None:
         d = self.types[name]

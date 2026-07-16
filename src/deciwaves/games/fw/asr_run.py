@@ -78,7 +78,7 @@ def run(clip_rows, transcripts_csv, audio_root, transcribe_fn, log=print):
     done = read_done_ids(transcripts_csv)
     pending = [r for r in clip_rows if r["line_id"] not in done]
     transcripts_csv.parent.mkdir(parents=True, exist_ok=True)
-    new_file = not transcripts_csv.exists()
+    new_file = not transcripts_csv.exists() or transcripts_csv.stat().st_size == 0
 
     n_ok = n_err = 0
     with transcripts_csv.open("a", newline="", encoding="utf-8") as f:

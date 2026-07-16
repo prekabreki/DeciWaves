@@ -11,8 +11,8 @@ from deciwaves.engine.pack.fw_package import FwPackage
 from deciwaves.games.hzd import match
 from deciwaves.games.hzd.atrac9 import Atrac9Error, decode_wem_to_wav
 from deciwaves.games.hzd.binding import build_buckets, relevant_buckets, structural_binds
+from deciwaves.games.hzd.profile import VOICE_ARCHIVE as ARCHIVE
 
-ARCHIVE = "package.01.00.core.stream"
 # Single source of truth for the incremental checkpoint sidecar's default path --
 # also read by cli/run.py's chained `hzd run` to decide whether to pass a prior
 # run's sidecar back in via --transcripts (see _load_transcripts_sidecar below).
@@ -211,7 +211,7 @@ def main(argv=None):
                         # known decode/archive-read failure (nor KeyboardInterrupt/
                         # SystemExit, which aren't Exception subclasses anyway) still
                         # aborts -- see test_sidecar_checkpoints_incrementally_and_survives_an_abort.
-                        ferr.write(f"{cr}\t{exc}\n"); ferr.flush()
+                        ferr.write(f"{cr}\t{type(exc).__name__}: {exc}\n"); ferr.flush()
                         n_failed += 1
                         if breaker_armed and n_failed >= BREAKER_K:
                             breaker_tripped = True

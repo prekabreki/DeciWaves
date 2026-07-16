@@ -1,4 +1,5 @@
 import os
+import shutil
 from pathlib import Path
 import pytest
 
@@ -115,3 +116,30 @@ def parsed_stage_args():
         raise AssertionError(f"{main_fn} never reached ArgumentParser.parse_args")
 
     return _run
+
+
+# Shared by test_audio_clip.py and test_render_story.py -- both gate real-ffmpeg
+# tests on the same two binaries; this used to be copy-pasted in each file.
+needs_ffmpeg = pytest.mark.skipif(
+    shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None,
+    reason="ffmpeg/ffprobe not installed")
+
+
+def catalog_row(**kw):
+    """Minimal in-scope, non-cutscene catalog row (DS catalog.csv shape). Shared
+    by test_selection.py and test_story_order.py, which both build the same
+    row shape under the (unrelated) name `_row()`."""
+    base = dict(
+        line_id="id",
+        core_path="c",
+        line_index="0",
+        category="terminal",
+        scene="lines_pr201",
+        speaker_code="",
+        speaker_name="The Engineer",
+        subtitle_en="Hello there friend.",
+        wem_path_en="loc/x.wem.english",
+        language="english",
+    )
+    base.update(kw)
+    return base

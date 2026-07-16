@@ -116,7 +116,9 @@ def build_subtitle_rows(groups, accept=70.0):
                 "score": round(float(score), 1),
                 "transcript": c.get("transcript", ""),
             })
-    out.sort(key=lambda r: r["line_id"])  # stable within already group-sorted
+    # out is already in (numeric group_id, clip_idx) order by construction --
+    # groups were walked via sorted(..., key=lambda g: int(g["group_id"])) and
+    # assign_subtitles returns pairs sorted by clip_idx -- no re-sort needed.
     for i, r in enumerate(out):
         r["gamescript_index"] = i
     return out
@@ -135,9 +137,9 @@ def scan_arith_clean_groups(graph, reader, store, transcripts_by_id,
     """
     from deciwaves.engine.pack.fw_rtti import type_hash
     from deciwaves.engine.pack.fw_object_reader import read_group_spans
+    from deciwaves.engine.pack.fw_fast_extract import LANGS
 
     LSSR = type_hash("LocalizedSimpleSoundResource")
-    LANGS = 12
     if en_indices is None:
         from deciwaves.engine.pack.fw_fast_extract import english_file_indices
         en_indices = english_file_indices(graph)

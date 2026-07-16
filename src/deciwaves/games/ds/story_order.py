@@ -121,9 +121,13 @@ def build_playlist(catalog_rows, cutscene_rows, anchor_index):
         a = group_anchor.get(g)
         return a if a is not None else em.CS_ORDER_HINT.get(g, ep_index.get(g, 0) * 100.0)
 
+    # group_anchor is fixed above and never mutated again, so this filtered view
+    # is loop-invariant -- build it once instead of on every assign_group() call
+    # (assign_group runs once per catalog row, below).
+    anchored = {g: group_anchor[g] for g in group_anchor if group_anchor[g] is not None}
+
     def assign_group(cat, sc):
         a = scene_anchor.get((cat, sc))
-        anchored = {g: group_anchor[g] for g in group_anchor if group_anchor[g] is not None}
         if a is not None and anchored:
             return min(anchored, key=lambda g: abs(anchored[g] - a))
         return em.fallback_group(cat, sc)
@@ -248,6 +252,10 @@ def main(argv=None):
         with open(args.dupes, "w", newline="", encoding="utf-8") as f:
             w = csv.DictWriter(f, fieldnames=list(dropped[0].keys()))
             w.writeheader(); w.writerows(dropped)
+    elif os.path.isfile(args.dupes):
+        # A stale dupes file from an earlier run (back when there WERE dupes)
+        # must not linger and look current after a later, clean re-run.
+        os.remove(args.dupes)
 
     by_ep = Counter(s.episode for s in segs)
     print(f"{len(segs)} segments, {len(dropped)} dupes dropped, "
