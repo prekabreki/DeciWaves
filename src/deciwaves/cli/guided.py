@@ -73,20 +73,21 @@ def _prompt_game(found: dict) -> str | None:
         suffix = "" if found[key] else "  [not configured]"
         print(f"  {i}) {label} ({gpu_note}){suffix}")
 
+    valid = tuple(str(i) for i in range(1, len(_GAMES) + 1))
     while True:
         try:
             raw = input("> ").strip()
-        except EOFError:
+        except (EOFError, KeyboardInterrupt):
             return None
-        if raw in ("1", "2", "3"):
+        if raw in valid:
             return _GAMES[int(raw) - 1][0]
-        print("Please enter 1, 2, or 3.")
+        print(f"Please enter {', '.join(valid[:-1])}, or {valid[-1]}.")
 
 
 def _prompt_workspace(default_ws: str) -> str | None:
     try:
         raw = input(f"Workspace [{default_ws}]: ").strip()
-    except EOFError:
+    except (EOFError, KeyboardInterrupt):
         return None
     return raw or default_ws
 
@@ -104,7 +105,7 @@ def _prompt_gamescript(default: str) -> str | None:
     suffix = f" [{default}]" if default else " [skip]"
     try:
         raw = input(f"Gamescript path{suffix}: ").strip()
-    except EOFError:
+    except (EOFError, KeyboardInterrupt):
         return None
     return raw or default
 
