@@ -81,9 +81,8 @@ def main(argv=None):
     ap.add_argument("--scenes", default="", help="comma-separated scene substrings to limit to (validation)")
     args = ap.parse_args(argv)
 
-    from deciwaves.engine import audio_clip
+    from deciwaves.engine import asr, audio_clip
     from deciwaves.engine.pack.bin_index import PackIndex
-    from deciwaves.games.hzd import asr
 
     idx = PackIndex(args.data_dir, args.oodle)
     model = asr.load_model(args.model)

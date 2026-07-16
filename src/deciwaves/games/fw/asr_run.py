@@ -102,7 +102,7 @@ def run(clip_rows, transcripts_csv, audio_root, transcribe_fn, log=print):
 def main(argv=None):
     import argparse
 
-    from deciwaves.games.hzd import asr
+    from deciwaves.engine import asr
 
     ap = argparse.ArgumentParser(description="FW ASR transcript pass")
     ap.add_argument("--clip-index", default="out/fw/clip-index.csv")

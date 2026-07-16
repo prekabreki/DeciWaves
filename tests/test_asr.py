@@ -1,5 +1,5 @@
 """Unit tests for the WhisperX wrapper (asr.py). Stubs the model so whisperx is NOT required."""
-from deciwaves.games.hzd.asr import transcribe
+from deciwaves.engine.asr import transcribe
 
 
 class _StubModel:
@@ -20,7 +20,7 @@ def test_asr_bind_imports_without_whisperx():
 
 def test_transcribe_concats_and_reports_speech_ratio(monkeypatch, tmp_path):
     # stub audio load -> 3.0s clip; 2.0s of speech => ratio ~0.667
-    import deciwaves.games.hzd.asr as asr
+    import deciwaves.engine.asr as asr
     monkeypatch.setattr(asr, "_load_audio_seconds", lambda p: 3.0)
     monkeypatch.setattr(asr, "_load_audio", lambda p: object())
     t = transcribe(str(tmp_path / "x.wav"), _StubModel())
@@ -45,7 +45,7 @@ def _stub_whisperx(monkeypatch):
 
 def test_load_model_primes_initial_prompt_as_asr_option(monkeypatch):
     captured = _stub_whisperx(monkeypatch)
-    import deciwaves.games.hzd.asr as asr
+    import deciwaves.engine.asr as asr
     m = asr.load_model("large-v3-turbo", initial_prompt="Aloy, GAIA, HEPHAESTUS")
     assert m == "MODEL"
     assert captured["name"] == "large-v3-turbo"
@@ -54,13 +54,13 @@ def test_load_model_primes_initial_prompt_as_asr_option(monkeypatch):
 
 def test_load_model_without_prompt_sends_no_asr_options(monkeypatch):
     captured = _stub_whisperx(monkeypatch)
-    import deciwaves.games.hzd.asr as asr
+    import deciwaves.engine.asr as asr
     asr.load_model()
     assert captured["asr_options"] is None
 
 
 def test_transcribe_forwards_language(monkeypatch, tmp_path):
-    import deciwaves.games.hzd.asr as asr
+    import deciwaves.engine.asr as asr
     monkeypatch.setattr(asr, "_load_audio_seconds", lambda p: 2.0)
     monkeypatch.setattr(asr, "_load_audio", lambda p: object())
     model = _StubModel()
@@ -69,7 +69,7 @@ def test_transcribe_forwards_language(monkeypatch, tmp_path):
 
 
 def test_transcribe_omits_language_when_unset(monkeypatch, tmp_path):
-    import deciwaves.games.hzd.asr as asr
+    import deciwaves.engine.asr as asr
     monkeypatch.setattr(asr, "_load_audio_seconds", lambda p: 2.0)
     monkeypatch.setattr(asr, "_load_audio", lambda p: object())
     model = _StubModel()
@@ -78,7 +78,7 @@ def test_transcribe_omits_language_when_unset(monkeypatch, tmp_path):
 
 
 def test_transcribe_segments_returns_raw_segments(monkeypatch, tmp_path):
-    import deciwaves.games.hzd.asr as asr
+    import deciwaves.engine.asr as asr
     monkeypatch.setattr(asr, "_load_audio", lambda p: object())
     model = _StubModel()  # returns one segment {text, start 0.0, end 2.0}
     segs = asr.transcribe_segments(str(tmp_path / "x.wav"), model)
@@ -87,7 +87,7 @@ def test_transcribe_segments_returns_raw_segments(monkeypatch, tmp_path):
 
 
 def test_transcribe_segments_empty(monkeypatch, tmp_path):
-    import deciwaves.games.hzd.asr as asr
+    import deciwaves.engine.asr as asr
     monkeypatch.setattr(asr, "_load_audio", lambda p: object())
 
     class _Empty:

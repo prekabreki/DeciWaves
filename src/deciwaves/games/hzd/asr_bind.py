@@ -6,8 +6,9 @@ import os
 import sys
 import tempfile
 import wave
+from deciwaves.engine import asr
 from deciwaves.engine.pack.fw_package import FwPackage
-from deciwaves.games.hzd import asr, match
+from deciwaves.games.hzd import match
 from deciwaves.games.hzd.atrac9 import Atrac9Error, decode_wem_to_wav
 from deciwaves.games.hzd.binding import build_buckets, relevant_buckets, structural_binds
 
