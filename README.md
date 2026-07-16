@@ -27,7 +27,7 @@ modifies your install (read-only), and its output is for your personal use.
 | Game | Edition | GPU needed | What you get |
 |------|---------|------------|--------------|
 | Death Stranding | Director's Cut (PC) | No | Lines identified straight from the Decima resource tree, with speaker and subtitle. Cutscene audio is whole-scene, not per-line. Story order is solid by default and sharper with an optional bring-your-own transcript. |
-| Horizon Zero Dawn | Remastered (PC) | Yes | Audio is tied to lines by content fingerprint and confirmed with on-device transcription, so the bind stage runs for hours on a full library. Reels come out in episode order. |
+| Horizon Zero Dawn | Remastered (PC) | Yes | Audio is tied to lines by content fingerprint; ambiguous fingerprint collisions are confirmed with on-device transcription, capped by default at 300 buckets rather than a full-library pass (`--sample-cap 0` for uncapped). Reels come out in episode order. |
 | Horizon Forbidden West | Complete Edition (PC) | Yes | Clips carry their exact in-game subtitle. Speaker labels and true story order need two bring-your-own inputs (a `types.json` and a gamescript); without them you still get subtitle-labeled reels. See [docs/BYO.md](docs/BYO.md). |
 
 ## Install
@@ -95,10 +95,19 @@ longer on a slow disk. No GPU is involved anywhere in the default DS chain.
     pip install ".[asr]"
     deciwaves --workspace D:\deciwaves hzd run
 
-HZD chains catalog -> clip-index -> wem-metadata -> bind -> render. The bind stage runs
-WhisperX transcription to confirm the fingerprint match, so it needs the `[asr]` extra and a
-CUDA GPU, and it runs for hours on a full library. It checkpoints as it goes (see Resume,
-below), so an interrupted bind picks up where it stopped.
+HZD chains catalog -> clip-index -> wem-metadata -> bind -> render. Structural binding
+(content fingerprinting) resolves the vast majority of rows before any ASR runs at all; the
+bind stage needs the `[asr]` extra and a CUDA GPU only to run WhisperX over what's left --
+ambiguous fingerprint collisions. By default that ASR pass is capped at 300 ambiguous buckets
+rather than running for hours over the full library; pass `--sample-cap 0` to `hzd run` (or
+`hzd bind`) for an uncapped full pass instead, or any other number for a custom cap. On one
+real install the capped default still bound 54,564 of 54,566 rows (99.996%), because
+structural binding had already covered almost everything -- the cap costs little in practice,
+and whenever it does leave buckets untranscribed, bind's own output states exactly how many.
+Note: if `bind` already completed in a workspace, changing `--sample-cap` on a later `hzd run`
+has no effect until you delete `out/hzd/.done-bind` and re-run it -- the done-marker doesn't
+know its own flags changed. bind also checkpoints as it goes (see Resume, below), so an
+interrupted bind picks up where it stopped.
 
 ### Horizon Forbidden West
 
@@ -157,7 +166,7 @@ install by hand.
 | catalog | Build the line catalog | `--package` |
 | clip-index | Fingerprint audio clips | `--package`, `--jobs` |
 | wem-metadata | Extract wem metadata + coverage | `--package` |
-| bind | [GPU] Bind clips to lines | `--package`, `--transcripts`, `--transcripts-out` |
+| bind | [GPU] Bind clips to lines | `--package`, `--transcripts`, `--transcripts-out`, `--sample-cap` (default 300, 0 = unlimited) |
 | render | Render MP3 reels + tracklists | `--out-dir`, `--jobs` |
 
 ### Horizon Forbidden West (`deciwaves fw ...`)
@@ -207,7 +216,9 @@ that stage also deletes every LATER stage's marker in the chain, so downstream s
 too instead of resuming from what's now stale data. A stage's output existing is deliberately
 not treated as done - only its marker is - so a crash mid-stage never looks finished. The HZD
 bind stage also checkpoints within itself: its `--transcripts-out` sidecar lets a restarted
-bind reuse the clips it already transcribed.
+bind reuse the clips it already transcribed. A marker also doesn't know if the flags used to
+produce it have since changed - re-running `hzd run` with a different `--sample-cap` after
+`bind` already has a marker is a no-op until you delete `out/hzd/.done-bind` yourself.
 
 Bring-your-own inputs. The optional DS transcript, the required FW `types.json`, and the
 optional FW gamescript are all documented in [docs/BYO.md](docs/BYO.md), including the exact
