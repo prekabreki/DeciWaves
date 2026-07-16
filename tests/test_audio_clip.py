@@ -7,11 +7,7 @@ import wave
 import pytest
 
 from deciwaves.engine import audio_clip as ac
-from conftest import require_install, DATA_DIR, OODLE_DLL  # noqa: F401
-
-needs_ffmpeg = pytest.mark.skipif(
-    shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None,
-    reason="ffmpeg/ffprobe not installed")
+from conftest import require_install, DATA_DIR, OODLE_DLL, needs_ffmpeg  # noqa: F401
 
 needs_vgmstream = pytest.mark.skipif(
     not (os.environ.get("DECIWAVES_VGMSTREAM") or shutil.which("vgmstream-cli")),
@@ -96,6 +92,26 @@ def test_trim_no_silence_unchanged(tmp_path):
     out, dur = ac.trim_long_silences(str(src), str(tmp_path / "trim"),
                                      min_silence=10.0, keep=0.75)
     assert abs(dur - 3.0) < 0.3, f"clip with no long silence changed (dur={dur})"
+
+
+def test_detect_silences_pairs_trailing_unclosed_silence_with_clip_end(tmp_path, monkeypatch):
+    """Some ffmpeg builds never flush a `silence_end` for a clip that is still
+    silent at EOF -- only `silence_start` gets logged. `_detect_silences` must
+    still return a pair for it (closed by the clip's own duration), not drop it
+    via zip's shortest-iterable truncation, or trailing dead air never trims."""
+    src = tmp_path / "trailing_silence.wav"
+    with wave.open(str(src), "wb") as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(48000)
+        w.writeframes(b"\x00\x00" * 48000 * 17)  # 17 s, silent throughout
+    monkeypatch.setattr(
+        ac.subprocess, "run",
+        lambda *a, **k: _FakeProc(0, stderr="[silencedetect] silence_start: 1.99996\n"))
+    spans = ac._detect_silences(str(src), threshold_db=-30.0, min_silence=10.0)
+    assert len(spans) == 1, f"expected exactly one silence span, got {spans}"
+    start, end = spans[0]
+    assert start == 1.99996
+    dur = ac.wav_duration_seconds(str(src))
+    assert abs(end - dur) < 0.01, f"trailing silence_end should close at clip duration (got {spans}, dur={dur})"
 
 
 @needs_ffmpeg

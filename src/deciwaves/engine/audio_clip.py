@@ -59,13 +59,22 @@ def _key(stream_path):
 
 def _detect_silences(src, threshold_db, min_silence):
     """Return [(start, end), ...] silence spans >= min_silence at threshold_db,
-    via ffmpeg silencedetect."""
+    via ffmpeg silencedetect.
+
+    A clip that is still silent at EOF gets a `silence_start` with no matching
+    `silence_end` -- some ffmpeg builds never flush one for a silence that runs
+    to the end of the stream. Left alone, `zip` would silently drop that
+    trailing, unpaired start, so dead air at the very end of a clip would never
+    be trimmed; close it with the clip's own duration instead.
+    """
     proc = subprocess.run(
         ["ffmpeg", "-i", src, "-af",
          f"silencedetect=noise={threshold_db}dB:d={min_silence}", "-f", "null", "-"],
         capture_output=True, text=True)
     starts = [float(m) for m in re.findall(r"silence_start: (-?[\d.]+)", proc.stderr)]
     ends = [float(m) for m in re.findall(r"silence_end: (-?[\d.]+)", proc.stderr)]
+    if len(starts) > len(ends):
+        ends.append(wav_duration_seconds(src))
     return list(zip(starts, ends))  # silencedetect pairs them in order
 
 
