@@ -10,7 +10,6 @@ semantics, NOT `DsarArchive`'s `bisect_right(...) - 1` (which would return the
 later chunk at an exact boundary). A naive copy of dsar's bisect_right would
 diverge here; the sweep below would catch it.
 """
-import struct
 
 import pytest
 

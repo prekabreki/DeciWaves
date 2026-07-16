@@ -14,7 +14,6 @@ whole covering chunk. These tests pin:
 import threading
 
 import lz4.block
-import pytest
 
 from deciwaves.engine.pack.dsar_archive import DsarArchive
 
