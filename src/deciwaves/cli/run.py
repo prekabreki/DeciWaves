@@ -63,7 +63,37 @@ def _done_marker(game: str, stage_name: str) -> str:
     return os.path.join("out", game, f".done-{stage_name}")
 
 
-def _run_chain(game: str, chain: list[Stage], ctx: dict) -> int:
+def _invalidate_downstream_markers(game: str, full_chain: list[Stage], stage_name: str) -> None:
+    """Delete the done-markers of every stage that comes AFTER ``stage_name`` in
+    the game's full declared chain (issue #37).
+
+    Resume markers previously only ever skipped work -- nothing invalidated
+    them, so re-running an early stage (e.g. re-cataloging after a game patch)
+    left later stages' stale markers standing, and a stale run became
+    indistinguishable from a fresh one. ``full_chain`` is the game's complete,
+    declared stage order (not necessarily the same list object actually being
+    executed in this call -- fw splits its chain across the BYO --gamescript
+    gate into two separate `_run_chain` calls, so invalidation must still see
+    the stages on the far side of that gate to find "later" correctly).
+    """
+    names = [s.name for s in full_chain]
+    idx = names.index(stage_name)
+    for later_name in names[idx + 1:]:
+        try:
+            os.remove(_done_marker(game, later_name))
+        except FileNotFoundError:
+            pass  # nothing to invalidate -- fresh run, or already invalidated
+
+
+def _run_chain(game: str, chain: list[Stage], ctx: dict, full_chain: list[Stage] | None = None) -> int:
+    """Run ``chain`` in order, skipping stages whose done-marker already exists.
+
+    ``full_chain`` is the game's complete declared stage order, used only to
+    compute "later stages" for marker invalidation (see
+    ``_invalidate_downstream_markers``); it defaults to ``chain`` itself for
+    games whose whole pipeline runs through a single `_run_chain` call.
+    """
+    full_chain = chain if full_chain is None else full_chain
     for st in chain:
         marker = _done_marker(game, st.name)
         if os.path.isfile(marker):
@@ -77,6 +107,11 @@ def _run_chain(game: str, chain: list[Stage], ctx: dict) -> int:
         except StageConfigError as exc:
             print(f"{st.name}: {exc}")
             return 1
+        # The stage is genuinely about to (re-)execute -- its data may already
+        # differ from what any later stage previously consumed, so invalidate
+        # downstream markers now, before dispatch, so a failed run still
+        # leaves them invalidated (they're stale either way).
+        _invalidate_downstream_markers(game, full_chain, st.name)
         rc = _import_stage(st.module)(argv) or 0
         if rc:
             return rc
@@ -293,12 +328,21 @@ def _run_fw(cfg: dict, extra_argv: list) -> int:
         return _missing_config("fw", "FW package (fw_package)", "--package")
 
     ctx = {"package": package, "gamescript": ns.gamescript}
-    chunk1 = [
+    # The chain is executed in two `_run_chain` calls (split around the BYO
+    # --gamescript gate below), but it is one declared pipeline -- pass the
+    # full, ordered stage list as `full_chain` to both calls so marker
+    # invalidation (issue #37) sees stages on the far side of the gate too.
+    full_chain = [
         Stage("extract", STAGES["fw"]["extract"][0], _fw_extract_argv),
         Stage("asr", STAGES["fw"]["asr"][0], _fw_asr_argv, gpu=True),
         Stage("subtitle-bind", STAGES["fw"]["subtitle-bind"][0], _fw_subtitle_bind_argv),
+        Stage("match", STAGES["fw"]["match"][0], _fw_match_argv),
+        Stage("full-reel", STAGES["fw"]["full-reel"][0], _fw_full_reel_argv),
+        Stage("render", STAGES["fw"]["render"][0], _fw_render_argv),
     ]
-    rc = _run_chain("fw", chunk1, ctx)
+    chunk1, chunk2 = full_chain[:3], full_chain[3:]
+
+    rc = _run_chain("fw", chunk1, ctx, full_chain=full_chain)
     if rc:
         return rc
 
@@ -310,12 +354,7 @@ def _run_fw(cfg: dict, extra_argv: list) -> int:
         print(f"deciwaves fw run: --gamescript path not found: {gamescript}")
         return 1
 
-    chunk2 = [
-        Stage("match", STAGES["fw"]["match"][0], _fw_match_argv),
-        Stage("full-reel", STAGES["fw"]["full-reel"][0], _fw_full_reel_argv),
-        Stage("render", STAGES["fw"]["render"][0], _fw_render_argv),
-    ]
-    return _run_chain("fw", chunk2, ctx)
+    return _run_chain("fw", chunk2, ctx, full_chain=full_chain)
 
 
 # ---------------------------------------------------------------------------

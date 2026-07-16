@@ -172,11 +172,15 @@ guided interactive flow (see below).
   extra isn't installed. **Resume is per-stage**: once a stage's `main()` returns `0`,
   `run` writes a done-marker file at `out/<game>/.done-<stage>`, and a later `run`
   invocation skips any stage whose marker already exists (delete the marker to force a
-  re-run of just that stage). A stage's own output path or directory existing is
-  deliberately *not* treated as "done" — a crash-interrupted run's partial output, or one
-  stage's output directory being mistaken for another's, must never look like a finished
-  stage. Each `run` subcommand builds its own `argparse` parser for its own flags (e.g. `ds
-  run --data-dir/--oodle`, `fw run --package/--gamescript`), so `deciwaves <game> run
+  re-run of that stage). Re-running a stage this way (or any stage whose marker didn't
+  already exist) also deletes every LATER stage's marker in that game's declared chain
+  before it runs, so a stale early-stage rebuild can't leave downstream stages
+  skip-and-stale — they're forced to re-run too (issue #37). A stage's own output path or
+  directory existing is deliberately *not* treated as "done" — a crash-interrupted run's
+  partial output, or one stage's output directory being mistaken for another's, must never
+  look like a finished stage. Each `run` subcommand builds its own `argparse` parser for
+  its own flags (e.g. `ds run --data-dir/--oodle`, `fw run --package/--gamescript`), so
+  `deciwaves <game> run
   --help` prints that game's actual flags instead of falling through and starting the
   multi-hour pipeline.
 

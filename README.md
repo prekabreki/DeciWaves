@@ -181,11 +181,13 @@ written under, all inside `out/`. DS writes `out/catalog.csv`, `out/playlist.csv
 in `out/audio`; HZD and FW write under `out/hzd/` and `out/fw/`.
 
 Resume. `deciwaves <game> run` writes a marker file at `out/<game>/.done-<stage>` after each
-stage finishes cleanly, and skips any stage whose marker already exists. To force one stage to
-re-run, delete its marker and run again; the stages before it stay skipped. A stage's output
-existing is deliberately not treated as done - only its marker is - so a crash mid-stage never
-looks finished. The HZD bind stage also checkpoints within itself: its `--transcripts-out`
-sidecar lets a restarted bind reuse the clips it already transcribed.
+stage finishes cleanly, and skips any stage whose marker already exists. To force a stage to
+re-run, delete its marker and run again; the stages before it stay skipped, but re-running
+that stage also deletes every LATER stage's marker in the chain, so downstream stages re-run
+too instead of resuming from what's now stale data. A stage's output existing is deliberately
+not treated as done - only its marker is - so a crash mid-stage never looks finished. The HZD
+bind stage also checkpoints within itself: its `--transcripts-out` sidecar lets a restarted
+bind reuse the clips it already transcribed.
 
 Bring-your-own inputs. The optional DS transcript, the required FW `types.json`, and the
 optional FW gamescript are all documented in [docs/BYO.md](docs/BYO.md), including the exact
