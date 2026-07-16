@@ -189,10 +189,11 @@ def test_fallback_id_is_deterministic_for_the_same_core_path():
     assert first[0].line_id == second[0].line_id
 
 
-def test_fallback_id_default_core_path_matches_pre_47_bare_form_when_unset():
+def test_fallback_id_is_namespaced_by_the_empty_path_hash_when_unset():
     """Callers that don't pass core_path (e.g. direct unit tests of parsing logic) get
     a stable, harmless default rather than an error -- the namespace prefix is simply
-    constant across such calls."""
+    constant (the hash of "") across such calls, NOT the old pre-#47 bare `sentence#N`
+    form (which would trip catalog.load_catalog_dict's bare-fallback-id detector)."""
     lines = parse_sentences_fw(_unnamed_line_core_bytes())
     assert lines[0].line_id.endswith("#sentence#0")
 
