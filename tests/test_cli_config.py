@@ -1,4 +1,5 @@
 import json
+import os
 
 import pytest
 
@@ -52,9 +53,10 @@ def test_absolutize_existing_paths_rewrites_only_existing_relative_tokens(tmp_pa
     monkeypatch.chdir(tmp_path)
     existing = tmp_path / "real.md"
     existing.write_text("x", encoding="utf-8")
+    workspace = tmp_path / "ws"  # distinct from cwd, and doesn't contain real.md
 
     argv = ["--gamescript", "real.md", "--data-dir", "does-not-exist", "--bitrate", "96"]
-    out = config.absolutize_existing_paths(argv)
+    out = config.absolutize_existing_paths(argv, workspace=str(workspace))
 
     assert out == ["--gamescript", str(existing), "--data-dir", "does-not-exist", "--bitrate", "96"]
 
@@ -62,13 +64,15 @@ def test_absolutize_existing_paths_rewrites_only_existing_relative_tokens(tmp_pa
 def test_absolutize_existing_paths_leaves_already_absolute_paths_alone(tmp_path):
     existing = tmp_path / "real.md"
     existing.write_text("x", encoding="utf-8")
-    out = config.absolutize_existing_paths(["--gamescript", str(existing)])
+    workspace = tmp_path / "ws"
+    out = config.absolutize_existing_paths(["--gamescript", str(existing)], workspace=str(workspace))
     assert out == ["--gamescript", str(existing)]
 
 
 def test_absolutize_existing_paths_ignores_flag_tokens_even_if_coincidentally_a_path(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    out = config.absolutize_existing_paths(["--gamescript"])
+    workspace = tmp_path / "ws"
+    out = config.absolutize_existing_paths(["--gamescript"], workspace=str(workspace))
     assert out == ["--gamescript"]  # never treated as a path token, existing or not
 
 
@@ -80,8 +84,9 @@ def test_absolutize_existing_paths_rewrites_flag_equals_value_form(tmp_path, mon
     monkeypatch.chdir(tmp_path)
     existing = tmp_path / "real.md"
     existing.write_text("x", encoding="utf-8")
+    workspace = tmp_path / "ws"
 
-    out = config.absolutize_existing_paths(["--gamescript=real.md", "--bitrate=96"])
+    out = config.absolutize_existing_paths(["--gamescript=real.md", "--bitrate=96"], workspace=str(workspace))
 
     assert out == [f"--gamescript={existing}", "--bitrate=96"]
 
@@ -90,8 +95,9 @@ def test_absolutize_existing_paths_equals_form_leaves_nonexistent_and_absolute_a
     monkeypatch.chdir(tmp_path)
     existing = tmp_path / "real.md"
     existing.write_text("x", encoding="utf-8")
+    workspace = tmp_path / "ws"
     argv = [f"--gamescript={existing}", "--data-dir=does-not-exist"]
-    assert config.absolutize_existing_paths(argv) == argv  # already-abs + typo untouched
+    assert config.absolutize_existing_paths(argv, workspace=str(workspace)) == argv  # already-abs + typo untouched
 
 
 def test_absolutize_existing_paths_prints_notice_when_rewriting(tmp_path, monkeypatch, capsys):
@@ -100,13 +106,14 @@ def test_absolutize_existing_paths_prints_notice_when_rewriting(tmp_path, monkey
     monkeypatch.chdir(tmp_path)
     existing = tmp_path / "real.md"
     existing.write_text("x", encoding="utf-8")
+    workspace = tmp_path / "ws"
 
-    config.absolutize_existing_paths(["--gamescript", "real.md"])
+    config.absolutize_existing_paths(["--gamescript", "real.md"], workspace=str(workspace))
     bare_out = capsys.readouterr().out
     assert "real.md" in bare_out
     assert str(existing) in bare_out
 
-    config.absolutize_existing_paths(["--gamescript=real.md"])
+    config.absolutize_existing_paths(["--gamescript=real.md"], workspace=str(workspace))
     eq_out = capsys.readouterr().out
     assert "real.md" in eq_out
     assert str(existing) in eq_out
@@ -114,8 +121,130 @@ def test_absolutize_existing_paths_prints_notice_when_rewriting(tmp_path, monkey
 
 def test_absolutize_existing_paths_silent_when_nothing_rewritten(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
-    config.absolutize_existing_paths(["--data-dir", "does-not-exist", "--bitrate=96"])
+    workspace = tmp_path / "ws"
+    config.absolutize_existing_paths(["--data-dir", "does-not-exist", "--bitrate=96"], workspace=str(workspace))
     assert capsys.readouterr().out == ""
+
+
+# --- issue #44: workspace-aware rewriting ----------------------------------
+# The rewrite must stop being pure existence-based-against-cwd: a previous
+# in-place run can leave e.g. `out/...` sitting under the invocation cwd, and
+# a later `--workspace` run passing the same relative token got silently
+# pinned to that OLD tree instead of the workspace one -- cross-workspace data
+# mixing with no error (confirmed aggregate-review failure shape). The tests
+# above cover the "workspace doesn't have it" case (unambiguous, absolutize);
+# these cover the new no-workspace/no-op and ambiguous-refusal branches.
+
+def test_absolutize_existing_paths_no_workspace_means_no_rewrite(tmp_path, monkeypatch, capsys):
+    """No --workspace given at all (workspace=None, the default) -- nothing
+    changes meaning across a chdir that isn't happening, so nothing should be
+    rewritten or announced, unlike the old pure existence-based behavior."""
+    monkeypatch.chdir(tmp_path)
+    existing = tmp_path / "real.md"
+    existing.write_text("x", encoding="utf-8")
+
+    argv = ["--gamescript", "real.md"]
+    out = config.absolutize_existing_paths(argv)
+
+    assert out == argv
+    assert capsys.readouterr().out == ""
+
+
+def test_absolutize_existing_paths_workspace_same_as_cwd_means_no_rewrite(tmp_path, monkeypatch, capsys):
+    """An explicit --workspace that resolves to the same directory as cwd (e.g.
+    the argparse default `.`) must also skip rewriting entirely -- nothing is
+    about to move, so nothing needs pinning."""
+    monkeypatch.chdir(tmp_path)
+    existing = tmp_path / "real.md"
+    existing.write_text("x", encoding="utf-8")
+
+    argv = ["--gamescript", "real.md"]
+    out = config.absolutize_existing_paths(argv, workspace=".")
+
+    assert out == argv
+    assert capsys.readouterr().out == ""
+
+
+def test_absolutize_existing_paths_missing_under_cwd_left_untouched_even_if_in_workspace(tmp_path, monkeypatch):
+    """A token that doesn't exist relative to cwd is left alone even when a
+    same-named file DOES exist under --workspace -- output paths stay
+    workspace-relative, and a typo still fails the stage's own loud check the
+    same way it always did (unchanged)."""
+    invoke_dir = tmp_path / "invoke"
+    invoke_dir.mkdir()
+    monkeypatch.chdir(invoke_dir)
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    (workspace / "real.md").write_text("workspace copy", encoding="utf-8")
+
+    argv = ["--gamescript", "real.md"]
+    out = config.absolutize_existing_paths(argv, workspace=str(workspace))
+
+    assert out == argv  # untouched -- does not exist under cwd
+
+
+def test_absolutize_existing_paths_refuses_when_both_exist_and_differ(tmp_path, monkeypatch, capsys):
+    """The confirmed failure shape: a relative token exists under BOTH the
+    invocation cwd and --workspace, and they're different files -- silently
+    picking one (the old behavior) risks pinning to a stale tree. Must refuse
+    loudly instead: exit 2, no stage runs, and the message names the token
+    plus both candidate absolute paths so the user can pick one explicitly."""
+    invoke_dir = tmp_path / "invoke"
+    invoke_dir.mkdir()
+    monkeypatch.chdir(invoke_dir)
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    cwd_file = invoke_dir / "real.md"
+    cwd_file.write_text("cwd version", encoding="utf-8")
+    ws_file = workspace / "real.md"
+    ws_file.write_text("workspace version", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc:
+        config.absolutize_existing_paths(["--gamescript", "real.md"], workspace=str(workspace))
+
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "real.md" in err
+    assert str(cwd_file.resolve()) in err
+    assert str(ws_file.resolve()) in err
+
+
+def test_absolutize_existing_paths_refuses_for_equals_form_too(tmp_path, monkeypatch, capsys):
+    invoke_dir = tmp_path / "invoke"
+    invoke_dir.mkdir()
+    monkeypatch.chdir(invoke_dir)
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    (invoke_dir / "real.md").write_text("cwd version", encoding="utf-8")
+    (workspace / "real.md").write_text("workspace version", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc:
+        config.absolutize_existing_paths(["--gamescript=real.md"], workspace=str(workspace))
+
+    assert exc.value.code == 2
+    assert "real.md" in capsys.readouterr().err
+
+
+def test_absolutize_existing_paths_both_resolve_to_same_file_is_unambiguous(tmp_path, monkeypatch, capsys):
+    """The workspace == subdir edge case: the token exists under both cwd and
+    --workspace, but the two candidates are the SAME underlying file (e.g. a
+    hardlink) rather than two different ones -- there's nothing ambiguous
+    about that, so it should absolutize like the single-existing-copy case,
+    not refuse."""
+    invoke_dir = tmp_path / "invoke"
+    invoke_dir.mkdir()
+    monkeypatch.chdir(invoke_dir)
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    cwd_file = invoke_dir / "real.md"
+    cwd_file.write_text("shared", encoding="utf-8")
+    ws_file = workspace / "real.md"
+    os.link(cwd_file, ws_file)  # same underlying file, two directory entries
+
+    out = config.absolutize_existing_paths(["--gamescript", "real.md"], workspace=str(workspace))
+
+    assert out == ["--gamescript", str(cwd_file.resolve())]
+    assert "real.md" in capsys.readouterr().out  # still announced like any other rewrite
 
 
 def test_load_returns_empty_dict_when_file_missing(tmp_path, monkeypatch):

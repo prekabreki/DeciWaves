@@ -153,7 +153,13 @@ def run_guided(cfg: dict, workspace: str | None = None) -> int:
     # Same as main.py's stage dispatch: absolutize a relative --gamescript
     # BEFORE the chdir below, so it keeps pointing at the file the user meant
     # (relative to where they ran `deciwaves` from) instead of being looked
-    # up inside the workspace (issue #32).
-    extra_argv = config.absolutize_existing_paths(extra_argv)
+    # up inside the workspace (issue #32). Passing the chosen workspace through
+    # lets it refuse (exit 2, no dispatch) if the same relative path exists --
+    # and differs -- under both cwd and workspace (issue #44), same contract
+    # as main.py's explicit --workspace path.
+    try:
+        extra_argv = config.absolutize_existing_paths(extra_argv, workspace=workspace)
+    except SystemExit as e:
+        return e.code
     config.enter_workspace(workspace)  # same contract as main.py's `run` dispatch
     return run_game(game, cfg, extra_argv)

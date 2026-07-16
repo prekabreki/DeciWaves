@@ -292,6 +292,41 @@ def test_fw_selection_relative_gamescript_survives_workspace_chdir(monkeypatch, 
     assert calls["args"] == ("fw", cfg, ["--gamescript", str(gamescript)])
 
 
+def test_fw_selection_ambiguous_gamescript_refuses_with_exit_2(monkeypatch, tmp_path, capsys):
+    """Issue #44, wired through guided mode: a relative gamescript typed at the
+    prompt exists under BOTH the invocation cwd and the chosen --workspace,
+    and they're different files. Must refuse loudly (exit 2, no run_game
+    dispatch) instead of silently picking one -- same contract as main.py's
+    explicit --workspace path."""
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    invoke_dir = tmp_path / "invoke_dir"
+    invoke_dir.mkdir()
+    monkeypatch.chdir(invoke_dir)
+    cfg = _all_found_cfg(tmp_path)
+
+    workspace = tmp_path / "some-other-workspace"
+    workspace.mkdir()
+    cwd_gamescript = invoke_dir / "gamescript.md"
+    cwd_gamescript.write_text("cwd version\n", encoding="utf-8")
+    ws_gamescript = workspace / "gamescript.md"
+    ws_gamescript.write_text("workspace version\n", encoding="utf-8")
+
+    responses = iter(["3", str(workspace), "gamescript.md"])  # fw, explicit workspace, relative gamescript
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(responses))
+
+    called = {"run_game": False}
+    monkeypatch.setattr(guided, "run_game", lambda *a, **k: called.update(run_game=True) or 0)
+
+    rc = guided.run_guided(cfg)
+
+    assert rc == 2
+    assert not called["run_game"]
+    err = capsys.readouterr().err
+    assert "gamescript.md" in err
+    assert str(cwd_gamescript.resolve()) in err
+    assert str(ws_gamescript.resolve()) in err
+
+
 def test_fw_selection_gamescript_eof_prints_usage(monkeypatch, tmp_path, capsys):
     """EOFError on the gamescript prompt (e.g. `deciwaves < NUL`) must be
     handled like every other guided-mode prompt -- never a raw traceback."""

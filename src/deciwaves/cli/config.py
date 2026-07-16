@@ -1,6 +1,7 @@
 """Persisted config: where setup put the tools and where the games live."""
 import json
 import os
+import sys
 import tempfile
 from pathlib import Path
 from typing import NamedTuple, Optional
@@ -73,9 +74,11 @@ def load() -> dict:
         return {}
     return cfg
 
-def absolutize_existing_paths(argv: list) -> list:
+def absolutize_existing_paths(argv: list, workspace=None) -> list:
     """Resolve any argv token that refers to an EXISTING file/dir relative to
-    the CURRENT (pre-chdir) cwd to its absolute form.
+    the CURRENT (pre-chdir) cwd to its absolute form -- but only when a
+    *different* --workspace is actually about to move "relative" out from
+    under it, and only when doing so is unambiguous.
 
     Call this before `enter_workspace()` changes what "relative" means. A
     relative path the user typed to mean "relative to where I ran deciwaves"
@@ -83,15 +86,36 @@ def absolutize_existing_paths(argv: list) -> list:
     place once the process chdirs into --workspace -- otherwise it's
     silently (mis)resolved inside the workspace instead (issue #32).
 
-    Deliberately existence-based, not flag-name based: a stage's own OUTPUT
-    path (e.g. --out/--manifest) is correctly workspace-relative and must NOT
-    be absolutized here -- and since an output path doesn't exist yet at this
-    point (nothing has run), it's naturally left alone. A token that never
-    existed at all (a typo) is also left untouched: it still fails whatever
-    stage's own "not found" check the same way it always did, just relative
-    to the workspace instead of the original cwd -- no behavior change for
-    that already-loud, already-nonzero failure case (see run.py's fw
-    --gamescript checks, issue #38).
+    *workspace* is the caller's (not yet chdir'd-into) `--workspace` target.
+    If it's ``None`` (no --workspace given) or resolves to the same directory
+    as cwd, nothing is rewritten at all -- "relative" means the same thing on
+    both sides of the (no-op) chdir, so there is nothing to pin. This is
+    itself a behavior fix (issue #44): a plain no-workspace run used to
+    rewrite tokens and print notices for no reason.
+
+    With a workspace that genuinely differs from cwd, each existing-under-cwd
+    token is checked against the workspace too, since a token can just as
+    easily already exist there (e.g. a stale `out/...` left by a previous
+    in-place run under cwd, later reused with `--workspace` pointed at a
+    different tree) -- confirmed aggregate-review failure shape: silently
+    absolutizing against cwd in that case pins the run to the OLD tree with no
+    error, mixing data across workspaces. So:
+
+    - exists under cwd only -> absolutize against cwd (the BYO-input
+      convenience this function exists for).
+    - exists under neither (a typo, or a stage's own not-yet-written output
+      path) -> left untouched; it still fails whatever stage's own "not
+      found" check the same way it always did (see run.py's fw --gamescript
+      checks, issue #38), just relative to the workspace instead of cwd -- no
+      behavior change for that already-loud, already-nonzero failure case.
+    - exists under both and they're the SAME file (e.g. workspace is a
+      subdir/hardlink arrangement that happens to coincide) -> unambiguous,
+      absolutize against cwd same as the cwd-only case.
+    - exists under both and they're DIFFERENT files -> refuse: print which
+      token and both candidate absolute paths, and exit 2 (matching this
+      CLI's usage-error convention -- see main.py's/run.py's own argparse
+      error handling) rather than silently picking one and risking the
+      stale-tree mixup above.
 
     Both the bare two-token form (``--gamescript real.md``) and the joined
     ``--flag=value`` form (``--gamescript=real.md``) are handled: the latter used
@@ -99,20 +123,63 @@ def absolutize_existing_paths(argv: list) -> list:
     #32 bug alive for that spelling (finding 2). Every rewrite prints a one-line
     notice so the invocation-dir -> absolute redirect is never silent.
     """
+    if workspace is None:
+        return list(argv)
+    workspace_path = Path(workspace).resolve()
+    if workspace_path == Path.cwd():
+        return list(argv)
+
     out = []
     for tok in argv:
         if tok.startswith("--") and "=" in tok:
             flag, _, value = tok.partition("=")
-            if value and not os.path.isabs(value) and os.path.exists(value):
-                resolved = str(Path(value).resolve())
-                _print_resolution_notice(value, resolved)
+            resolved = _resolve_against_workspace(value, workspace_path)
+            if resolved is not None:
                 tok = f"{flag}={resolved}"
         elif tok and not tok.startswith("-") and not os.path.isabs(tok) and os.path.exists(tok):
-            resolved = str(Path(tok).resolve())
-            _print_resolution_notice(tok, resolved)
-            tok = resolved
+            resolved = _resolve_against_workspace(tok, workspace_path)
+            if resolved is not None:
+                tok = resolved
         out.append(tok)
     return out
+
+
+def _resolve_against_workspace(value: str, workspace_path: Path):
+    """Return *value* absolutized against the (pre-chdir) cwd, or ``None`` if
+    it should be left exactly as typed (empty, already absolute, or doesn't
+    exist relative to cwd at all).
+
+    Raises ``SystemExit(2)`` if *value* ALSO exists relative to
+    *workspace_path* and the two candidates are different files -- see
+    `absolutize_existing_paths`'s docstring for why silently picking one
+    isn't safe here.
+    """
+    if not value or os.path.isabs(value) or not os.path.exists(value):
+        return None
+    resolved_cwd = str(Path(value).resolve())
+    ws_candidate = workspace_path / value
+    if not ws_candidate.exists():
+        _print_resolution_notice(value, resolved_cwd)
+        return resolved_cwd
+    resolved_ws = str(ws_candidate.resolve())
+    # samefile (not string equality) so a workspace nested/linked such that the
+    # two candidates are literally the same file on disk (issue #44's "workspace
+    # == subdir" edge case) isn't mistaken for a genuine conflict.
+    if os.path.samefile(resolved_cwd, resolved_ws):
+        _print_resolution_notice(value, resolved_cwd)
+        return resolved_cwd
+    _refuse_ambiguous_path(value, resolved_cwd, resolved_ws)
+
+
+def _refuse_ambiguous_path(token: str, cwd_candidate: str, workspace_candidate: str) -> None:
+    print(
+        f"deciwaves: {token!r} exists both relative to the invocation directory "
+        f"({cwd_candidate}) and relative to --workspace ({workspace_candidate}), "
+        "and they are different files -- pass an absolute path to say which one "
+        "you mean.",
+        file=sys.stderr,
+    )
+    raise SystemExit(2)
 
 
 def _print_resolution_notice(original: str, resolved: str) -> None:

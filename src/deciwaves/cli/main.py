@@ -188,8 +188,17 @@ def main(argv=None) -> int:
     # Absolutize any relative path in the stage's own argv (e.g. --gamescript)
     # BEFORE chdir'ing into --workspace -- otherwise a relative flag value is
     # silently looked up inside the workspace instead of relative to wherever
-    # the user actually ran `deciwaves` from (issue #32).
-    extra_argv = config.absolutize_existing_paths(extra_argv)
+    # the user actually ran `deciwaves` from (issue #32). Passing args.workspace
+    # through lets absolutize_existing_paths tell "no workspace given" (or a
+    # workspace that's just cwd again) apart from a genuinely different one --
+    # only the latter can leave a token ambiguous between the two (issue #44).
+    # A resulting SystemExit(2) (ambiguous between cwd and --workspace) is
+    # converted to a return, same "usage errors return 2" contract as this
+    # function's other SystemExit catches above -- no stage runs.
+    try:
+        extra_argv = config.absolutize_existing_paths(extra_argv, workspace=args.workspace)
+    except SystemExit as e:
+        return e.code
     config.enter_workspace(args.workspace)
     if stage == "run":
         from deciwaves.cli.run import run_game; return _dispatch(run_game, args.cmd, cfg, extra_argv)
