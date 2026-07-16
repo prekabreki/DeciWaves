@@ -909,6 +909,13 @@ def test_fw_byo_message_shows_exact_rerun_command(tmp_path, monkeypatch, capsys)
     assert "deciwaves setup --fw-gamescript" in out
 
 
+def test_fw_byo_message_quotes_package_path_with_spaces():
+    """Finding 10: the suggested re-run command must survive a package path with
+    spaces -- an unquoted path breaks the command it tells the user to paste."""
+    msg = run_mod._fw_byo_message(r"C:\Games\Forbidden West\package")
+    assert '"C:\\Games\\Forbidden West\\package"' in msg
+
+
 def test_fw_asr_gpu_gate_aborts_without_whisperx(tmp_path, monkeypatch, capsys):
     """Same upfront-scan contract as HZD's bind gate (issue #33): `extract` must
     not run at all if `asr` is going to fail the GPU gate anyway."""

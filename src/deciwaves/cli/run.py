@@ -341,11 +341,15 @@ def _fw_byo_message(package: str) -> str:
     path itself stays a placeholder -- it's BYO, this repo never has a real one
     to show.
     """
+    # Quote the package path when it contains a space so the suggested command
+    # stays copy-pasteable (a real FW install lives under "...\Forbidden West\...")
+    # (finding 10). Spaceless paths (e.g. the "PKG" test placeholder) stay bare.
+    pkg = f'"{package}"' if package and " " in package else package
     return (
         "fw: no gamescript configured. extract/asr/subtitle-bind are done; speaker + "
         "story-order matching needs your own copy of the Forbidden West gamescript -- "
         "BYO, this repo can't ship game text (see docs/BYO.md). Re-run with:\n"
-        f"    deciwaves fw run --package {package} --gamescript <path-to-gamescript>\n"
+        f"    deciwaves fw run --package {pkg} --gamescript <path-to-gamescript>\n"
         "to continue with match -> full-reel -> render, or persist it once with "
         "`deciwaves setup --fw-gamescript <path-to-gamescript>` so future runs (and "
         "guided mode) don't need the flag at all."
