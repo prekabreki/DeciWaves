@@ -97,6 +97,12 @@ def main(argv=None):
                          "trusted)")
     a = ap.parse_args(argv)
 
+    from deciwaves.games.hzd.profile import hzd_package_error
+    err = hzd_package_error(a.package)
+    if err:
+        print(err)
+        return 1
+
     profile = build_profile(a.package)
     fw = profile.pack_reader
 
