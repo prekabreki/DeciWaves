@@ -11,16 +11,23 @@ jobs:
     uses: ./.github/workflows/test.yml
   publish:
     needs: test
-    runs-on: windows-latest
+    # Linux runner: the wheel is pure-Python (py3-none-any) so the build OS is irrelevant,
+    # and pypa/gh-action-pypi-publish is a container action that only runs on Linux.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read      # checkout
+      id-token: write     # OIDC token for PyPI Trusted Publishing (#55)
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
-      - run: pip install build==1.5.0 twine==6.2.0
+      - run: pip install build==1.5.0
       - run: python -m build
-      # Uses a classic PyPI API token for now (secrets.PYPI_API_TOKEN). Intended follow-up
-      # (owner action): switch to PyPI's OIDC trusted publishing once the `deciwaves`
-      # project exists on PyPI, removing the need for a long-lived API token entirely.
-      - run: twine upload dist/*
-        env: { TWINE_USERNAME: __token__, TWINE_PASSWORD: "${{ secrets.PYPI_API_TOKEN }}" }
+      # PyPI Trusted Publishing (OIDC): the runner's id-token authenticates directly to
+      # PyPI -- no long-lived PYPI_API_TOKEN. Requires a matching "pending publisher"
+      # registered on PyPI BEFORE the first tag:
+      #   PyPI project name: deciwaves | Owner: prekabreki | Repository: DeciWaves
+      #   Workflow name: release.yml   | Environment: (leave blank)
+      # Pinned to the v1.14.0 release commit per this repo's SHA-pinning convention.
+      - uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
