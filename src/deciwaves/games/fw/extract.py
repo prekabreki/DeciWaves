@@ -205,8 +205,12 @@ def main(argv=None) -> int:
     a = ap.parse_args(argv)
     stats = extract(a.package, a.out_dir, limit=a.limit, decode=not a.no_decode,
                     jobs=a.jobs)
-    print(f"resolved={stats.resolved} ok={stats.ok} skipped={stats.skipped} "
-          f"failed={stats.failed}")
+    msg = (f"resolved={stats.resolved} ok={stats.ok} skipped={stats.skipped} "
+           f"failed={stats.failed}")
+    if stats.failed:
+        errors_path = os.path.join(a.out_dir, "extract-errors.log")
+        msg += f" (see {errors_path})"
+    print(msg)
     return 0
 
 
