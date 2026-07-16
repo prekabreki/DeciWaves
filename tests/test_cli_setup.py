@@ -55,6 +55,53 @@ def test_setup_warns_when_oodle_missing_under_ds_install(tmp_path, monkeypatch, 
     assert cfg["ds_install"] == str(ds)
 
 
+def test_setup_warns_when_hzd_package_missing_locators(tmp_path, monkeypatch, capsys):
+    # issue #34: setup used to accept any existing dir for --hzd-package with
+    # no validation at all, so a wrong path (e.g. the install root) silently
+    # "succeeded" and only broke later, at catalog time, with a traceback.
+    hzd = tmp_path / "hzd_wrong_dir"; hzd.mkdir()  # exists, but no PackFileLocators.bin
+    monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.setattr(s, "_download_and_unpack", _stub_download_ok)
+    rc = s.run_setup(["--hzd-package", str(hzd), "--tools-dir", str(tmp_path / "tools")])
+    assert rc == 0  # non-blocking, same as the oodle-missing warning
+    out = capsys.readouterr().out
+    assert "PackFileLocators.bin" in out
+    assert "--hzd-package" in out
+    # config is still written with whatever the user passed (consistent with
+    # how a broken ds_install/oodle_dll is still persisted, not silently dropped)
+    cfg = json.loads((tmp_path / "cfg" / "config.json").read_text())
+    assert cfg["hzd_package"] == str(hzd)
+
+
+def test_setup_suggests_localcachedx12_subdir_when_install_root_given(tmp_path, monkeypatch, capsys):
+    # The "nicety" from issue #34: when the user points --hzd-package at the
+    # install root and the LocalCacheDX12\package subdir actually exists
+    # (with PackFileLocators.bin in it), name that exact subdir in the hint.
+    root = tmp_path / "Horizon Zero Dawn Remastered"
+    pkg_dir = root / "LocalCacheDX12" / "package"
+    pkg_dir.mkdir(parents=True)
+    (pkg_dir / "PackFileLocators.bin").write_bytes(b"x")
+    monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.setattr(s, "_download_and_unpack", _stub_download_ok)
+    rc = s.run_setup(["--hzd-package", str(root), "--tools-dir", str(tmp_path / "tools")])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "LocalCacheDX12" in out
+    assert str(pkg_dir) in out  # names the exact corrected path, not just the pattern
+    assert "--hzd-package" in out
+
+
+def test_setup_no_hzd_warning_when_package_dir_correct(tmp_path, monkeypatch, capsys):
+    hzd = tmp_path / "hzd_pkg"; hzd.mkdir()
+    (hzd / "PackFileLocators.bin").write_bytes(b"x")
+    monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.setattr(s, "_download_and_unpack", _stub_download_ok)
+    rc = s.run_setup(["--hzd-package", str(hzd), "--tools-dir", str(tmp_path / "tools")])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "WARNING" not in out
+
+
 def test_setup_saves_hzd_and_fw_package_paths(tmp_path, monkeypatch, capsys):
     hzd = tmp_path / "hzd.package"
     fw = tmp_path / "fw.package"

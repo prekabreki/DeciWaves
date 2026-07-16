@@ -91,6 +91,35 @@ def _download_and_unpack(url: str, dest_dir: Path, timeout: float = DOWNLOAD_TIM
                 shutil.copyfileobj(src, dst)
 
 
+HZD_LOCATORS_NAME = "PackFileLocators.bin"
+
+
+def _hzd_package_warning(hzd_package: str) -> str | None:
+    """Return a WARNING message if *hzd_package* is set but doesn't look like
+    the HZDR ...\\LocalCacheDX12\\package dir (the one containing
+    PackFileLocators.bin), else None. Non-blocking -- like the oo2core_7_win64.dll
+    check for ds_install, this never fails setup's exit code, it only makes the
+    eventual catalog-time failure legible up front (issue #34: setup used to
+    accept any existing dir for --hzd-package with zero validation).
+
+    If the user pointed --hzd-package at the game install root, detect that
+    ...\\LocalCacheDX12\\package exists underneath and name the exact corrected
+    path in the hint, rather than just describing the pattern.
+    """
+    if not hzd_package:
+        return None
+    if os.path.isfile(os.path.join(hzd_package, HZD_LOCATORS_NAME)):
+        return None
+    suggestion = Path(hzd_package) / "LocalCacheDX12" / "package"
+    if (suggestion / HZD_LOCATORS_NAME).is_file():
+        return (f"WARNING: {hzd_package!r} has no {HZD_LOCATORS_NAME} directly inside -- "
+                f"looks like the HZD install root, not the package dir. Did you mean "
+                f"--hzd-package {suggestion}?")
+    return (f"WARNING: {HZD_LOCATORS_NAME} not found under {hzd_package!r}. "
+            f"--hzd-package must point at the ...\\LocalCacheDX12\\package directory "
+            f"(the one containing {HZD_LOCATORS_NAME}).")
+
+
 def _find_oodle(ds_install: str) -> str:
     """Return the path to oo2core_7_win64.dll under ds_install, or "" if
     ds_install wasn't given or doesn't contain it."""
@@ -183,6 +212,10 @@ def run_setup(argv) -> int:
         print(f"WARNING: {OODLE_DLL_NAME} not found under {ds_install!r}. "
               f"Point --ds-install at the DS:DC game root -- the folder that directly "
               f"contains {OODLE_DLL_NAME}, alongside ds.exe.")
+
+    hzd_warning = _hzd_package_warning(hzd_package)
+    if hzd_warning:
+        print(hzd_warning)
 
     if not (ds_install or hzd_package or fw_package):
         print("No game install configured (pass --ds-install / --hzd-package / --fw-package). "
