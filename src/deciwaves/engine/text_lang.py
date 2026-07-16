@@ -23,8 +23,8 @@ import unicodedata
 #: Exclusive upper bound (code point) for "plausibly English/Latin" text.
 #: Covers Basic Latin (U+0000-007F), Latin-1 Supplement (U+0080-00FF), and
 #: Latin Extended-A/B (U+0100-024F) -- so accented European names ("Muller",
-#: "Walesa") pass -- while rejecting CJK ideographs, Hiragana/Katakana,
-#: Hangul, and Cyrillic, all of which start at or above U+0400.
+#: "Walesa") pass -- while rejecting everything from U+0250 up: Greek,
+#: Cyrillic, CJK ideographs, Hiragana/Katakana, Hangul, and so on.
 _LATIN_MAX_CODEPOINT = 0x0250
 
 
