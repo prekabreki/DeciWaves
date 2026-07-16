@@ -8,8 +8,14 @@ import pytest
 from deciwaves.engine.pack.bin_archive import file_hash
 from deciwaves.engine.pack.fw_locators import FwLocators
 
-HZD_PACKAGE = (r"C:\Program Files (x86)\Steam\steamapps\common"
-               r"\Horizon - Zero Dawn Remastered\LocalCacheDX12\package")
+# Override with DECIWAVES_HZD_PACKAGE, mirroring the DECIWAVES_DS_INSTALL /
+# DECIWAVES_FW_INSTALL convention (see conftest.py) and the sibling pack tests
+# (test_dsar_archive.py / test_fw_locators.py / test_fw_package.py). Falls back
+# to the old literal so behavior is unchanged when unset; the fixture skips
+# cleanly when the path is absent.
+HZD_PACKAGE = os.environ.get(
+    "DECIWAVES_HZD_PACKAGE",
+    r"C:\Program Files (x86)\Steam\steamapps\common\Horizon - Zero Dawn Remastered\LocalCacheDX12\package")
 
 
 @pytest.fixture
