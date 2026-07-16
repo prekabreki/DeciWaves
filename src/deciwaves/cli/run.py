@@ -85,22 +85,41 @@ def _invalidate_downstream_markers(game: str, full_chain: list[Stage], stage_nam
             pass  # nothing to invalidate -- fresh run, or already invalidated
 
 
-def _blocking_gpu_stage(game: str, chain: list[Stage]) -> Stage | None:
-    """The first not-yet-done GPU-gated stage in ``chain`` that would fail for
-    lack of the ASR extra, or ``None`` if none would.
+def _blocking_gpu_stage(game: str, chain: list[Stage],
+                        full_chain: list[Stage] | None = None) -> Stage | None:
+    """The first GPU-gated stage in ``chain`` that WILL effectively run yet would
+    fail for lack of the ASR extra, or ``None`` if none would.
 
     Used to scan the whole chain UPFRONT, before any stage runs, instead of
     discovering the gate mid-chain after earlier (possibly hours-long) stages
-    already ran (issue #33) -- a stage whose done-marker already exists is not
-    "blocking" even if it's GPU-gated (it already ran, whether whisperx was
-    installed at the time or not; deleting its marker to force a re-run is the
-    user's call, same as any other stage).
+    already ran (issue #33).
+
+    Crucially, the scan is invalidation-aware (finding 1): a GPU stage
+    effectively runs not only when its OWN done-marker is absent, but also when
+    ANY earlier stage in the full declared chain will run -- because that
+    running stage deletes every downstream marker via
+    ``_invalidate_downstream_markers`` before this GPU stage is reached, so its
+    currently-present marker is about to vanish. Reasoning only about the GPU
+    stage's own marker (as this used to) let the gate pass, catalog run for
+    hours, and bind then die with a raw ModuleNotFoundError once the re-catalog
+    invalidated .done-bind. ``full_chain`` is the complete declared order (fw
+    splits its chain across the BYO --gamescript gate into two `_run_chain`
+    calls, so "earlier stage will run" must still see stages before the split);
+    it defaults to ``chain`` for single-call pipelines. Only a GPU stage that is
+    actually part of ``chain`` (this call's slice) is returned.
     """
     if importlib.util.find_spec("whisperx") is not None:
         return None
-    for st in chain:
-        if st.gpu and not os.path.isfile(_done_marker(game, st.name)):
+    full_chain = chain if full_chain is None else full_chain
+    chain_names = {s.name for s in chain}
+    upstream_will_run = False
+    for st in full_chain:
+        own_absent = not os.path.isfile(_done_marker(game, st.name))
+        effectively_runs = own_absent or upstream_will_run
+        if st.gpu and effectively_runs and st.name in chain_names:
             return st
+        if own_absent:
+            upstream_will_run = True
     return None
 
 
@@ -117,7 +136,7 @@ def _run_chain(game: str, chain: list[Stage], ctx: dict, full_chain: list[Stage]
     after wasting however long the earlier stages take.
     """
     full_chain = chain if full_chain is None else full_chain
-    blocking = _blocking_gpu_stage(game, chain)
+    blocking = _blocking_gpu_stage(game, chain, full_chain)
     if blocking is not None:
         print(_gpu_gate_message(blocking.name))
         return 1
