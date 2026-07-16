@@ -51,7 +51,7 @@ def is_valid_hzd_package_dir(package_dir: str) -> bool:
     ``check_hzd_package``, ``cli.setup``'s ``_hzd_package_warning``, and this
     module's own ``hzd_package_error`` (previously each independently
     reimplemented the same ``os.path.isfile(os.path.join(dir,
-    "PackFileLocators.bin")))`` check -- issue #51 item 2). Each caller keeps
+    "PackFileLocators.bin"))`` check -- issue #51 item 2). Each caller keeps
     its own message wording: a doctor preflight status line, a setup WARNING
     with an install-root-typo suggestion, and this module's stage-time hard
     error are genuinely different audiences, so only the predicate and the
