@@ -1,6 +1,6 @@
 """Portable creative line-selection rules (Phase D).
 
-Extracted verbatim from deciwaves.engine.story_order.build_playlist so that future
+Extracted verbatim from deciwaves.games.ds.story_order.build_playlist so that future
 game profiles (e.g. HZD) can reuse the same rules without duplicating logic.
 
 These are the project's portable creative selection rules — see docs/architecture.md for how

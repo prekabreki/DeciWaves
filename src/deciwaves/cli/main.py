@@ -10,10 +10,10 @@ from deciwaves.cli import config
 
 STAGES = {
     "ds": {
-        "catalog":   ("deciwaves.engine.catalog",           "Build the line catalog from your install"),
+        "catalog":   ("deciwaves.games.ds.catalog",         "Build the line catalog from your install"),
         "cutscenes": ("deciwaves.games.ds.cutscene_audio",  "Resolve cutscene voice tracks"),
         "trim":      ("deciwaves.games.ds.cutscene_trim",   "[GPU] Rebuild the speech-trim manifest"),
-        "order":     ("deciwaves.engine.story_order",       "Build the story-ordered playlist"),
+        "order":     ("deciwaves.games.ds.story_order",     "Build the story-ordered playlist"),
         "render":    ("deciwaves.engine.render",             "Render MP3 reels + tracklists"),
     },
     "hzd": {

@@ -6,7 +6,7 @@ Resolve at runtime via `deciwaves.data.packaged("<rel>")`.
 ## ds/data-file-list.txt
 
 Filtered DS:DC virtual-path listing — the default `--file-list` for
-`deciwaves.engine.catalog` (`deciwaves ds catalog`).
+`deciwaves.games.ds.catalog` (`deciwaves ds catalog`).
 
 - **Game:** Death Stranding Director's Cut, PC/Steam.
 - **Method:** reconstructed-from-proven-outputs. An earlier attempt to dump this listing
@@ -18,7 +18,7 @@ Filtered DS:DC virtual-path listing — the default `--file-list` for
 - **Generated:** 2026-07-14.
 - **Contents:** one virtual path per line, no header. 282 lines end `/sentences` under a
   `games.ds.profile.DS_CORE_PREFIXES` prefix (exactly what
-  `engine.catalog.select_core_paths` selects) — pure paths, no dialogue text. The
+  `games.ds.catalog.select_core_paths` selects) — pure paths, no dialogue text. The
   remaining 96 lines end `/simpletext` under `localized/sentences/voices/<stem>/` —
   exactly what `engine.speakers.SpeakerMap`'s `_DS_SIMPLETEXT_FILTER` selects (paths
   containing `sentences/voices/` and ending `/simpletext`) — pure paths, no speaker-name
@@ -42,7 +42,7 @@ Filtered DS:DC virtual-path listing — the default `--file-list` for
 ## ds/cutscene_tracks.csv
 
 Pre-resolved cutscene voice-track listing — the default source for `deciwaves ds run`'s
-story-order stage's `--cutscene-tracks` (`deciwaves.engine.story_order`). Columns:
+story-order stage's `--cutscene-tracks` (`deciwaves.games.ds.story_order`). Columns:
 `scene,status,track_index,voice_track_stream`. IDs and status codes only, no dialogue
 text.
 

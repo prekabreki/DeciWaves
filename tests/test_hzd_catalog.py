@@ -1,6 +1,6 @@
 """HZD identification pipeline: classification + profile (pure, no install needed)."""
 from deciwaves.games.hzd.catalog import classify_hzd, select_sentence_cores
-from deciwaves.games.hzd.profile import build_profile
+from deciwaves.games.hzd.profile import build_profile, HZD_FAMILY_PREFIXES
 
 
 # --- classify_hzd: (category, scene) from a sentence-core virtual path ---
@@ -106,7 +106,6 @@ def test_select_keeps_sentences_drops_voices_and_simpletext():
 
 def test_build_profile_fields():
     p = build_profile(package_dir=None)
-    assert p.name == "hzd"
-    assert p.out_dir == "out/hzd"
-    assert p.transcript_path == ""  # disabled by default; BYO transcript via --transcript
+    assert p.decima_version == "HZDR"
+    assert p.core_prefixes == HZD_FAMILY_PREFIXES
     assert p.pack_reader is None  # None when package_dir not given

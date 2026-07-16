@@ -1,6 +1,6 @@
 """HZD identification catalog: build out/hzd/catalog.csv from HZD sentence cores.
 
-HZD differs from the DS catalog (engine.catalog) in three ways:
+HZD differs from the DS catalog (games.ds.catalog) in three ways:
 * No packfile file-list -- sentence-core paths are harvested by content-scanning the
   pack (games.hzd.inventory), since HZDR exposes only path-hashes.
 * Lines are parsed by the self-contained games.hzd.sentence_fw (no pydecima).
@@ -17,7 +17,7 @@ import csv
 import os
 import sys
 
-from deciwaves.engine.catalog import CSV_COLUMNS, done_core_paths, processed_core_paths
+from deciwaves.engine.catalog_io import CSV_COLUMNS, done_core_paths, processed_core_paths
 from deciwaves.games.hzd.sentence_fw import parse_sentences_fw
 from deciwaves.games.hzd.profile import HZD_ANCHORED_PREFIXES, HZD_FAMILY_PREFIXES
 

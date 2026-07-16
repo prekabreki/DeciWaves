@@ -7,7 +7,7 @@ transcript covers a scene; episode_map heuristics place the rest. Cutscene audio
 whole-scene track rows, not per-line.
 
 Invoke as a module (package form):
-    python -m deciwaves.engine.story_order
+    python -m deciwaves.games.ds.story_order
 """
 from __future__ import annotations
 

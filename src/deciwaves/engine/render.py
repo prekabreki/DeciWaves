@@ -190,7 +190,7 @@ def main(argv=None):
     # imports deferred into main() (consistent with cutscene_audio.py): avoids
     # constructing PackIndex at module import time; keeps `import engine.render` test-clean
     from deciwaves.engine import audio_clip
-    from deciwaves.engine import story_order
+    from deciwaves.games.ds import story_order
     from deciwaves.engine.pack.bin_index import PackIndex
     from deciwaves.games.ds import episode_map as em
 

@@ -18,8 +18,10 @@ stable ID, internal name, speaker (where derivable), category/scene, language, a
 a playable WAV — rendered into ≤290 MB story-ordered MP3 reels.
 
 **Architecture:** `src/deciwaves/engine/` is the (largely) game-agnostic core — archive/pack
-readers, the `GameProfile` config seam, and the catalog → selection → story_order → render
-pipeline; `src/deciwaves/games/{ds,hzd,fw}/` hold the per-game specializations. The three
+readers, the `GameProfile` config seam, and the shared tail of the catalog → selection →
+story_order → render pipeline (`selection`, `render`, and the game-free CSV-resume helpers in
+`catalog_io.py`); `src/deciwaves/games/{ds,hzd,fw}/` hold the per-game specializations,
+including each game's own `catalog` and (for DS) `story_order`. The three
 games share an engine, but each required a genuinely distinct extraction/binding solution —
 **true cross-game agnosticism is a non-goal**; the shared seam earns its keep only for what is
 genuinely common across all three. See [`docs/architecture.md`](docs/architecture.md) for the
@@ -80,8 +82,9 @@ installing, or invoke a stage module directly as `python -m deciwaves.<module>`.
 - **Bring your own game.** This repo ships code, never game content. It is read-only against
   any install it touches — it never repacks or modifies game files.
 - **No game prose in the repo.** Narrative transcripts/gamescripts are copyrighted game text
-  and are never checked in; they're an optional, user-supplied ("BYO") local input, wired
-  through a `transcript_path` that defaults to `""` (disabled) per game profile.
+  and are never checked in; they're an optional, user-supplied ("BYO") local input, passed
+  via per-stage CLI flags (`deciwaves ds order --transcript`, `deciwaves fw run --gamescript`)
+  that default to disabled.
 - **Extracted audio stays out of git.** WAV/`.wem`/`.at9`/`.bk2`/manifests derived from a real
   install are gitignored; only small packaged sample/reference data ships in `src/deciwaves/data/`.
 - **Treat format details as "likely," not "certain."** All three games' formats are partially

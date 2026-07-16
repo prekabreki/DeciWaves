@@ -29,13 +29,10 @@ def _simpletext_filter(path: str) -> bool:
 
 def _make_profile(**overrides) -> GameProfile:
     defaults: dict[str, Any] = dict(
-        name="ds",
         pack_reader=MagicMock(),
         decima_version="DSPC",
         core_prefixes=_ds_prefixes(),
         speaker_simpletext_filter=_simpletext_filter,
-        transcript_path="docs/death_stranding_gamescript.md",
-        out_dir="out/ds",
     )
     defaults.update(overrides)
     return GameProfile(**defaults)
@@ -44,9 +41,8 @@ def _make_profile(**overrides) -> GameProfile:
 # ── construction tests ──────────────────────────────────────────────────────
 
 def test_gameprofile_constructs_with_required_fields():
-    """Basic construction succeeds; name and decima_version round-trip."""
+    """Basic construction succeeds; decima_version round-trips."""
     p = _make_profile()
-    assert p.name == "ds"
     assert p.decima_version == "DSPC"
 
 
@@ -72,35 +68,12 @@ def test_gameprofile_speaker_simpletext_filter_matches_ds_speakers():
     assert f("localized/sentences/voices/vr0010_sam/metadata") is False     # wrong suffix
 
 
-def test_gameprofile_paths():
-    """transcript_path and out_dir are stored as given."""
-    p = _make_profile()
-    assert p.transcript_path == "docs/death_stranding_gamescript.md"
-    assert p.out_dir == "out/ds"
-
-
-def test_gameprofile_optional_fields_default_to_none():
-    """episode_map and cutscene_resolver are optional and default to None."""
-    p = _make_profile()
-    assert p.episode_map is None
-    assert p.cutscene_resolver is None
-
-
-def test_gameprofile_optional_fields_accept_callables():
-    """episode_map and cutscene_resolver accept callables when provided."""
-    dummy_em = MagicMock()
-    dummy_cr = MagicMock()
-    p = _make_profile(episode_map=dummy_em, cutscene_resolver=dummy_cr)
-    assert p.episode_map is dummy_em
-    assert p.cutscene_resolver is dummy_cr
-
-
 def test_gameprofile_is_frozen():
     """GameProfile is a frozen dataclass — mutation raises FrozenInstanceError."""
     import dataclasses
     p = _make_profile()
     try:
-        p.name = "hzd"  # type: ignore[misc]
+        p.decima_version = "HZDR"  # type: ignore[misc]
         raise AssertionError("Expected FrozenInstanceError was not raised")
     except dataclasses.FrozenInstanceError:
         pass

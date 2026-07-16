@@ -7,7 +7,7 @@ import pytest
 
 from deciwaves.engine import audio_clip as ac
 from deciwaves.engine import render as rs
-from deciwaves.engine.story_order import Segment, write_playlist
+from deciwaves.games.ds.story_order import Segment, write_playlist
 
 
 def _seg(is_side, line_id, scene="sq_cs00_s00100", category="cutscene"):
