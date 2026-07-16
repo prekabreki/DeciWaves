@@ -228,12 +228,20 @@ def _print_summary(tool_rows, ds_install, oodle_dll, hzd_package, fw_package, fw
 
 def run_setup(argv) -> int:
     ap = argparse.ArgumentParser(prog="deciwaves setup", description=__doc__)
-    ap.add_argument("--ds-install", default="", help="DS:DC game root (contains ds.exe, oo2core_7_win64.dll)")
-    ap.add_argument("--hzd-package", default="", help="HZD Remastered .package/install path")
-    ap.add_argument("--fw-package", default="", help="Forbidden West install/package path")
-    ap.add_argument("--fw-gamescript", default="", help="path to your own Forbidden West gamescript "
+    # default=None (not "") for the path flags so an EXPLICIT empty string is
+    # distinguishable from an omitted flag: omitted keeps the saved value,
+    # `--flag ""` CLEARS it (finding 4 -- the only CLI recovery from a stale
+    # ds_install/fw_gamescript that would otherwise make `doctor` exit 1 forever).
+    ap.add_argument("--ds-install", default=None,
+                    help="DS:DC game root (contains ds.exe, oo2core_7_win64.dll); "
+                         'pass "" to clear a previously saved path')
+    ap.add_argument("--hzd-package", default=None,
+                    help='HZD Remastered .package/install path; pass "" to clear')
+    ap.add_argument("--fw-package", default=None,
+                    help='Forbidden West install/package path; pass "" to clear')
+    ap.add_argument("--fw-gamescript", default=None, help="path to your own Forbidden West gamescript "
                     "transcript (BYO, optional -- see docs/BYO.md); needed for `fw run` to reach "
-                    "match/full-reel/render without passing --gamescript every time")
+                    'match/full-reel/render without passing --gamescript every time; pass "" to clear')
     ap.add_argument("--tools-dir", default=None, help="where to fetch vgmstream/VGAudio/ffmpeg (default: %%LOCALAPPDATA%%\\DeciWaves\\tools)")
     ap.add_argument("--skip-downloads", action="store_true", help="don't fetch tools, just re-check what's already there and rewrite config")
     ap.add_argument("--force", action="store_true", help="re-download a tool even if its exe is already present in --tools-dir (default: skip it)")
@@ -246,14 +254,18 @@ def run_setup(argv) -> int:
     # warning), so this merge degrades gracefully to "just this run's flags"
     # in that case too.
     saved = config.load()
-    # Resolved to absolute below (issue #32) -- `saved`'s own values are
-    # already absolute from a prior run of this same fix, so re-resolving
-    # them here is a no-op; only a freshly-given relative flag actually
-    # changes shape.
-    ds_install = _resolve_or_empty(args.ds_install or saved.get("ds_install", ""))
-    hzd_package = _resolve_or_empty(args.hzd_package or saved.get("hzd_package", ""))
-    fw_package = _resolve_or_empty(args.fw_package or saved.get("fw_package", ""))
-    fw_gamescript = _resolve_or_empty(args.fw_gamescript or saved.get("fw_gamescript", ""))
+    # Merge rule per key (finding 4): args.X is None -> keep saved; args.X == ""
+    # -> CLEAR; else -> use args.X. Then resolve to absolute (issue #32) --
+    # `saved`'s own values are already absolute from a prior run, so re-resolving
+    # is a no-op; only a freshly-given relative flag changes shape, and "" stays
+    # "" (an unset field).
+    def _merged(arg_val, saved_val):
+        return _resolve_or_empty(saved_val if arg_val is None else arg_val)
+
+    ds_install = _merged(args.ds_install, saved.get("ds_install", ""))
+    hzd_package = _merged(args.hzd_package, saved.get("hzd_package", ""))
+    fw_package = _merged(args.fw_package, saved.get("fw_package", ""))
+    fw_gamescript = _merged(args.fw_gamescript, saved.get("fw_gamescript", ""))
     tools_dir = (
         Path(args.tools_dir).resolve() if args.tools_dir
         else Path(saved["tools_dir"]).resolve() if saved.get("tools_dir")
