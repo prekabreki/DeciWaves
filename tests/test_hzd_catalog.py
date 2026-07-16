@@ -163,6 +163,34 @@ def test_catalog_main_writes_cores_sidecar_with_dialogue_only_paths(tmp_path, mo
     ]
 
 
+def test_catalog_main_accepts_bare_filename_out(tmp_path, monkeypatch):
+    """A bare filename (no directory component) --out must not crash: os.makedirs on
+    an empty dirname raises FileNotFoundError unless the path is abspath'd first."""
+    import deciwaves.games.hzd.profile as profile_mod
+    import deciwaves.games.hzd.inventory as inventory_mod
+    from deciwaves.games.hzd import catalog as catalog_mod
+
+    reader = _FakeReader()
+    monkeypatch.setattr(profile_mod, "build_profile", lambda package: _FakeProfile(reader))
+    monkeypatch.setattr(inventory_mod, "harvest_sentence_cores", lambda fw, sample_cap=None: [])
+    monkeypatch.setattr(catalog_mod, "parse_sentences_fw", lambda core_bytes, on_line_error=None: [])
+
+    fake_pkg = tmp_path / "package"
+    fake_pkg.mkdir()
+    (fake_pkg / "PackFileLocators.bin").write_bytes(b"x")
+    monkeypatch.chdir(tmp_path)
+
+    rc = catalog_mod.main([
+        "--package", str(fake_pkg),
+        "--out", "catalog.csv",  # bare filename, no directory component
+        "--errors", "catalog-errors.log",
+        "--processed", "catalog-processed.txt",
+        "--cores-out", "catalog-cores.txt",
+    ])
+    assert rc == 0
+    assert (tmp_path / "catalog.csv").is_file()
+
+
 # ---------------------------------------------------------------------------
 # hzd_package_error: actionable failure when --package doesn't point at the
 # LocalCacheDX12\package dir, instead of a bare FileNotFoundError traceback

@@ -100,7 +100,7 @@ def main(argv=None):
     profile = build_profile(args.package)
     fw = profile.pack_reader
 
-    os.makedirs(os.path.dirname(args.out), exist_ok=True)
+    os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     print("harvesting sentence-core paths (content scan)...", flush=True)
     harvested = harvest_sentence_cores(fw, sample_cap=args.sample_cap or None)
     paths = select_sentence_cores(harvested)

@@ -94,6 +94,29 @@ def test_uses_cores_sidecar_and_never_rescans(tmp_path, monkeypatch):
     assert reader.read_calls == ["localized/sentences/mq/scene/sentences"]
 
 
+def test_main_accepts_bare_filename_out(tmp_path, monkeypatch):
+    """A bare filename (no directory component) --out must not crash: os.makedirs on
+    an empty dirname raises FileNotFoundError unless the path is abspath'd first."""
+    cores_sidecar = tmp_path / "catalog-cores.txt"
+    write_core_paths_sidecar(str(cores_sidecar), ["localized/sentences/mq/scene/sentences"])
+
+    reader = _FakeReader({"localized/sentences/mq/scene/sentences": b"CORE_BYTES"})
+    _patch_profile(monkeypatch, reader)
+    _forbid_rescan(monkeypatch)
+    monkeypatch.setattr(
+        wem_metadata, "parse_sentence_media",
+        lambda core_bytes, on_line_error=None: [LineMedia("L1", 0, 100, 530)])
+
+    catalog = tmp_path / "catalog.csv"
+    _write_minimal_catalog(catalog, ["L1"])
+    monkeypatch.chdir(tmp_path)
+
+    rc = wem_metadata.main(_argv(tmp_path, cores_sidecar, catalog=catalog, out="wem-metadata.csv"))
+
+    assert rc == 0
+    assert (tmp_path / "wem-metadata.csv").is_file()
+
+
 def test_falls_back_to_rescan_and_still_excludes_simpletext_when_sidecar_missing(
         tmp_path, monkeypatch, capsys):
     """Standalone usability: if wem-metadata is run without a prior `hzd catalog` (no
