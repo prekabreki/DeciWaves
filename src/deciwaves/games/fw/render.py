@@ -3,8 +3,8 @@
 Simpler than the HZD render: the clip WAVs already exist (`out/fw/audio/`, from
 the fast-path extractor), so there is NO decode step — order the bound lines by `gamescript_index`
 (rough chronological; the gamescript already interleaves main/side/DLC), measure,
-pack to <=290 MB MP3s, and concat with gaps. Reuses the game-agnostic packing and
-ffmpeg concat from `engine.render`.
+pack to <=290 MB MP3s, and concat with gaps. Reuses the game-agnostic assembly kit
+(accumulate_episode_seconds, assemble_reels) from `engine.render`.
 
     PYTHONPATH=src python -m deciwaves.games.fw.render
 """
@@ -20,8 +20,8 @@ from dataclasses import dataclass
 import subprocess
 
 from deciwaves.engine.render import (
-    LINE_GAP, SCENE_GAP, SR, _ffmpeg_concat, budget_seconds, format_ts,
-    pack_episodes, silence_wav,
+    SR, accumulate_episode_seconds, assemble_reels, budget_seconds, format_ts,
+    ReelColumns,
 )
 
 BOUND_TIERS = {"1", "2"}
@@ -136,52 +136,28 @@ def main(argv=None):
           f"{len({s.episode for s in spine})} episodes")
 
     os.makedirs(a.out_dir, exist_ok=True)
-    sil = mono_silence_wav if a.uniform_mono else silence_wav
-    concat = _concat_uniform if a.uniform_mono else _ffmpeg_concat
-    line_sil = sil(LINE_GAP, a.cache)
-    scene_sil = sil(SCENE_GAP, a.cache)
 
     # measure each existing clip once; accumulate per-episode duration (incl. gaps)
-    durs, ep_secs, prev_q_by_ep = {}, {}, {}
-    with open(a.errors, "w", encoding="utf-8") as ferr:
-        for s in spine:
-            wav = os.path.join(a.audio_root, s.wav)
-            try:
-                with wave.open(wav) as w:
-                    dur = w.getnframes() / float(w.getframerate())
-            except (OSError, wave.Error) as e:
-                ferr.write(f"{s.line_id}\t{s.wav}\t{e}\n")
-                continue
-            durs[s.line_id] = dur
-            gap = 0.0
-            if s.episode in prev_q_by_ep:
-                gap = SCENE_GAP if s.quest != prev_q_by_ep[s.episode] else LINE_GAP
-            prev_q_by_ep[s.episode] = s.quest
-            ep_secs[s.episode] = ep_secs.get(s.episode, 0.0) + gap + dur
+    def dur_of(s):
+        wav = os.path.join(a.audio_root, s.wav)
+        with wave.open(wav) as w:
+            dur = w.getnframes() / float(w.getframerate())
+        return wav, dur
 
-    for fi, eps in enumerate(pack_episodes(list(ep_secs.items()), budget=budget_seconds())):
-        eps_set = set(eps)
-        file_segs = [s for s in spine if s.episode in eps_set and s.line_id in durs]
-        wav_list, rows, t, prev = [], [], 0.0, None
-        for s in file_segs:
-            new_scene = s.quest != prev
-            if wav_list:
-                wav_list.append(scene_sil if new_scene else line_sil)
-                t += SCENE_GAP if new_scene else LINE_GAP
-            wav_list.append(os.path.join(a.audio_root, s.wav))
-            rows.append([format_ts(t), s.quest, s.speaker, s.subtitle, s.line_id])
-            t += durs[s.line_id]
-            prev = s.quest
-        if not wav_list:
-            continue
-        base = os.path.join(a.out_dir, f"{a.stem}_{fi:02d}")
-        concat(wav_list, base + ".mp3", base + ".concat.txt",
-               os.path.join(a.cache, "norm"))
-        with open(base + ".tracklist.csv", "w", newline="", encoding="utf-8") as f:
-            w = csv.writer(f)
-            w.writerow(["timestamp", "quest", "speaker", "subtitle", "line_id"])
-            w.writerows(rows)
-        print(f"{base}.mp3  ({len(rows)} lines, {format_ts(t)})")
+    # n_failed intentionally unused: FW logs measure failures to a.errors but has
+    # never surfaced a summary count for them (unlike DS/HZD's fail-soft reporting).
+    durations, ep_secs, _n_failed = accumulate_episode_seconds(
+        spine, dur_of, gap_key=lambda s: s.quest, err_key=lambda s: s.wav,
+        errors_path=a.errors, catch=(OSError, wave.Error))
+
+    columns = ReelColumns(
+        header=["timestamp", "quest", "speaker", "subtitle", "line_id"],
+        row_of=lambda s, t: [format_ts(t), s.quest, s.speaker, s.subtitle, s.line_id])
+    assemble_reels(
+        spine, ep_secs, durations, out_dir=a.out_dir, cache_dir=a.cache, stem=a.stem,
+        columns=columns, budget=budget_seconds(), gap_key=lambda s: s.quest,
+        concat_fn=_concat_uniform if a.uniform_mono else None,
+        silence_fn=mono_silence_wav if a.uniform_mono else None)
     return 0
 
 
