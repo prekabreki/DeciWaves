@@ -48,8 +48,9 @@ Then fetch the decode tools, point DeciWaves at your game, and check the result:
     deciwaves setup --ds-install "C:\...\DEATH STRANDING DIRECTORS CUT"
     deciwaves doctor
 
-`setup` downloads vgmstream-cli, VGAudioCli, and ffmpeg into `%LOCALAPPDATA%\DeciWaves\tools`,
-finds the Oodle DLL next to a DS install, and writes `config.json`. Pass `--hzd-package` or
+`setup` downloads vgmstream-cli, VGAudioCli, and ffmpeg into `%LOCALAPPDATA%\DeciWaves\tools`
+(skipping any tool already present there -- pass `--force` to refetch anyway), finds the
+Oodle DLL next to a DS install, and writes `config.json`. Pass `--hzd-package` or
 `--fw-package` for those games instead, and (optionally) `--fw-gamescript` to persist your own
 FW gamescript transcript so `fw run` and guided mode don't need `--gamescript` passed by hand
 every time. It exits nonzero if any tool failed to download. `doctor` prints a preflight report
@@ -70,7 +71,12 @@ run; it only adds the menu around it. In a non-interactive shell it prints usage
 instead of blocking.
 
 If you'd rather drive it yourself, each game has an explicit `run` command. The global
-`--workspace` flag sets where output lands (default: the current directory).
+`--workspace` flag sets where output lands (default: the current directory) -- it must come
+*before* the game name (`deciwaves --workspace DIR ds run`, not `deciwaves ds --workspace DIR
+run`, which is parsed as that stage's own argument instead). A relative path you pass to a
+stage's own flag (e.g. `--gamescript`) is resolved against the directory you ran `deciwaves`
+from, not against `--workspace` -- it doesn't need to sit inside the workspace, and a path
+saved earlier via `deciwaves setup` is always absolute regardless.
 
 ### Death Stranding (no GPU)
 
