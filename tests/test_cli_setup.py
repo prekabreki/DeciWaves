@@ -270,3 +270,9 @@ def test_pinned_urls_are_github_release_downloads(url):
     assert url.startswith("https://github.com/")
     assert "/releases/download/" in url
     assert url.endswith(".zip")
+    # The tag segment (.../releases/download/<tag>/<asset>) must be a fixed,
+    # dated/versioned release -- never a rolling alias like "latest", whose
+    # underlying asset upstream can change out from under a pinned run
+    # (issue #39: this caught the ffmpeg URL still pointing at "latest").
+    tag = url.split("/releases/download/", 1)[1].split("/", 1)[0]
+    assert tag != "latest", f"{url} points at a rolling 'latest' release tag, not a pinned one"

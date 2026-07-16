@@ -8,8 +8,10 @@ dependency, no auth, and the flatten step means callers never need to know
 whether the upstream zip nests its exe one folder deep.
 
 URLs are pinned to specific releases (not "latest" redirects) so a run next
-year fetches the same bits this one did; .memories/toolchain-notes.md records
-how the pinned asset names were verified against the upstream releases.
+year fetches the same bits this one did; see the comment above the URL
+constants below for how each pinned asset name was verified against the
+upstream releases -- including BtbN/FFmpeg-Builds, whose own "latest" tag is
+a rolling alias and therefore not itself a valid pin (issue #39).
 """
 from __future__ import annotations
 
@@ -27,10 +29,15 @@ from deciwaves.cli import config
 # Pinned 2026-07-14 via:
 #   gh release view --repo vgmstream/vgmstream --json assets -q '.assets[].name' | grep -i win
 #   gh release view --repo Thealexbarney/VGAudio --json assets -q '.assets[].name'
-#   gh release view --repo BtbN/FFmpeg-Builds --json assets -q '.assets[].name' | grep win64-gpl.zip
+#   gh release view autobuild-2026-07-14-13-19 --repo BtbN/FFmpeg-Builds --json assets -q '.assets[].name' | grep win64-gpl.zip
+#
+# BtbN/FFmpeg-Builds has no versioned tags -- "latest" is a rolling alias that
+# always points at whatever the newest autobuild-YYYY-MM-DD-HH-MM release is,
+# so it is NOT a pin (issue #39). Pin to that dated autobuild tag's master
+# build instead, same as vgmstream/VGAudio pin to a fixed release/tag.
 VGMSTREAM_URL = "https://github.com/vgmstream/vgmstream/releases/download/r2117/vgmstream-win64.zip"
 VGAUDIO_URL = "https://github.com/Thealexbarney/VGAudio/releases/download/v2.2.1/VGAudioCli.zip"
-FFMPEG_URL = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
+FFMPEG_URL = "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-07-14-13-19/ffmpeg-N-125608-g150f7d15df-win64-gpl.zip"
 
 # (label, url, exe expected to land directly in the tools dir once unpacked).
 _TOOLS = (
