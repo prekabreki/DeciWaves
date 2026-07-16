@@ -93,16 +93,27 @@ The DS and HZD pipelines share this shape (FW's is described in its own section 
 4. **Render** (`engine/render.py`) — packs the ordered playlist into MP3 files sized to
    stay under a fixed per-file budget (comfortably under 290 MB per file at a given
    bitrate), inserting small silence gaps between lines and a longer one between scenes,
-   and writes a tracklist CSV alongside each MP3 so the reel is navigable.
+   and writes a tracklist CSV alongside each MP3 so the reel is navigable. The
+   measure-durations → per-episode gap accounting → pack → concat → tracklist shape used
+   to be copy-pasted once per game; it's now two public helpers every game's `main()`
+   calls instead: `accumulate_episode_seconds(segs, dur_of, ...)` does the
+   decode/measure loop and per-episode gap bookkeeping given a game-specific `dur_of`
+   callable, and `assemble_reels(spine, ep_secs, durations, columns=..., stem=..., ...)`
+   packs, concatenates, and writes the tracklist, with the tracklist's column shape
+   (`columns`, a `ReelColumns(header, row_of)`) supplied per game rather than hardcoded.
+   Each game's own decode/measure function (DS's inline clip decode, HZD's
+   `decode_spine_clips`, FW's bare `wave.open` duration read) is the only game-specific
+   code left in that half of the pipeline.
 
 HZD reuses the general shape of catalog/render — `games/hzd/render.py`'s own docstring
-notes it reuses `engine.render`'s game-agnostic packing/concat (`pack_episodes`, silence
-gaps, `_ffmpeg_concat`) — but it does **not** reuse `engine.selection`: nothing under
-`games/hzd/` imports `filter_and_dedup` or anything else from that module. Instead HZD has
-its own binding stage in place of both DS's transcript anchoring and DS's
-`engine.selection` dedup — its structural (A, B)-bucket join (see below) binds at most one
-line to one clip per bucket by construction, which is a different mechanism from, not a
-reuse of, `filter_and_dedup`. The two games don't share `story_order.py` itself.
+notes it reuses `engine.render`'s game-agnostic assembly kit
+(`accumulate_episode_seconds`, `assemble_reels`) — but it does **not** reuse
+`engine.selection`: nothing under `games/hzd/` imports `filter_and_dedup` or anything else
+from that module. Instead HZD has its own binding stage in place of both DS's transcript
+anchoring and DS's `engine.selection` dedup — its structural (A, B)-bucket join (see below)
+binds at most one line to one clip per bucket by construction, which is a different
+mechanism from, not a reuse of, `filter_and_dedup`. The two games don't share
+`story_order.py` itself.
 
 ## Command-line interface
 
