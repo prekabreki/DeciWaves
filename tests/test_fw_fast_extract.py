@@ -14,8 +14,10 @@ from deciwaves.engine.pack.fw_object_reader import GroupReader, read_group_spans
 from deciwaves.engine.pack.fw_fast_extract import (
     iter_english_lines, english_file_indices, FastLine, strip_cache_prefix)
 
-TYPES_JSON = os.path.join("vendor", "odradek", "odradek-game-hfw",
-                          "src", "main", "resources", "types.json")
+# Override with DECIWAVES_FW_TYPES_JSON; falls back to the old dev-checkout
+# layout (an odradek vendor checkout) for backward compatibility.
+TYPES_JSON = os.environ.get("DECIWAVES_FW_TYPES_JSON") or os.path.join(
+    "vendor", "odradek", "odradek-game-hfw", "src", "main", "resources", "types.json")
 
 # Retail Horizon Forbidden West CE, validated 2026-06-27 (scratchpad analysis):
 # the fast path resolves exactly this many English clips arithmetically, across

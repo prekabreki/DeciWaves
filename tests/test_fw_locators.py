@@ -1,3 +1,4 @@
+import os
 import struct
 from pathlib import Path
 
@@ -106,7 +107,11 @@ def test_duplicate_count_zero_when_no_duplicates():
     assert loc.duplicate_count == 0
 
 
-HZD_PACKAGE = Path(r"C:\Program Files (x86)\Steam\steamapps\common\Horizon - Zero Dawn Remastered\LocalCacheDX12\package")
+# Override with DECIWAVES_HZD_PACKAGE, mirroring the DECIWAVES_DS_INSTALL /
+# DECIWAVES_FW_INSTALL convention (see conftest.py).
+HZD_PACKAGE = Path(os.environ.get(
+    "DECIWAVES_HZD_PACKAGE",
+    r"C:\Program Files (x86)\Steam\steamapps\common\Horizon - Zero Dawn Remastered\LocalCacheDX12\package"))
 
 
 @pytest.fixture

@@ -13,8 +13,10 @@ from deciwaves.engine.pack.fw_object_reader import (
     CAPTURE_ALL, GroupReader, read_group_spans, _Cur,
 )
 
-TYPES_JSON = os.path.join("vendor", "odradek", "odradek-game-hfw",
-                          "src", "main", "resources", "types.json")
+# Override with DECIWAVES_FW_TYPES_JSON; falls back to the old dev-checkout
+# layout (an odradek vendor checkout) for backward compatibility.
+TYPES_JSON = os.environ.get("DECIWAVES_FW_TYPES_JSON") or os.path.join(
+    "vendor", "odradek", "odradek-game-hfw", "src", "main", "resources", "types.json")
 LSSR = type_hash("LocalizedSimpleSoundResource")
 
 
