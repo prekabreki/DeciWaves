@@ -8,14 +8,7 @@ import pytest
 from deciwaves.engine.pack.bin_archive import file_hash
 from deciwaves.engine.pack.fw_locators import FwLocators
 
-# Override with DECIWAVES_HZD_PACKAGE, mirroring the DECIWAVES_DS_INSTALL /
-# DECIWAVES_FW_INSTALL convention (see conftest.py) and the sibling pack tests
-# (test_dsar_archive.py / test_fw_locators.py / test_fw_package.py). Falls back
-# to the old literal so behavior is unchanged when unset; the fixture skips
-# cleanly when the path is absent.
-HZD_PACKAGE = os.environ.get(
-    "DECIWAVES_HZD_PACKAGE",
-    r"C:\Program Files (x86)\Steam\steamapps\common\Horizon - Zero Dawn Remastered\LocalCacheDX12\package")
+from conftest import HZD_PACKAGE
 
 
 @pytest.fixture
@@ -23,7 +16,7 @@ def fw():
     if not os.path.isdir(HZD_PACKAGE):
         pytest.skip("HZDR install not present")
     from deciwaves.engine.pack.fw_package import FwPackage
-    return FwPackage(HZD_PACKAGE)
+    return FwPackage(str(HZD_PACKAGE))
 
 
 def test_harvest_finds_known_sentence_core(fw):

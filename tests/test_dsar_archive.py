@@ -1,10 +1,10 @@
-import os
 import re
 import struct
 import lz4.block
 import pytest
-from pathlib import Path
 from deciwaves.engine.pack.dsar_archive import DsarArchive
+
+from conftest import HZD_PACKAGE
 
 
 def _write_dsar(tmp_path, chunks):
@@ -84,14 +84,6 @@ def test_read_past_eof_raises_not_silent_truncation(tmp_path):
         arc.read(10_000, 10)   # well past total_size (1000)
     with pytest.raises(ValueError, match=re.escape(path)):
         arc.read(990, 20)      # starts in range but crosses EOF
-
-
-# Override with DECIWAVES_HZD_PACKAGE, mirroring the DECIWAVES_DS_INSTALL /
-# DECIWAVES_FW_INSTALL convention (see conftest.py) -- HZD had no such override
-# before this, every test hardcoding the same personal Steam path.
-HZD_PACKAGE = Path(os.environ.get(
-    "DECIWAVES_HZD_PACKAGE",
-    r"C:\Program Files (x86)\Steam\steamapps\common\Horizon - Zero Dawn Remastered\LocalCacheDX12\package"))
 
 
 def test_real_dsar_header():
