@@ -169,6 +169,11 @@ def main(argv=None):
             # pure reuse mode (no --package): clips missing from the sidecar simply stay
             # unbound this run -- there's nothing to transcribe them with.
         else:
+            from deciwaves.games.hzd.profile import hzd_package_error
+            err = hzd_package_error(a.package)
+            if err:
+                print(err)
+                return 1
             dsar = FwPackage(a.package).dsar_for(ARCHIVE)
             model = asr.load_model()
             os.makedirs(os.path.dirname(os.path.abspath(a.transcripts_out)), exist_ok=True)

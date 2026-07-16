@@ -1,5 +1,6 @@
 import wave
 
+from deciwaves.games.hzd import render
 from deciwaves.games.hzd.render import mq_rank, build_spine, decode_spine_clips, SpineItem
 
 
@@ -205,3 +206,24 @@ def test_decode_spine_clips_no_failures_no_skips(tmp_path, monkeypatch):
 
     assert skipped == 0
     assert set(decoded) == {"L0"}
+
+
+# ---------------------------------------------------------------------------
+# main(): a bad --package (issue #49, mirrors #34's hzd_catalog check) must fail
+# actionably, not with a raw FileNotFoundError traceback from fw_locators. The
+# check must run before any of the (possibly-missing) --manifest/--catalog/
+# --clip-index files are opened, so this needs none of them to exist.
+# ---------------------------------------------------------------------------
+
+def test_render_main_missing_package_fails_actionably(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    bad_package = tmp_path / "install_root"  # exists, but no PackFileLocators.bin
+    bad_package.mkdir()
+
+    rc = render.main(["--package", str(bad_package)])
+
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "--hzd-package" in captured.out
+    assert "PackFileLocators.bin" in captured.out
+    assert captured.err == ""  # no traceback

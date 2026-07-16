@@ -128,8 +128,22 @@ def _write_multi_bucket_fixture(tmp_path, n_buckets):
     return catalog, wem_meta, clip_index
 
 
+def _fake_package_dir(tmp_path):
+    """A real directory shaped like a valid HZDR package dir (has
+    PackFileLocators.bin), so it passes hzd_package_error while FwPackage itself
+    stays fully mocked (see FakePackage -- it ignores the path value entirely).
+    Reused across tests via a fixed subdirectory name so repeated calls are
+    idempotent."""
+    pkg = tmp_path / "fake_package"
+    pkg.mkdir(exist_ok=True)
+    locators = pkg / "PackFileLocators.bin"
+    if not locators.is_file():
+        locators.write_bytes(b"x")
+    return str(pkg)
+
+
 def _argv(tmp_path, catalog, wem_meta, clip_index, **extra):
-    argv = ["--package", "FAKE_PKG",
+    argv = ["--package", _fake_package_dir(tmp_path),
             "--clip-index", str(clip_index),
             "--wem-metadata", str(wem_meta),
             "--catalog", str(catalog),
@@ -578,3 +592,26 @@ def test_sample_cap_zero_means_unlimited_full_pass_no_cap_message(tmp_path, monk
     out = capsys.readouterr().out
     assert "SAMPLE CAP" not in out
     assert dsar.calls == [1000, 2000, 3000, 4000, 5000]   # every bucket's clip transcribed
+
+
+# ---------------------------------------------------------------------------
+# main(): a bad --package (issue #49, mirrors #34's hzd_catalog check) must fail
+# actionably, not with a raw FileNotFoundError traceback from fw_locators.py --
+# FwPackage is deliberately left unmocked here: the check must fire before
+# FwPackage is ever constructed.
+# ---------------------------------------------------------------------------
+
+def test_asr_bind_main_missing_package_fails_actionably(tmp_path, monkeypatch, capsys):
+    catalog, wem_meta, clip_index = _write_fixture(tmp_path, n_clips=3)
+    bad_package = tmp_path / "install_root"  # exists, but no PackFileLocators.bin
+    bad_package.mkdir()
+    argv = _argv(tmp_path, catalog, wem_meta, clip_index)
+    argv[argv.index("--package") + 1] = str(bad_package)   # swap in the bad one
+
+    rc = asr_bind.main(argv)
+
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "--hzd-package" in captured.out
+    assert "PackFileLocators.bin" in captured.out
+    assert captured.err == ""  # no traceback

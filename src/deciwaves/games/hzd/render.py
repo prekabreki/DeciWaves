@@ -209,6 +209,12 @@ def main(argv=None):
                          "--jobs 1 forces the old serial decode")
     a = ap.parse_args(argv)
 
+    from deciwaves.games.hzd.profile import hzd_package_error
+    err = hzd_package_error(a.package)
+    if err:
+        print(err)
+        return 1
+
     catalog = {r["line_id"]: r for r in _load_csv(a.catalog)}
     clip_index = {int(c["clip_row"]): c for c in _load_csv(a.clip_index)}
     if a.spine_only:
