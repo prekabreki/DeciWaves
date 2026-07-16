@@ -163,6 +163,70 @@ def test_catalog_main_writes_cores_sidecar_with_dialogue_only_paths(tmp_path, mo
     ]
 
 
+def test_catalog_main_sample_cap_leaves_existing_cores_sidecar_untouched(tmp_path, monkeypatch, capsys):
+    """Finding 6: a --sample-cap'd (smoke-test) harvest is a TRUNCATED core list.
+    Overwriting the shared catalog-cores.txt with it poisons wem-metadata, which
+    trusts the sidecar and ignores its own --sample-cap -- silently rewriting
+    wem-metadata.csv down to the capped subset. A capped run must NOT touch the
+    sidecar and must say so; an existing sidecar stays byte-identical."""
+    import deciwaves.games.hzd.profile as profile_mod
+    import deciwaves.games.hzd.inventory as inventory_mod
+    from deciwaves.games.hzd import catalog as catalog_mod
+
+    reader = _FakeReader()
+    monkeypatch.setattr(profile_mod, "build_profile", lambda package: _FakeProfile(reader))
+    monkeypatch.setattr(inventory_mod, "harvest_sentence_cores",
+                         lambda fw, sample_cap=None: ["localized/sentences/capped/scene/sentences"])
+    monkeypatch.setattr(catalog_mod, "parse_sentences_fw", lambda core_bytes, on_line_error=None: [])
+
+    fake_pkg = tmp_path / "package"; fake_pkg.mkdir()
+    (fake_pkg / "PackFileLocators.bin").write_bytes(b"x")
+
+    cores_sidecar = tmp_path / "catalog-cores.txt"
+    cores_sidecar.write_text("localized/sentences/full/run/sentences\n", encoding="utf-8")
+    before = cores_sidecar.read_bytes()
+
+    rc = catalog_mod.main([
+        "--package", str(fake_pkg),
+        "--out", str(tmp_path / "catalog.csv"),
+        "--errors", str(tmp_path / "catalog-errors.log"),
+        "--processed", str(tmp_path / "catalog-processed.txt"),
+        "--cores-out", str(cores_sidecar),
+        "--sample-cap", "5",
+    ])
+    assert rc == 0
+    assert cores_sidecar.read_bytes() == before, "capped run must not overwrite the shared sidecar"
+    assert "sample-cap active" in capsys.readouterr().out.lower()
+
+
+def test_catalog_main_uncapped_still_writes_cores_sidecar(tmp_path, monkeypatch):
+    """The complement: an uncapped run (--sample-cap 0, the default) is a full
+    harvest and still writes the sidecar for wem-metadata to reuse."""
+    import deciwaves.games.hzd.profile as profile_mod
+    import deciwaves.games.hzd.inventory as inventory_mod
+    from deciwaves.games.hzd import catalog as catalog_mod
+
+    reader = _FakeReader()
+    monkeypatch.setattr(profile_mod, "build_profile", lambda package: _FakeProfile(reader))
+    monkeypatch.setattr(inventory_mod, "harvest_sentence_cores",
+                         lambda fw, sample_cap=None: ["localized/sentences/full/scene/sentences"])
+    monkeypatch.setattr(catalog_mod, "parse_sentences_fw", lambda core_bytes, on_line_error=None: [])
+
+    fake_pkg = tmp_path / "package"; fake_pkg.mkdir()
+    (fake_pkg / "PackFileLocators.bin").write_bytes(b"x")
+
+    cores_sidecar = tmp_path / "catalog-cores.txt"
+    rc = catalog_mod.main([
+        "--package", str(fake_pkg),
+        "--out", str(tmp_path / "catalog.csv"),
+        "--errors", str(tmp_path / "catalog-errors.log"),
+        "--processed", str(tmp_path / "catalog-processed.txt"),
+        "--cores-out", str(cores_sidecar),
+    ])
+    assert rc == 0
+    assert read_core_paths_sidecar(str(cores_sidecar)) == ["localized/sentences/full/scene/sentences"]
+
+
 def test_catalog_main_accepts_bare_filename_out(tmp_path, monkeypatch):
     """A bare filename (no directory component) --out must not crash: os.makedirs on
     an empty dirname raises FileNotFoundError unless the path is abspath'd first."""
