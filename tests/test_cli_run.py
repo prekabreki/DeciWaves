@@ -490,6 +490,9 @@ def test_hzd_run_help_documents_sample_cap_flag(tmp_path, monkeypatch, capsys):
 
 
 def test_hzd_bind_gpu_gate_aborts_without_whisperx(tmp_path, monkeypatch, capsys):
+    """The GPU gate is scanned UPFRONT, before any stage runs -- not discovered
+    mid-chain after catalog/clip-index/wem-metadata already ran (potentially
+    hours of work wasted just to learn `bind` will fail). See issue #33."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("importlib.util.find_spec", lambda name: None)
     mods = _mods("hzd")
@@ -500,11 +503,32 @@ def test_hzd_bind_gpu_gate_aborts_without_whisperx(tmp_path, monkeypatch, capsys
     assert rc == 1
 
     called = [m for m, _ in calls]
-    assert called == [mods["catalog"], mods["clip-index"], mods["wem-metadata"]]
+    assert called == []  # nothing runs -- the gate fires before catalog even starts
 
     out = capsys.readouterr().out
     assert "pip install deciwaves[asr]" in out
     assert "pytorch.org" in out
+
+
+def test_hzd_bind_gpu_gate_ignored_when_bind_already_done(tmp_path, monkeypatch, capsys):
+    """The upfront scan must not block a chain whose GPU-gated stage is
+    already marked done (e.g. it ran earlier when whisperx WAS installed) --
+    only a not-yet-done GPU stage should trip the gate."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: None)
+    mods = _mods("hzd")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _hzd_outputs(mods)))
+    for stage in ("catalog", "clip-index", "wem-metadata", "bind"):
+        marker = _marker("hzd", stage)
+        os.makedirs(os.path.dirname(marker), exist_ok=True)
+        Path(marker).write_text("", encoding="utf-8")
+
+    rc = run_mod.run_game("hzd", {"hzd_package": "PKG"}, [])
+    assert rc == 0
+
+    called = [m for m, _ in calls]
+    assert called == [mods["render"]]  # every earlier stage skipped via its marker
 
 
 def test_hzd_missing_config_errors(tmp_path, monkeypatch, capsys):
@@ -829,6 +853,8 @@ def test_fw_byo_message_shows_exact_rerun_command(tmp_path, monkeypatch, capsys)
 
 
 def test_fw_asr_gpu_gate_aborts_without_whisperx(tmp_path, monkeypatch, capsys):
+    """Same upfront-scan contract as HZD's bind gate (issue #33): `extract` must
+    not run at all if `asr` is going to fail the GPU gate anyway."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("importlib.util.find_spec", lambda name: None)
     mods = _mods("fw")
@@ -839,7 +865,7 @@ def test_fw_asr_gpu_gate_aborts_without_whisperx(tmp_path, monkeypatch, capsys):
     assert rc == 1
 
     called = [m for m, _ in calls]
-    assert called == [mods["extract"]]
+    assert called == []  # nothing runs -- the gate fires before extract even starts
 
     out = capsys.readouterr().out
     assert "pip install deciwaves[asr]" in out
