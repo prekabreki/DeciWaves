@@ -38,6 +38,13 @@ table, addressed the same way.
 MurmurHash3 x64-128, seed 42, first 64 bits, over the NUL-terminated UTF-8 virtual path (with
 backslashes normalized to forward slashes). One hashing routine, shared by both games' readers.
 
+**Retail index files carry a short trailing section after the last packfile group** (observed
+2026-07-16, issue #46: 39 bytes decoding as `u8 0x01`, then `u32 name_len=18`,
+`"ShaderBinaries.bin"`, `u64 hash`, `u32 offset=0`, `u32 length=0xFFFFFFFF` — likely a
+count-prefixed loose-file list, but that reading is n=1 empirical). A byte-exact parse
+precondition on this file is therefore wrong on real installs; the reader warns about
+unconsumed trailing bytes instead of raising, while truncation mid-record still fails hard.
+
 ## Resource type hashes are a fresh empirical problem per engine generation
 
 Decima RTTI type hashes are derived from a type's field layout, which changes across engine

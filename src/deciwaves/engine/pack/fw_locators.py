@@ -5,9 +5,15 @@ Layout (little-endian), confirmed against the retail install; see .memories/hzd-
     per packfile: u32 NameLength; char Name[NameLength]; u32 NumFiles;
                   NumFiles x { u64 path_hash; u32 offset; u32 length }
 The archive index is implicit (the enclosing packfile group).
+
+Retail files carry a short trailing section after the last packfile record (observed:
+39 bytes naming ShaderBinaries.bin -- see the memory above). The parse warns loudly
+about unconsumed bytes rather than raising: a genuinely truncated file still fails
+hard inside the record loop (struct.error), so only the benign over-run is tolerated.
 """
 from __future__ import annotations
 import struct
+import sys
 from dataclasses import dataclass
 
 
@@ -54,10 +60,14 @@ class FwLocators:
                 self._ordered.append(Entry(name, h, off, length))
                 # first packfile wins on duplicate hash (mirror DS PackIndex.setdefault)
                 self._by_hash.setdefault(h, Locator(name, off, length))
-        if pos != len(data):
-            raise ValueError(
-                f"trailing garbage after PackFileLocators parse: "
-                f"{len(data) - pos} unexpected bytes"
+        self.trailing_bytes = len(data) - pos
+        if self.trailing_bytes:
+            print(
+                f"WARNING: PackFileLocators parse left {self.trailing_bytes} "
+                f"unconsumed trailing bytes ({len(self._archives)} archives / "
+                f"{len(self._ordered)} records parsed OK; retail files ship a "
+                f"trailing loose-file section, so this is expected on a real install)",
+                file=sys.stderr,
             )
 
     def lookup(self, path_hash: int) -> Locator | None:

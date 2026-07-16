@@ -76,18 +76,33 @@ def test_items_dedupes_first_wins():
     assert len(items) == len(loc)
 
 
-def test_trailing_garbage_raises():
-    """Unexpected bytes after the last parsed record must not be silently
-    ignored -- a truncated/corrupted PackFileLocators.bin should fail loudly,
-    not silently under-read."""
+def test_trailing_bytes_warn_loudly_but_parse_survives(capsys):
+    """Retail PackFileLocators.bin carries a short trailing loose-file section
+    after the last packfile record (issue #46: observed 39 bytes naming
+    ShaderBinaries.bin on a real install), so unconsumed trailing bytes must
+    NOT raise -- a hard ValueError here bricks the whole HZD pipeline at
+    startup. They must not be silently ignored either: warn loudly on stderr
+    and keep the parsed records intact."""
     data = _build_locators([("a.core", [(0xAA, 0, 10)])]) + b"\x01\x02\x03"
-    with pytest.raises(ValueError, match="3"):
-        FwLocators.from_bytes(data)
+    loc = FwLocators.from_bytes(data)
+    assert loc.trailing_bytes == 3
+    assert "3 unconsumed trailing bytes" in capsys.readouterr().err
+    assert loc.lookup(0xAA) == Locator("a.core", 0, 10)  # records still intact
 
 
-def test_no_trailing_garbage_does_not_raise():
+def test_truncated_file_still_fails_hard():
+    """Softening the trailing-bytes check (issue #46) must not soften
+    truncation: a file cut off mid-record dies in struct.unpack_from."""
     data = _build_locators([("a.core", [(0xAA, 0, 10), (0xBB, 16, 20)])])
-    FwLocators.from_bytes(data)  # must not raise
+    with pytest.raises(struct.error):
+        FwLocators.from_bytes(data[:-4])
+
+
+def test_no_trailing_bytes_no_warning(capsys):
+    data = _build_locators([("a.core", [(0xAA, 0, 10), (0xBB, 16, 20)])])
+    loc = FwLocators.from_bytes(data)
+    assert loc.trailing_bytes == 0
+    assert capsys.readouterr().err == ""
 
 
 def test_duplicate_count_reflects_collapsed_duplicates():
@@ -127,3 +142,7 @@ def test_real_locators(require_hzd_install):
     assert len(loc.archives) == 78           # NumPackfiles observed 2026-06-26
     assert all(a.startswith("package.") for a in loc.archives)
     assert len(loc) > 1000                    # many indexed resources
+    # Retail carries a short trailing loose-file section (issue #46: 39 bytes
+    # naming ShaderBinaries.bin, observed 2026-07-16) -- tiny either way, and
+    # never a parse failure.
+    assert loc.trailing_bytes < 1024
