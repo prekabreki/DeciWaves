@@ -13,7 +13,7 @@ import deciwaves._vendor.pydecima.reader as _pydecima_reader
 from deciwaves import data
 from deciwaves.engine.sentence_core import parse_sentences
 from deciwaves.engine.speakers import SpeakerMap
-from deciwaves.engine.catalog_io import CSV_COLUMNS, done_core_paths, processed_core_paths
+from deciwaves.engine.catalog_io import CSV_COLUMNS, processed_core_paths, prune_incomplete_rows
 
 # Alias for backward compatibility (imported by some tests and callers).
 # Authoritative map is games.ds.profile.DS_CORE_PREFIXES — catalog merely aliases it.
@@ -82,9 +82,15 @@ def main(argv=None):
     file_list_path = args.file_list if args.file_list is not None else data.packaged("ds/data-file-list.txt")
     file_list_lines = open(file_list_path, encoding="utf-8").read().splitlines()
     paths = select_core_paths(file_list_lines, profile.core_prefixes)
-    # Resume = union of (cores that produced CSV rows) and (cores recorded as processed).
-    # The sidecar covers zero-row and hard-failed cores that the CSV cannot represent.
-    done = done_core_paths(args.out) | processed_core_paths(args.processed)
+    # The processed sidecar is the SOLE resume authority (issue #21): a core's sidecar
+    # line is only written after all of its rows are in the CSV, so a mid-core crash
+    # can leave partial CSV rows for a core the sidecar never confirmed. Drop those
+    # before computing "done", or a partial core would be silently treated as finished.
+    dropped = prune_incomplete_rows(args.out, args.processed)
+    if dropped:
+        print(f"resume: dropped {dropped} row(s) left by an incomplete previous run "
+              f"(core(s) not confirmed done in {args.processed})")
+    done = processed_core_paths(args.processed)
     todo = [p for p in paths if p not in done]
     print(f"{len(paths)} dialogue cores; {len(done)} done; {len(todo)} to do")
 
