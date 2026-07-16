@@ -118,9 +118,13 @@ guided interactive flow (see below).
   `doctor.py`'s own install checks (`check_ds_install` / `check_hzd_package` /
   `check_fw_package`) consider configured, prompts for a game and a workspace directory,
   `chdir`s into that workspace, and calls the identical
-  `deciwaves.cli.run.run_game(...)` that `deciwaves <game> run` calls. If stdin isn't a
-  TTY (CI, a pipe, a scripted invocation) it never blocks on `input()` — it prints a
-  one-line usage hint and returns a nonzero exit code instead.
+  `deciwaves.cli.run.run_game(...)` that `deciwaves <game> run` calls. Choosing FW adds one
+  more optional prompt — the BYO gamescript path, defaulting to whatever `fw_gamescript`
+  `deciwaves setup` already has saved (blank input skips it gracefully; this is the fix for
+  issue #23, which otherwise left guided mode with no way to ever complete the FW pipeline
+  past subtitle-bind). If stdin isn't a TTY (CI, a pipe, a scripted invocation) it never
+  blocks on `input()` — it prints a one-line usage hint and returns a nonzero exit code
+  instead.
 - **Stage dispatch.** `deciwaves/cli/main.py` keeps a `STAGES` registry — a
   `{game: {stage_name: (module_path, help_text)}}` mapping covering every stage in all
   three pipelines (DS: `catalog` / `cutscenes` / `trim` / `order` / `render`; HZD:
@@ -138,8 +142,8 @@ guided interactive flow (see below).
   against whatever directory `--workspace` chdir'd into), so this `chdir` is what lets one
   flag redirect an entire run without touching every stage's individual path arguments.
 - **Config env application.** `deciwaves/cli/config.py` persists a small JSON config
-  (`tools_dir`, `ds_install`, `hzd_package`, `fw_package`, `oodle_dll`) under
-  `%LOCALAPPDATA%/DeciWaves/config.json` (overridable via `DECIWAVES_CONFIG_DIR`).
+  (`tools_dir`, `ds_install`, `hzd_package`, `fw_package`, `oodle_dll`, `fw_gamescript`)
+  under `%LOCALAPPDATA%/DeciWaves/config.json` (overridable via `DECIWAVES_CONFIG_DIR`).
   Before dispatching to any stage, `main()` calls `_apply_config_env()`, which prepends
   the saved `tools_dir` onto `PATH` and sets `DECIWAVES_VGMSTREAM` / `DECIWAVES_VGAUDIO`
   when the corresponding executables are found there. This has to happen *before* the
@@ -149,23 +153,37 @@ guided interactive flow (see below).
 - **`setup`.** `deciwaves setup` (`deciwaves/cli/setup.py`) fetches `vgmstream-cli`,
   `VGAudioCli`, and `ffmpeg` into a tools directory (default
   `%LOCALAPPDATA%\DeciWaves\tools`), locates `oo2core_7_win64.dll` under a supplied
-  `--ds-install`, and persists all of that — plus any `--hzd-package` / `--fw-package`
-  paths — via `deciwaves/cli/config.py`. Each tool's download/unpack is isolated (one
-  failed fetch is reported in the summary table and doesn't stop the others), but the
-  command exits nonzero overall if any tool ended up missing.
+  `--ds-install`, and persists all of that — plus any `--hzd-package` / `--fw-package` /
+  `--fw-gamescript` paths — via `deciwaves/cli/config.py`. Each tool's download/unpack is
+  isolated (one failed fetch is reported in the summary table and doesn't stop the
+  others), but the command exits nonzero overall if any tool ended up missing. Every run
+  merges its flags over what's already saved (issue #36): an omitted flag keeps its
+  previous value, so registering one game's (or `--fw-gamescript`'s) path never blanks out
+  another's.
 - **`doctor`.** `deciwaves doctor` (`deciwaves/cli/doctor.py`) runs a set of small,
   independently-testable `(ok, message)` checks — the decode tools, the Oodle DLL, each
-  game's install/package path, the optional ASR extra, and CUDA availability — and prints
-  a report. The exit code is 0 only when every *required* check passes; an unconfigured
-  game (the user simply doesn't own it) reports `[--] not configured` but its check
-  reports `ok=True` regardless, so `doctor` never requires a DS (or HZD, or FW) install to
-  report a clean bill of health. The ASR extra and CUDA checks are purely informational
-  either way.
+  game's install/package path, the optional FW gamescript, the optional ASR extra, and
+  CUDA availability — and prints a report. The exit code is 0 only when every *required*
+  check passes; an unconfigured game (the user simply doesn't own it) reports `[--] not
+  configured` but its check reports `ok=True` regardless, so `doctor` never requires a DS
+  (or HZD, or FW) install to report a clean bill of health. `fw_gamescript` follows the
+  same shape: unset is fine (`ok=True`, it's optional even when FW is owned), but
+  configured-and-now-missing fails the check (`ok=False`) the same way a moved DS/HZD/FW
+  install path does — it was explicitly pointed at that path, just earlier. The ASR extra
+  and CUDA checks are purely informational either way.
 - **`<game> run`.** Each per-game subparser accepts `run` alongside its real stage names,
   as a whole-pipeline shortcut (`deciwaves/cli/run.py`): `ds run` chains `catalog -> order
   -> render`; `hzd run` chains `catalog -> clip-index -> wem-metadata -> bind -> render`;
   `fw run` chains `extract -> asr -> subtitle-bind`, then — only once a `--gamescript`
-  (BYO; see `docs/BYO.md`) is supplied — continues `match -> full-reel -> render`. The
+  (BYO; see `docs/BYO.md`), or otherwise a configured `fw_gamescript`, resolves to a real
+  file — continues `match -> full-reel -> render`. An explicit `--gamescript` beats a
+  configured `fw_gamescript`; either way, if the resolved path doesn't exist on disk the
+  run fails loudly (nonzero exit, issue #38) instead of silently behaving like no
+  gamescript was given at all — that distinction matters because "never configured" (fine,
+  BYO is optional) and "configured but the file moved" (a real problem) must not look the
+  same. Without any gamescript at all, the stop message shows the exact command to re-run
+  with, including the real `--package` this run used, plus the `deciwaves setup
+  --fw-gamescript` alternative for persisting it once (issue #23). The
   GPU-bound stages in those chains (`hzd bind`, `fw asr`) are gated on
   `importlib.util.find_spec("whisperx")` and print an actionable install hint (`pip
   install deciwaves[asr]`, plus a matching PyTorch build) instead of crashing when the ASR

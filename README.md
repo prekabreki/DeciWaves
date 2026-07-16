@@ -50,9 +50,11 @@ Then fetch the decode tools, point DeciWaves at your game, and check the result:
 
 `setup` downloads vgmstream-cli, VGAudioCli, and ffmpeg into `%LOCALAPPDATA%\DeciWaves\tools`,
 finds the Oodle DLL next to a DS install, and writes `config.json`. Pass `--hzd-package` or
-`--fw-package` for those games instead. It exits nonzero if any tool failed to download.
-`doctor` prints a preflight report and returns success as long as every required tool is
-present; a game you don't own shows `[--] not configured` and never fails the check.
+`--fw-package` for those games instead, and (optionally) `--fw-gamescript` to persist your own
+FW gamescript transcript so `fw run` and guided mode don't need `--gamescript` passed by hand
+every time. It exits nonzero if any tool failed to download. `doctor` prints a preflight report
+and returns success as long as every required tool is present; a game you don't own shows
+`[--] not configured` and never fails the check.
 
 ## Quick start - pick your game
 
@@ -61,7 +63,9 @@ The fastest path is guided mode. Run `deciwaves` with no arguments:
     deciwaves
 
 It detects which games you have configured, asks which one to extract, confirms a workspace
-directory, and runs that game's full pipeline. This is the same pipeline the explicit commands
+directory (and, for FW, optionally asks for your gamescript path if one isn't already
+configured - see below - so guided mode can reach match/full-reel/render too, not just
+subtitle-bind), and runs that game's full pipeline. This is the same pipeline the explicit commands
 run; it only adds the menu around it. In a non-interactive shell it prints usage and exits
 instead of blocking.
 
@@ -95,8 +99,9 @@ below), so an interrupted bind picks up where it stopped.
 FW chains extract -> asr -> subtitle-bind, which gets you clips labeled with their exact
 in-game subtitle. The asr stage needs the `[asr]` extra and a GPU. subtitle-bind requires a
 `types.json` (a Decima type map for FW) in the workspace root. Speaker labels and real story
-order additionally need your own copy of the FW gamescript, passed with `--gamescript`. Both
-are bring-your-own inputs that this repo does not and will not ship - see
+order additionally need your own copy of the FW gamescript, passed with `--gamescript` (or set
+once with `deciwaves setup --fw-gamescript <path>`, so you never have to pass the flag again).
+Both are bring-your-own inputs that this repo does not and will not ship - see
 [docs/BYO.md](docs/BYO.md). Without a gamescript, `fw run` stops cleanly after subtitle-bind
 and tells you what it's waiting for.
 
@@ -157,13 +162,15 @@ install by hand.
 | render | Render MP3 reels + tracklists | `--manifest`, `--tiers` |
 
 `fw run` chains extract -> asr -> subtitle-bind, then continues match -> full-reel -> render
-once a `--gamescript` is supplied.
+once a `--gamescript` is supplied (explicitly, or via a `--fw-gamescript` configured earlier
+with `deciwaves setup`).
 
 ## Configuration
 
 `deciwaves setup` writes `config.json` to `%LOCALAPPDATA%\DeciWaves\config.json`. It records
-the tools directory and the install path for each game you configured (`ds_install`,
-`hzd_package`, `fw_package`, `oodle_dll`). Set `DECIWAVES_CONFIG_DIR` to keep that file
+the tools directory, the install path for each game you configured (`ds_install`,
+`hzd_package`, `fw_package`, `oodle_dll`), and your optional FW gamescript path
+(`fw_gamescript`, set with `--fw-gamescript`). Set `DECIWAVES_CONFIG_DIR` to keep that file
 somewhere else.
 
 Each run merges its flags over what's already saved -- an omitted flag keeps its previous
