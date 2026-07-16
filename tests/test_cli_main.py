@@ -227,3 +227,57 @@ def test_relative_path_that_never_existed_is_left_untouched(monkeypatch, tmp_pat
                    "--data-dir", "no-such-relative-dir", "--oodle", "Y"])
     assert rc == 0
     assert called["argv"] == ["--data-dir", "no-such-relative-dir", "--oodle", "Y"]
+
+
+def test_no_workspace_flag_leaves_existing_relative_path_unrewritten_and_silent(monkeypatch, tmp_path, capsys):
+    """Issue #44 design fix, wired through main.py: with no --workspace given
+    (the argparse default `.`, same directory as cwd), nothing is about to
+    move across a chdir -- so a relative token that happens to exist must be
+    left exactly as typed, and no resolution notice printed, unlike the old
+    pure existence-based rule (which rewrote + announced regardless of
+    whether a workspace was even given)."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "real.md").write_text("x", encoding="utf-8")
+
+    called = {}
+
+    def _stage(argv):
+        called["argv"] = argv
+        return 0
+
+    monkeypatch.setattr(cli, "_import_stage", lambda mod: _stage)
+    rc = cli.main(["fw", "extract", "--gamescript", "real.md"])
+
+    assert rc == 0
+    assert called["argv"] == ["--gamescript", "real.md"]
+    assert capsys.readouterr().out == ""
+
+
+def test_workspace_ambiguous_relative_path_refuses_with_exit_2(monkeypatch, tmp_path, capsys):
+    """The confirmed stale-tree failure shape, wired through main.py: a
+    relative --gamescript exists under BOTH the invocation cwd and the given
+    --workspace, and they're different files. Must refuse loudly (exit 2,
+    naming the token and both candidate paths) instead of silently pinning to
+    one of them, and must not dispatch any stage."""
+    invoke_dir = tmp_path / "invoke_dir"
+    invoke_dir.mkdir()
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    cwd_gamescript = invoke_dir / "gamescript.md"
+    cwd_gamescript.write_text("cwd version\n", encoding="utf-8")
+    ws_gamescript = workspace / "gamescript.md"
+    ws_gamescript.write_text("workspace version\n", encoding="utf-8")
+    monkeypatch.chdir(invoke_dir)
+
+    calls = []
+    monkeypatch.setattr(cli, "_import_stage", lambda mod: (lambda argv: calls.append(argv) or 0))
+
+    rc = cli.main(["--workspace", str(workspace), "fw", "extract",
+                   "--gamescript", "gamescript.md"])
+
+    assert rc == 2
+    assert calls == []
+    err = capsys.readouterr().err
+    assert "gamescript.md" in err
+    assert str(cwd_gamescript.resolve()) in err
+    assert str(ws_gamescript.resolve()) in err

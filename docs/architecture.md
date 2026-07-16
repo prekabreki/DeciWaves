@@ -175,13 +175,24 @@ guided interactive flow (see below).
   flag redirect an entire run without touching every stage's individual path arguments.
   Because the `chdir` happens before a stage (or `run`) ever sees its own argv, any relative
   path in a stage's own flags (e.g. `--gamescript`) is absolutized first, against the
-  directory the user actually ran `deciwaves` from — via `config.absolutize_existing_paths()`,
-  which rewrites only argv tokens that already exist relative to that pre-chdir cwd (an
-  output flag like `--out`/`--manifest` doesn't exist yet, so it's correctly left
-  workspace-relative; a typo'd input path is left alone too, and still fails its stage's own
-  "not found" check the same way it always did) — otherwise a relative `--gamescript` would
-  be silently looked up inside the workspace instead of where the user meant (issue #32).
-  Bare `deciwaves --workspace X` (no subcommand) passes `X` through to guided mode as its
+  directory the user actually ran `deciwaves` from — via `config.absolutize_existing_paths()`
+  — otherwise a relative `--gamescript` would be silently looked up inside the workspace
+  instead of where the user meant (issue #32). This rewrite is **workspace-aware**, not purely
+  existence-based (issue #44): given no `--workspace` at all, or one that resolves to the same
+  directory as cwd, nothing is rewritten — nothing is about to move, so nothing needs pinning.
+  With a workspace that genuinely differs from cwd, each argv token that exists relative to cwd
+  is *also* checked against the workspace, because a stale leftover (e.g. an `out/...` tree a
+  previous in-place run left sitting under cwd) can just as easily already exist there too:
+  silently preferring cwd in that case would pin the run to the wrong tree with no error — the
+  confirmed failure shape this redesign closes. So: exists under cwd only → absolutize against
+  cwd (unchanged BYO-input convenience); exists under neither → left alone, still fails the
+  stage's own "not found" check the same way it always did (a typo, or a stage's own
+  not-yet-written output flag like `--out`/`--manifest`, correctly stays workspace-relative);
+  exists under both and they're the same file (e.g. a workspace/subdir arrangement that happens
+  to coincide) → unambiguous, absolutize; exists under both and they're *different* files →
+  refuse loudly, naming the token and both candidate absolute paths, exit code 2 (this CLI's
+  usual usage-error convention) and no stage runs, rather than silently guessing. Bare
+  `deciwaves --workspace X` (no subcommand) passes `X` through to guided mode as its
   workspace-prompt default, for the same reason — it used to be dropped entirely, and the
   prompt always defaulted to the process cwd regardless of `--workspace`.
 - **Config env application.** `deciwaves/cli/config.py` persists a small JSON config
