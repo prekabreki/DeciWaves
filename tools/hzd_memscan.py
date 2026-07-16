@@ -69,8 +69,8 @@ EXIT_NOT_RESIDENT = 2
 def load_key_set(package_dir: str, archive: str) -> dict[int, tuple[int, int]]:
     """Map stream key (u64) -> (offset, length) for every locator entry in
     `archive`. The `hash` of a .core.stream entry IS the stream key."""
-    from deciwaves.engine.pack.fw_locators import FwLocators
-    loc = FwLocators(os.path.join(package_dir, "PackFileLocators.bin"))
+    from deciwaves.engine.pack.hzd_locators import HzdLocators
+    loc = HzdLocators(os.path.join(package_dir, "PackFileLocators.bin"))
     return {e.hash: (e.offset, e.length) for e in loc.entries(archive)}
 
 

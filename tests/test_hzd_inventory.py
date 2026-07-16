@@ -1,12 +1,12 @@
 """HZD inventory harvest -- integration test against the real HZDR install (skips if absent),
-plus hermetic unit tests against a fake FwPackage-like stand-in (issue #27: harvest_sentence_cores
+plus hermetic unit tests against a fake HzdPackage-like stand-in (issue #27: harvest_sentence_cores
 must only use the public `fw.locators` / `fw.read_by_hash` surface, not reach into
 `fw._locators._by_hash`)."""
 import os
 import pytest
 
 from deciwaves.engine.pack.bin_archive import file_hash
-from deciwaves.engine.pack.fw_locators import FwLocators
+from deciwaves.engine.pack.hzd_locators import HzdLocators
 
 from conftest import HZD_PACKAGE
 
@@ -15,8 +15,8 @@ from conftest import HZD_PACKAGE
 def fw():
     if not os.path.isdir(HZD_PACKAGE):
         pytest.skip("HZDR install not present")
-    from deciwaves.engine.pack.fw_package import FwPackage
-    return FwPackage(str(HZD_PACKAGE))
+    from deciwaves.engine.pack.hzd_package import HzdPackage
+    return HzdPackage(str(HZD_PACKAGE))
 
 
 def test_harvest_finds_known_sentence_core(fw):
@@ -29,7 +29,7 @@ def test_harvest_finds_known_sentence_core(fw):
 
 
 # ---------------------------------------------------------------------------
-# Hermetic unit tests: a minimal fake standing in for FwPackage, exposing only
+# Hermetic unit tests: a minimal fake standing in for HzdPackage, exposing only
 # the public surface harvest_sentence_cores actually needs (`.locators` /
 # `.read_by_hash`). No real install, DSAR archive, or lz4 needed.
 # ---------------------------------------------------------------------------
@@ -46,11 +46,11 @@ def _build_locators_bytes(packfiles):
     return out
 
 
-class _FakeFwPackage:
+class _FakeHzdPackage:
     """Stand-in exposing only what harvest_sentence_cores uses: `.locators` (a real
-    FwLocators, built from synthetic bytes) and `.read_by_hash(hash) -> bytes`."""
+    HzdLocators, built from synthetic bytes) and `.read_by_hash(hash) -> bytes`."""
 
-    def __init__(self, locators: FwLocators, blobs: dict[int, bytes]):
+    def __init__(self, locators: HzdLocators, blobs: dict[int, bytes]):
         self.locators = locators
         self._blobs = blobs
 
@@ -71,7 +71,7 @@ def _make_fake_fw(entries):
         packfiles.setdefault(archive, []).append((h, 0, recorded_length))
         blobs[h] = payload
     data = _build_locators_bytes(list(packfiles.items()))
-    return _FakeFwPackage(FwLocators.from_bytes(data), blobs)
+    return _FakeHzdPackage(HzdLocators.from_bytes(data), blobs)
 
 
 def test_harvest_finds_embedded_sentence_path():

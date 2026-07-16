@@ -3,7 +3,7 @@ archive read raises ValueError (bad offset/length -- see test_dsar_archive.py)
 must be logged and skipped, not abort the whole index."""
 import csv
 
-from deciwaves.engine.pack.fw_locators import Entry
+from deciwaves.engine.pack.hzd_locators import Entry
 from deciwaves.games.hzd import clip_index as clip_index_mod
 from deciwaves.games.hzd.clip_index import ARCHIVE, COLUMNS, build_clip_index
 
@@ -102,7 +102,7 @@ def test_build_clip_index_no_failures_no_skips(tmp_path):
 
 # ---------------------------------------------------------------------------
 # main(): a bad --package (issue #49, mirrors #34's hzd_catalog check) must fail
-# actionably, not with a raw FileNotFoundError traceback from fw_locators.
+# actionably, not with a raw FileNotFoundError traceback from hzd_locators.
 # ---------------------------------------------------------------------------
 
 def test_clip_index_main_missing_package_fails_actionably(tmp_path, monkeypatch, capsys):

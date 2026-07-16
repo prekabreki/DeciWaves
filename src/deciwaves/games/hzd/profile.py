@@ -62,14 +62,14 @@ def is_valid_hzd_package_dir(package_dir: str) -> bool:
 
 def hzd_package_error(package_dir: str) -> str | None:
     """Return an actionable error message if *package_dir* doesn't contain
-    ``PackFileLocators.bin`` (the file ``FwPackage``/``FwLocators`` need), else
+    ``PackFileLocators.bin`` (the file ``HzdPackage``/``HzdLocators`` need), else
     ``None``. Kept separate from ``build_profile`` so the missing-file message
     is unit-testable without a real install (mirrors
     ``games.fw.subtitle_bind.types_json_error``).
 
     Without this check, a wrong --package (e.g. the game install root instead
     of ...\\LocalCacheDX12\\package) surfaced only as a raw FileNotFoundError
-    traceback from engine.pack.fw_locators at catalog time (issue #34).
+    traceback from engine.pack.hzd_locators at catalog time (issue #34).
     """
     if is_valid_hzd_package_dir(package_dir):
         return None
@@ -115,11 +115,11 @@ def build_profile(package_dir: str | None) -> GameProfile:
     ----------
     package_dir:
         Path to the HZDR ``LocalCacheDX12/package`` directory (passed to
-        FwPackage).  May be None when pack_reader is not needed.
+        HzdPackage).  May be None when pack_reader is not needed.
     """
     if package_dir is not None:
-        from deciwaves.engine.pack.fw_package import FwPackage
-        pack_reader = FwPackage(package_dir)
+        from deciwaves.engine.pack.hzd_package import HzdPackage
+        pack_reader = HzdPackage(package_dir)
     else:
         pack_reader = None
 

@@ -70,7 +70,7 @@ back to text-only matching within the full catalog.
 ### Pipeline
 
 ```
-all package.01 locator entries (FwLocators.entries(archive=None), file order)
+all package.01 locator entries (HzdLocators.entries(archive=None), file order)
   → DSAR read(offset,length) → ATRAC9 .wem → VGAudioCli → WAV        [extraction, already solved]
   → VAD/energy triage (see below)
   → WhisperX large-v3 transcript

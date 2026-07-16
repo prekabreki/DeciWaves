@@ -33,13 +33,13 @@ class Entry:
     length: int
 
 
-class FwLocators:
+class HzdLocators:
     def __init__(self, path: str):
         with open(path, "rb") as f:
             self._init_from(f.read())
 
     @classmethod
-    def from_bytes(cls, data: bytes) -> "FwLocators":
+    def from_bytes(cls, data: bytes) -> "HzdLocators":
         self = cls.__new__(cls)
         self._init_from(data)
         return self

@@ -1,7 +1,7 @@
 import struct
 
 import pytest
-from deciwaves.engine.pack.fw_locators import FwLocators, Locator, Entry
+from deciwaves.engine.pack.hzd_locators import HzdLocators, Locator, Entry
 
 from conftest import HZD_PACKAGE
 
@@ -22,7 +22,7 @@ def test_parse_and_lookup():
         ("package.00.00.core", [(0xAABB, 0, 100), (0xCCDD, 128, 256)]),
         ("package.00.01.core", [(0x1234, 64, 512)]),
     ])
-    loc = FwLocators.from_bytes(data)
+    loc = HzdLocators.from_bytes(data)
     assert loc.archives == ["package.00.00.core", "package.00.01.core"]
     assert len(loc) == 3
     assert loc.lookup(0xCCDD) == Locator("package.00.00.core", 128, 256)
@@ -31,7 +31,7 @@ def test_parse_and_lookup():
 
 
 def test_lookup_miss_returns_none():
-    loc = FwLocators.from_bytes(_build_locators([("a.core", [(1, 0, 1)])]))
+    loc = HzdLocators.from_bytes(_build_locators([("a.core", [(1, 0, 1)])]))
     assert loc.lookup(0xDEAD) is None
     assert 0xDEAD not in loc
 
@@ -44,7 +44,7 @@ def test_ordered_entries_preserve_file_order_and_duplicates():
         ("a.core", [(0xAA, 0, 10), (0xBB, 16, 20)]),
         ("b.core.stream", [(0xBB, 0, 30), (0xCC, 64, 40)]),
     ])
-    loc = FwLocators.from_bytes(data)
+    loc = HzdLocators.from_bytes(data)
     assert loc.lookup(0xBB) == Locator("a.core", 16, 20)  # dict still dedupes
     assert loc.entries() == [
         Entry("a.core", 0xAA, 0, 10),
@@ -66,7 +66,7 @@ def test_items_dedupes_first_wins():
         ("a.core", [(0xAA, 0, 10), (0xBB, 16, 20)]),
         ("b.core.stream", [(0xBB, 0, 30), (0xCC, 64, 40)]),
     ])
-    loc = FwLocators.from_bytes(data)
+    loc = HzdLocators.from_bytes(data)
     items = loc.items()
     assert dict(items) == {
         0xAA: Locator("a.core", 0, 10),
@@ -84,7 +84,7 @@ def test_trailing_bytes_warn_loudly_but_parse_survives(capsys):
     startup. They must not be silently ignored either: warn loudly on stderr
     and keep the parsed records intact."""
     data = _build_locators([("a.core", [(0xAA, 0, 10)])]) + b"\x01\x02\x03"
-    loc = FwLocators.from_bytes(data)
+    loc = HzdLocators.from_bytes(data)
     assert loc.trailing_bytes == 3
     assert "3 unconsumed trailing bytes" in capsys.readouterr().err
     assert loc.lookup(0xAA) == Locator("a.core", 0, 10)  # records still intact
@@ -95,12 +95,12 @@ def test_truncated_file_still_fails_hard():
     truncation: a file cut off mid-record dies in struct.unpack_from."""
     data = _build_locators([("a.core", [(0xAA, 0, 10), (0xBB, 16, 20)])])
     with pytest.raises(struct.error):
-        FwLocators.from_bytes(data[:-4])
+        HzdLocators.from_bytes(data[:-4])
 
 
 def test_no_trailing_bytes_no_warning(capsys):
     data = _build_locators([("a.core", [(0xAA, 0, 10), (0xBB, 16, 20)])])
-    loc = FwLocators.from_bytes(data)
+    loc = HzdLocators.from_bytes(data)
     assert loc.trailing_bytes == 0
     assert capsys.readouterr().err == ""
 
@@ -111,14 +111,14 @@ def test_duplicate_count_reflects_collapsed_duplicates():
         ("a.core", [(0xAA, 0, 10), (0xBB, 16, 20)]),
         ("b.core.stream", [(0xBB, 0, 30), (0xCC, 64, 40)]),
     ])
-    loc = FwLocators.from_bytes(data)
+    loc = HzdLocators.from_bytes(data)
     assert loc.duplicate_count == 1
     assert len(loc.entries()) - len(loc) == loc.duplicate_count
 
 
 def test_duplicate_count_zero_when_no_duplicates():
     data = _build_locators([("a.core", [(0xAA, 0, 10), (0xBB, 16, 20)])])
-    loc = FwLocators.from_bytes(data)
+    loc = HzdLocators.from_bytes(data)
     assert loc.duplicate_count == 0
 
 
@@ -130,7 +130,7 @@ def require_hzd_install():
 
 
 def test_real_locators(require_hzd_install):
-    loc = FwLocators(str(require_hzd_install / "PackFileLocators.bin"))
+    loc = HzdLocators(str(require_hzd_install / "PackFileLocators.bin"))
     assert loc.archives[0] == "package.00.00.core"
     assert len(loc.archives) == 78           # NumPackfiles observed 2026-06-26
     assert all(a.startswith("package.") for a in loc.archives)

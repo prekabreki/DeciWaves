@@ -7,7 +7,7 @@ import sys
 import tempfile
 import wave
 from deciwaves.engine import asr
-from deciwaves.engine.pack.fw_package import FwPackage
+from deciwaves.engine.pack.hzd_package import HzdPackage
 from deciwaves.games.hzd import match
 from deciwaves.games.hzd.atrac9 import Atrac9Error, decode_wem_to_wav
 from deciwaves.games.hzd.binding import build_buckets, relevant_buckets, structural_binds
@@ -178,7 +178,7 @@ def main(argv=None):
             if err:
                 print(err)
                 return 1
-            dsar = FwPackage(a.package).dsar_for(ARCHIVE)
+            dsar = HzdPackage(a.package).dsar_for(ARCHIVE)
             model = asr.load_model()
             os.makedirs(os.path.dirname(os.path.abspath(a.transcripts_out)), exist_ok=True)
             os.makedirs(os.path.dirname(os.path.abspath(a.errors)), exist_ok=True)

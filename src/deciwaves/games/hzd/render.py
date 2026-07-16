@@ -30,7 +30,7 @@ from deciwaves.engine.render import (
     accumulate_episode_seconds, assemble_reels, budget_seconds, format_ts, ReelColumns,
 )
 from deciwaves.engine.parallel import KeyedLocks, default_jobs
-from deciwaves.engine.pack.fw_package import FwPackage
+from deciwaves.engine.pack.hzd_package import HzdPackage
 from deciwaves.games.hzd.atrac9 import decode_wem_to_wav, Atrac9Error
 from deciwaves.games.hzd.catalog import load_catalog_dict
 from deciwaves.games.hzd.profile import VOICE_ARCHIVE as ARCHIVE
@@ -230,7 +230,7 @@ def main(argv=None):
     os.makedirs(a.out_dir, exist_ok=True)
     os.makedirs(a.cache, exist_ok=True)
 
-    pkg = FwPackage(a.package)
+    pkg = HzdPackage(a.package)
     dsar = pkg.dsar_for(ARCHIVE)
 
     decoded, ep_secs, skipped = decode_spine_clips(spine, dsar, a.cache, a.errors, jobs=a.jobs)

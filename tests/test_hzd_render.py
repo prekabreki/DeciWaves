@@ -210,7 +210,7 @@ def test_decode_spine_clips_no_failures_no_skips(tmp_path, monkeypatch):
 
 # ---------------------------------------------------------------------------
 # main(): a bad --package (issue #49, mirrors #34's hzd_catalog check) must fail
-# actionably, not with a raw FileNotFoundError traceback from fw_locators. The
+# actionably, not with a raw FileNotFoundError traceback from hzd_locators. The
 # check must run before any of the (possibly-missing) --manifest/--catalog/
 # --clip-index files are opened, so this needs none of them to exist.
 # ---------------------------------------------------------------------------
