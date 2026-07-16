@@ -238,12 +238,14 @@ decode and no transcription for the vast majority of lines:
   ASR needed. In practice this resolves the large majority of story lines for free.
 - Only buckets with more than one candidate ("collision buckets" — usually where several
   near-identical clips or lines share the same byte/sample counts) go to speech
-  recognition. `games/hzd/asr.py` wraps WhisperX; `games/hzd/match.py` scores each
-  transcript against each candidate subtitle with fuzzy string matching (guarding against
-  a known failure mode where a short candidate's tokens are trivially a subset of a long
-  transcript, which would otherwise score as a false 100% match) and assigns tiers by
-  confidence; a final elimination pass pairs off any bucket left with exactly one
-  unmatched line and one unmatched clip. `games/hzd/asr_bind.py` orchestrates the whole
+  recognition. `engine/asr.py` wraps WhisperX (game-agnostic — also used by FW's
+  transcript pass and DS's cutscene trim); `games/hzd/match.py` scores each transcript
+  against each candidate subtitle with fuzzy string matching, normalizing both sides
+  with the shared `engine/text_normalize.py` (guarding against a known failure mode
+  where a short candidate's tokens are trivially a subset of a long transcript, which
+  would otherwise score as a false 100% match) and assigns tiers by confidence; a final
+  elimination pass pairs off any bucket left with exactly one unmatched line and one
+  unmatched clip. `games/hzd/asr_bind.py` orchestrates the whole
   worklist and writes the bind manifest. Because ASR only ever runs on the ambiguous
   minority of clips, the GPU-bound stage stays small relative to the size of the game.
 
