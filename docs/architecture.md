@@ -105,6 +105,19 @@ The DS and HZD pipelines share this shape (FW's is described in its own section 
    `decode_spine_clips`, FW's bare `wave.open` duration read) is the only game-specific
    code left in that half of the pipeline.
 
+   The per-clip decode — the wall-clock cost of a render — runs in a bounded worker
+   pool (`engine/parallel.py`), sized by each decode stage's `--jobs` flag
+   (`min(8, cpu_count)` by default; `--jobs 1` restores the old fully-serial decode).
+   `accumulate_episode_seconds` parallelizes only the `dur_of` calls (the decoder
+   subprocess and its archive read); the gap accounting and every error-log write stay
+   on the calling thread in segment order, so the output is byte-identical to a serial
+   run. The FW `extract` stage and HZD `clip-index` stage use the same pool. The pack
+   readers this touches are safe under it: DS `BinArchive` and HZD/FW `DsarArchive` both
+   reopen the file per read (no shared seek), and cache writes are atomic
+   (`engine/atomic_io.py`, per-call-unique tmp names) with a per-output-path lock
+   (`engine.parallel.KeyedLocks`) so a cache entry shared by several lines is produced
+   exactly once.
+
 HZD reuses the general shape of catalog/render — `games/hzd/render.py`'s own docstring
 notes it reuses `engine.render`'s game-agnostic assembly kit
 (`accumulate_episode_seconds`, `assemble_reels`) — but it does **not** reuse

@@ -118,13 +118,18 @@ For the full design - package layout, the per-game solutions, the pipeline seam 
 `deciwaves <game> <stage> [flags]`, and `deciwaves <game> <stage> --help` prints that stage's
 own flags. `[GPU]` marks stages that need the `[asr]` extra and a CUDA GPU.
 
+The decode-heavy stages (`ds render`, `hzd clip-index`, `hzd render`, `fw extract`) decode
+clips concurrently and take a `--jobs N` flag (default `min(8, cpu_count)`); this is the
+single biggest speed-up on a multi-core machine. `--jobs 1` forces the old one-at-a-time
+decode. `deciwaves <game> run` uses the default automatically.
+
 ### Death Stranding (`deciwaves ds ...`)
 
 | Stage | What it does | Key flags |
 |-------|--------------|-----------|
 | catalog | Build the line catalog from your install | `--data-dir`, `--oodle` |
 | order | Build the story-ordered playlist | `--transcript` (BYO, see [docs/BYO.md](docs/BYO.md)) |
-| render | Render MP3 reels + tracklists | `--main-story`, `--speech-trim`, `--bitrate` |
+| render | Render MP3 reels + tracklists | `--main-story`, `--speech-trim`, `--bitrate`, `--jobs` |
 | cutscenes | Resolve cutscene voice tracks | standalone; `run` uses a bundled track list |
 | trim | [GPU] Rebuild the speech-trim manifest | standalone |
 
@@ -137,16 +142,16 @@ install by hand.
 | Stage | What it does | Key flags |
 |-------|--------------|-----------|
 | catalog | Build the line catalog | `--package` |
-| clip-index | Fingerprint audio clips | `--package` |
+| clip-index | Fingerprint audio clips | `--package`, `--jobs` |
 | wem-metadata | Extract wem metadata + coverage | `--package` |
 | bind | [GPU] Bind clips to lines | `--package`, `--transcripts`, `--transcripts-out` |
-| render | Render MP3 reels + tracklists | `--out-dir` |
+| render | Render MP3 reels + tracklists | `--out-dir`, `--jobs` |
 
 ### Horizon Forbidden West (`deciwaves fw ...`)
 
 | Stage | What it does | Key flags |
 |-------|--------------|-----------|
-| extract | Extract dialogue clips to WAV | `--package` |
+| extract | Extract dialogue clips to WAV | `--package`, `--jobs` |
 | asr | [GPU] Transcribe clips | `--roster`, `--model`, `--limit` |
 | subtitle-bind | Label clips with exact subtitles | `--package-dir`, `--types-json` (BYO) |
 | match | Speaker + story order (needs BYO gamescript) | `--gamescript` (BYO) |
