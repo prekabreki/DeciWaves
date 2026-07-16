@@ -1,10 +1,11 @@
 """Portable creative line-selection rules (Phase D).
 
-Extracted verbatim from deciwaves.games.ds.story_order.build_playlist so that future
-game profiles (e.g. HZD) can reuse the same rules without duplicating logic.
-
-These are the project's portable creative selection rules — see docs/architecture.md for how
-selection fits the shared catalog -> selection -> story_order -> render pipeline.
+Extracted verbatim from deciwaves.games.ds.story_order.build_playlist as DS's own
+selection/dedup rules, factored out into a separately-testable module. In practice
+only DS uses it today: HZD does NOT reuse it -- its own structural (A,B)-bucket
+join is a genuinely different binding mechanism, not a reuse of these rules (see
+docs/architecture.md for how selection fits the shared catalog -> selection ->
+story_order -> render pipeline, and why HZD's binding differs).
 
 Rules applied by filter_and_dedup:
   1. Require non-empty subtitle_en (drop empty / whitespace-only / placeholder rows).
