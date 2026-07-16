@@ -7,7 +7,9 @@ and sliced. Format confirmed against the retail install; see .memories/hzd-pack-
 """
 from __future__ import annotations
 import struct
+import threading
 from bisect import bisect_right
+from collections import OrderedDict
 from dataclasses import dataclass
 
 import lz4.block
@@ -25,8 +27,23 @@ class _Chunk:
 class DsarArchive:
     MAGIC = b"DSAR"
 
+    # Decompressed-chunk LRU cap (issue #50 / M17). Keys are chunk indices, values
+    # are the whole decompressed chunk bytes. 16 comfortably covers the working set
+    # of the #41 decode pool: default_jobs() <= 8 concurrent readers, each touching
+    # its current chunk plus (for a boundary-spanning clip) the next one, with a few
+    # slots of headroom for the pool's in-order dispatch reordering (up to jobs*2 in
+    # flight). Bounded memory: <= 16 chunks resident (~4 MiB at 256 KiB chunks).
+    _CACHE_MAX = 16
+
     def __init__(self, path: str):
         self.path = path
+        # Per-archive decompressed-chunk LRU, shared across the pool's threads.
+        # Stores BYTES only (never file handles), keyed by chunk index, so a cached
+        # entry is immutable and safe to hand to any thread. The lock guards only
+        # the OrderedDict ops -- never the file read / LZ4 decompress -- so a
+        # cold-cache race at most does redundant, identical-bytes work.
+        self._chunk_cache: "OrderedDict[int, bytes]" = OrderedDict()
+        self._cache_lock = threading.Lock()
         with open(path, "rb") as f:
             header = f.read(32)
             magic, ver_major, ver_minor, chunk_count, _first_chunk_off, total = \
@@ -46,6 +63,37 @@ class DsarArchive:
         # greatest chunk offset <= offset
         return bisect_right(self._offsets, offset) - 1
 
+    def _cached_chunk(self, i: int) -> bytes | None:
+        """Return chunk *i*'s decompressed bytes if resident, else None (LRU touch)."""
+        with self._cache_lock:
+            raw = self._chunk_cache.get(i)
+            if raw is not None:
+                self._chunk_cache.move_to_end(i)
+        return raw
+
+    def _load_chunk(self, f, i: int) -> bytes:
+        """Read + decompress chunk *i* from open handle *f*, then cache it.
+
+        The lock is dropped across the file read and LZ4 decompress: two threads
+        racing on a cold chunk both do the work and both store identical bytes
+        (last write wins) -- redundant but never wrong.
+        """
+        c = self._chunks[i]
+        f.seek(c.compressed_offset)
+        comp = f.read(c.compressed_size)
+        if c.compressed_size == c.size:
+            raw = comp                     # stored uncompressed
+        elif c.ctype == 3:
+            raw = lz4.block.decompress(comp, uncompressed_size=c.size)
+        else:
+            raise ValueError(f"unsupported DSAR chunk type {c.ctype} in {self.path}")
+        with self._cache_lock:
+            self._chunk_cache[i] = raw
+            self._chunk_cache.move_to_end(i)
+            while len(self._chunk_cache) > self._CACHE_MAX:
+                self._chunk_cache.popitem(last=False)
+        return raw
+
     def read(self, offset: int, length: int) -> bytes:
         first = self._first_chunk(offset)
         if first < 0:
@@ -54,21 +102,21 @@ class DsarArchive:
             )
         buf = bytearray()
         i = first
-        with open(self.path, "rb") as f:
+        f = None
+        try:
             while len(buf) < (offset - self._chunks[first].offset) + length:
-                c = self._chunks[i]
-                f.seek(c.compressed_offset)
-                comp = f.read(c.compressed_size)
-                if c.compressed_size == c.size:
-                    raw = comp                     # stored uncompressed
-                elif c.ctype == 3:
-                    raw = lz4.block.decompress(comp, uncompressed_size=c.size)
-                else:
-                    raise ValueError(f"unsupported DSAR chunk type {c.ctype} in {self.path}")
+                raw = self._cached_chunk(i)
+                if raw is None:
+                    if f is None:              # open lazily: skipped when all chunks hit
+                        f = open(self.path, "rb")
+                    raw = self._load_chunk(f, i)
                 buf += raw
                 i += 1
                 if i >= len(self._chunks):
                     break
+        finally:
+            if f is not None:
+                f.close()
         start = offset - self._chunks[first].offset
         result = bytes(buf[start:start + length])
         if len(result) != length:
