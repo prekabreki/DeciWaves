@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import argparse
 import enum
-import os
 import shutil
 from pathlib import Path
 from typing import NamedTuple
@@ -53,6 +52,15 @@ class CheckResult(NamedTuple):
     ``ok, msg = check_x(...)`` call site/test, unchanged. ``status`` is the
     structured signal callers that need more than pass/fail (guided.py)
     should read instead of the message text.
+
+    Positional indexing (``result[0]``) is kept consistent with iteration/
+    unpacking via the ``__getitem__`` override below: without it, indexing
+    would silently fall back to ``NamedTuple``'s inherited ``tuple.__getitem__``
+    -- which reads the raw underlying fields (``status``, ``message``), NOT
+    ``(ok, message)`` -- so ``result[0]`` would hand back the ``Availability``
+    enum instead of the boolean ``ok`` that iteration/unpacking gives. That
+    mismatch (only ``__iter__`` had been overridden, not ``__getitem__``) is
+    exactly the footgun this closes.
     """
     status: Availability
     message: str
@@ -64,6 +72,9 @@ class CheckResult(NamedTuple):
     def __iter__(self):
         yield self.ok
         yield self.message
+
+    def __getitem__(self, index):
+        return (self.ok, self.message)[index]
 
 
 # --- tool resolution ---------------------------------------------------

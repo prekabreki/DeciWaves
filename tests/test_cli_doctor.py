@@ -159,6 +159,33 @@ def test_check_ds_install_valid_status_is_ok(tmp_path):
     assert doctor.check_ds_install(str(tmp_path)).status is doctor.Availability.OK
 
 
+# --- CheckResult: positional indexing must agree with iteration (issue #51 item
+# 10) -- NamedTuple's inherited tuple.__getitem__ would otherwise hand back the
+# raw (status, message) fields instead of (ok, message), so result[0] would
+# silently be the Availability enum rather than the bool iteration/unpacking give.
+
+def test_check_result_indexing_matches_iteration_for_ok_case(tmp_path):
+    (tmp_path / "data").mkdir()
+    result = doctor.check_ds_install(str(tmp_path))
+    assert result[0] is result.ok is True
+    assert result[1] == result.message
+    assert list(result) == [result[0], result[1]]
+
+
+def test_check_result_indexing_matches_iteration_for_broken_case(tmp_path):
+    result = doctor.check_ds_install(str(tmp_path))  # no data/ dir -> BROKEN
+    assert result.status is doctor.Availability.BROKEN
+    assert result[0] is result.ok is False  # NOT the Availability enum
+    assert result[1] == result.message
+
+
+def test_check_result_indexing_matches_iteration_for_not_configured_case():
+    result = doctor.check_ds_install("")  # NOT_CONFIGURED -- ok is still True
+    assert result.status is doctor.Availability.NOT_CONFIGURED
+    assert result[0] is result.ok is True
+    assert result[1] == result.message
+
+
 def test_check_hzd_package_not_configured():
     ok, msg = doctor.check_hzd_package("")
     assert ok
