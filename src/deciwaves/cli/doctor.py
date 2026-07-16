@@ -89,6 +89,24 @@ def check_fw_package(fw_package: str) -> tuple[bool, str]:
                     f"Fix: run `deciwaves setup --fw-package <...\\LocalCacheWinGame\\package>`.")
 
 
+def check_fw_gamescript(fw_gamescript: str) -> tuple[bool, str]:
+    """Unlike check_fw_package, "not configured" here is a normal, fully-supported
+    state -- the FW gamescript is BYO and optional even when FW itself is owned (it
+    only gates match/full-reel/render's speaker + story-order matching; without it
+    `fw run` still produces subtitle-labeled reels). But once it HAS been configured
+    (via `deciwaves setup --fw-gamescript`) and later goes missing, that's the same
+    "configured but broken" failure as the other game checks -- it was explicitly
+    pointed at a path, just earlier."""
+    if not fw_gamescript:
+        return True, ("[--] FW gamescript: not configured (optional, BYO -- only needed for "
+                       "speaker + story-order matching; see docs/BYO.md)")
+    if Path(fw_gamescript).is_file():
+        return True, f"[ok] FW gamescript: {fw_gamescript}"
+    return False, (f"[--] FW gamescript: {fw_gamescript!r} not found. "
+                    f"Fix: run `deciwaves setup --fw-gamescript <path>` with the correct path, "
+                    f"or pass --gamescript explicitly to `deciwaves fw run`.")
+
+
 # --- optional GPU extras: informational, never fail the exit code --------
 
 def check_asr_extra() -> tuple[bool, str]:
@@ -134,6 +152,7 @@ def run_doctor(argv=None) -> int:
         check_ds_install(cfg.get("ds_install", "")),
         check_hzd_package(cfg.get("hzd_package", "")),
         check_fw_package(cfg.get("fw_package", "")),
+        check_fw_gamescript(cfg.get("fw_gamescript", "")),
         check_asr_extra(),
         check_cuda(),
         check_config_file(),
