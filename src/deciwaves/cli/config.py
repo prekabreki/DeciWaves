@@ -73,6 +73,21 @@ def load() -> dict:
         return {}
     return cfg
 
+def enter_workspace(workspace) -> Path:
+    """Resolve *workspace* to an absolute path, create it, and chdir into it.
+
+    Stage modules default their own outputs to CWD-relative `out/` paths, so
+    this one call is what lets a single `--workspace` flag (or guided mode's
+    workspace prompt) redirect an entire run without touching every stage's
+    individual path arguments. Previously duplicated verbatim in both
+    cli.main's stage-dispatch path and cli.guided's end-of-flow dispatch
+    (issue #32) -- now one shared helper.
+    """
+    ws = Path(workspace).resolve()
+    ws.mkdir(parents=True, exist_ok=True)
+    os.chdir(ws)
+    return ws
+
 def save(cfg: dict) -> None:
     cfg_path = path()
     cfg_path.parent.mkdir(parents=True, exist_ok=True)

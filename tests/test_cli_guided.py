@@ -244,11 +244,61 @@ def test_bare_invocation_dispatches_to_run_guided(monkeypatch):
 
     called = {}
 
-    def _fake_run_guided(cfg):
+    def _fake_run_guided(cfg, workspace=None):
         called["cfg"] = cfg
+        called["workspace"] = workspace
         return 0
 
     monkeypatch.setattr("deciwaves.cli.guided.run_guided", _fake_run_guided)
     rc = cli.main([])
     assert rc == 0
     assert "cfg" in called
+
+
+def test_bare_workspace_flag_is_not_silently_ignored(monkeypatch, tmp_path):
+    """`deciwaves --workspace X` (no subcommand) must not silently drop the
+    --workspace flag on the floor -- it must reach run_guided so guided mode's
+    own workspace prompt can default to it, instead of always defaulting to
+    the process cwd regardless of what --workspace said (issue #32)."""
+    from deciwaves.cli import main as cli
+
+    called = {}
+
+    def _fake_run_guided(cfg, workspace=None):
+        called["workspace"] = workspace
+        return 0
+
+    monkeypatch.setattr("deciwaves.cli.guided.run_guided", _fake_run_guided)
+    rc = cli.main(["--workspace", str(tmp_path)])
+    assert rc == 0
+    assert called["workspace"] == str(tmp_path)
+
+
+def test_selects_game_prompt_defaults_to_passed_in_workspace(monkeypatch, tmp_path):
+    """When main.py passes a --workspace value through as guided's prompt
+    default, accepting the prompt with a blank Enter must chdir into THAT
+    workspace -- not the process cwd (which is what the old
+    `default_ws = str(Path.cwd())` always used, ignoring anything main.py
+    might pass in)."""
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    cfg = _all_found_cfg(tmp_path)
+
+    ws = tmp_path / "my-workspace"
+
+    responses = iter(["1", ""])  # pick ds, accept the shown default workspace
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(responses))
+
+    calls = {}
+
+    def _fake_run_game(game, cfg_arg, extra_argv):
+        calls["cwd"] = os.getcwd()
+        return 0
+
+    monkeypatch.setattr(guided, "run_game", _fake_run_game)
+
+    rc = guided.run_guided(cfg, workspace=str(ws))
+    assert rc == 0
+    assert calls["cwd"] == str(ws)

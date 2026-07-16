@@ -17,12 +17,11 @@ nonzero exit code instead.
 """
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
 from deciwaves import __version__
-from deciwaves.cli import doctor
+from deciwaves.cli import config, doctor
 from deciwaves.cli.run import run_game
 
 # (key, menu label, banner abbreviation, gpu note)
@@ -106,8 +105,15 @@ def _prompt_gamescript(default: str) -> str | None:
     return raw or default
 
 
-def run_guided(cfg: dict) -> int:
-    """Entry point for bare ``deciwaves`` (no subcommand). Returns an exit code."""
+def run_guided(cfg: dict, workspace: str | None = None) -> int:
+    """Entry point for bare ``deciwaves`` (no subcommand). Returns an exit code.
+
+    ``workspace``, when given, is used as the workspace prompt's default (issue
+    #32: bare `deciwaves --workspace X` used to silently ignore --workspace
+    here, always defaulting the prompt to ``Path.cwd()`` instead) -- ``None``
+    (the default, e.g. when calling this directly in a test) falls back to the
+    process cwd, same as before this parameter existed.
+    """
     if not sys.stdin.isatty():
         print(_usage_message())
         return 2
@@ -124,7 +130,7 @@ def run_guided(cfg: dict) -> int:
         print(f"{label} isn't set up yet -- run `deciwaves setup` first.")
         return 1
 
-    default_ws = str(Path.cwd())
+    default_ws = workspace or str(Path.cwd())
     workspace = _prompt_workspace(default_ws)
     if workspace is None:
         print(_usage_message())
@@ -139,7 +145,5 @@ def run_guided(cfg: dict) -> int:
         if gamescript:
             extra_argv = ["--gamescript", gamescript]
 
-    ws = Path(workspace).resolve()
-    ws.mkdir(parents=True, exist_ok=True)
-    os.chdir(ws)                      # same contract as main.py's `run` dispatch
+    config.enter_workspace(workspace)  # same contract as main.py's `run` dispatch
     return run_game(game, cfg, extra_argv)

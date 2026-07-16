@@ -118,7 +118,15 @@ def main(argv=None) -> int:
     # path constants (VGMSTREAM/VGAUDIO) are resolved at import time from the env
     # this call sets up.
     if args.cmd is None:
-        from deciwaves.cli.guided import run_guided; return run_guided(cfg)
+        # Resolve to an absolute path before handing it to guided mode as its
+        # workspace-prompt default -- whether it came from an explicit
+        # --workspace or is just the "." argparse default, the prompt should
+        # always show a real absolute path, matching what it showed before
+        # this flag existed (issue #32: bare `deciwaves --workspace X` used
+        # to silently ignore --workspace entirely here, always defaulting the
+        # prompt to Path.cwd() instead).
+        from deciwaves.cli.guided import run_guided
+        return run_guided(cfg, workspace=str(Path(args.workspace).resolve()))
     if args.cmd == "setup":
         from deciwaves.cli.setup import run_setup; return run_setup(rest)
     if args.cmd == "doctor":
@@ -143,9 +151,7 @@ def main(argv=None) -> int:
             return e.code
     stage, extra_argv = stage_argv[0], stage_argv[1:] + rest
 
-    ws = Path(args.workspace).resolve()
-    ws.mkdir(parents=True, exist_ok=True)
-    os.chdir(ws)                      # stage modules default outputs to CWD-relative out/
+    config.enter_workspace(args.workspace)
     if stage == "run":
         from deciwaves.cli.run import run_game; return run_game(args.cmd, cfg, extra_argv)
     mod, _help = STAGES[args.cmd][stage]
