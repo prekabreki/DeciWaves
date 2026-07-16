@@ -5,7 +5,6 @@ family that once silently lost ~1,109 story lines (sentence_fw.py's `ff 0f` mark
 history)."""
 import csv
 
-import pytest
 
 from deciwaves.games.hzd import wem_metadata
 from deciwaves.engine.catalog_io import write_core_paths_sidecar

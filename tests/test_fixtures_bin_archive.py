@@ -38,7 +38,6 @@ module docstring ("murmur ... decrypt ... Oodle"):
   sidesteps the missing-Oodle-DLL risk flagged when this issue was scoped, but
   means `oodle_decompress()` itself has no synthetic-bytes coverage here.
 """
-import re
 import struct
 
 import pytest
@@ -46,8 +45,6 @@ import pytest
 from deciwaves.engine.pack import bin_archive
 from deciwaves.engine.pack.bin_archive import (
     BinArchive,
-    FileEntry,
-    SALT_A,
     _decrypt_block,
     _decrypt_chunk_data,
     file_hash,

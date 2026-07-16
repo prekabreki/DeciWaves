@@ -6,6 +6,7 @@ install (and the decode test also without VGAudio).
 import csv
 import os
 import wave
+from collections import namedtuple
 
 import pytest
 
@@ -98,8 +99,6 @@ def test_extract_decodes_real_wav(fw_package_dir, tmp_path):
 
 
 # --- parallel extraction (issue #41): stubbed graph/store/decoder, no install ---
-from collections import namedtuple
-
 _FakeLoc = namedtuple("_FakeLoc", "file_index offset")
 _FakeLine = namedtuple("_FakeLine", "line_id group_id lssr_index locator")
 
