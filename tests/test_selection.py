@@ -12,24 +12,7 @@ fits the pipeline):
 These rules are extracted verbatim from deciwaves.games.ds.story_order.build_playlist.
 """
 from deciwaves.engine.selection import filter_and_dedup, PLACEHOLDER_SUBTITLE
-
-
-def _row(**kw):
-    """Minimal in-scope, non-cutscene catalog row."""
-    base = dict(
-        line_id="id",
-        core_path="c",
-        line_index="0",
-        category="terminal",
-        scene="lines_pr201",
-        speaker_code="",
-        speaker_name="The Engineer",
-        subtitle_en="Hello there friend.",
-        wem_path_en="loc/x.wem.english",
-        language="english",
-    )
-    base.update(kw)
-    return base
+from conftest import catalog_row as _row
 
 
 # ---------------------------------------------------------------------------
