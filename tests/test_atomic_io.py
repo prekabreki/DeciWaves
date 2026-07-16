@@ -3,6 +3,7 @@ import threading
 
 import pytest
 
+from deciwaves.engine import atomic_io
 from deciwaves.engine.atomic_io import atomic_write, _tmp_path_for
 
 
@@ -105,6 +106,41 @@ def test_tmp_path_is_unique_per_call_but_keeps_extension_and_dir():
         assert t.endswith(".wav"), "tmp must keep dst's extension for ffmpeg/vgmstream"
         assert os.path.dirname(t) == os.path.dirname(dst), "tmp must be a sibling of dst"
         assert t != dst
+
+
+def test_replace_retries_when_dst_is_the_stale_file_being_rewritten(tmp_path, monkeypatch):
+    """Finding 7: _replace treated ANY pre-existing dst on the first transient
+    OSError as 'a peer won the race' and returned success -- discarding the fresh
+    tmp and never retrying. But dst may be the very stale/invalid file the caller
+    is REWRITING (e.g. the <=44-byte WAV stub audio_clip deliberately regenerates).
+    With the stale file unchanged since entry, that is NOT a peer win: _replace
+    must keep retrying so the fresh bytes actually land."""
+    dst = str(tmp_path / "clip.wav")
+    with open(dst, "wb") as f:
+        f.write(b"S" * 44)  # stale sub-header stub audio_clip regenerates
+
+    real_replace = os.replace
+    calls = {"n": 0}
+
+    def flaky_replace(src, d):
+        calls["n"] += 1
+        if calls["n"] <= 3:            # transient sharing violations, then succeed
+            raise PermissionError("simulated transient sharing violation")
+        return real_replace(src, d)
+
+    monkeypatch.setattr(atomic_io.os, "replace", flaky_replace)
+    monkeypatch.setattr(atomic_io.time, "sleep", lambda *_: None)  # no real delay
+
+    def write_fn(tmp):
+        with open(tmp, "wb") as f:
+            f.write(b"FRESH-REGENERATED-CONTENT")
+
+    atomic_write(dst, write_fn)
+
+    assert calls["n"] >= 4, "must have retried past the transient failures"
+    with open(dst, "rb") as f:
+        assert f.read() == b"FRESH-REGENERATED-CONTENT", "stale bytes must be replaced"
+    assert _stray_files(tmp_path, dst) == []
 
 
 def test_concurrent_atomic_writes_to_same_dst_do_not_corrupt(tmp_path):

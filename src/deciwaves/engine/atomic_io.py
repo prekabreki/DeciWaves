@@ -44,6 +44,16 @@ def _tmp_path_for(dst):
     return f"{root}.tmp.{uuid.uuid4().hex}{ext}"
 
 
+def _stat_sig(path):
+    """`(size, mtime_ns)` for *path*, or ``None`` if it doesn't exist. A cheap
+    signature for "did this file change out from under us" without hashing."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return (st.st_size, st.st_mtime_ns)
+
+
 def _replace(tmp, dst, attempts=100, delay=0.005):
     """`os.replace(tmp, dst)`, tolerating a concurrent writer racing on the same
     `dst`.
@@ -52,17 +62,27 @@ def _replace(tmp, dst, attempts=100, delay=0.005):
     transient sharing violation (``PermissionError``/``FileNotFoundError``) even
     though each owns a distinct tmp file. Because every writer of a given cache
     path produces identical bytes (the source -> decoded-output mapping is
-    deterministic), a peer that already put the file at `dst` has done our job
-    for us: on failure, if `dst` now exists we simply discard our redundant tmp.
-    Otherwise we briefly retry to ride out the window where a peer's replace is
-    mid-flight and `dst` isn't visible yet.
+    deterministic), a peer that already put a NEW file at `dst` has done our job
+    for us: on failure we can discard our redundant tmp and return.
+
+    The catch (finding 7): `dst` existing on failure is not proof a peer won.
+    `dst` may be the stale/invalid file the caller is REWRITING (e.g. the
+    <=44-byte WAV stub `audio_clip` deliberately regenerates) -- returning early
+    there discarded the fresh tmp and left the stale bytes in place forever, with
+    the 100-attempt retry loop never running. So we capture `dst`'s stat
+    signature at entry and treat "peer won" as valid only if `dst` did not exist
+    at entry, or its signature has CHANGED since (a genuinely new file appeared).
+    An unchanged pre-existing `dst` means no peer intervened: keep retrying (and
+    raise after exhaustion) so our fresh bytes replace the stale ones.
     """
+    entry_sig = _stat_sig(dst)
     for i in range(attempts):
         try:
             os.replace(tmp, dst)
             return
         except OSError:
-            if os.path.isfile(dst):          # a peer won the race with an equivalent file
+            cur_sig = _stat_sig(dst)
+            if cur_sig is not None and cur_sig != entry_sig:  # a peer wrote a NEW file
                 if os.path.isfile(tmp):
                     os.remove(tmp)
                 return
