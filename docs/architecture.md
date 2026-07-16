@@ -78,8 +78,10 @@ The DS and HZD pipelines share this shape (FW's is described in its own section 
    game's dialogue resources and emit one CSV row per voice line: a stable line ID, the
    source `.core` path, category/scene, speaker code and display name, the English
    subtitle, and a path to the encoded audio stream. This stage is resumable (it skips
-   `.core` paths already present in the output CSV) and fail-soft (a parse error on one
-   file is logged and skipped, never aborts the run).
+   `.core` paths recorded as done in a `-processed.txt` sidecar log, the sole resume
+   authority; on startup it drops any CSV rows for cores the sidecar doesn't confirm,
+   which repairs partial rows a mid-core crash may have left behind — see issue #21)
+   and fail-soft (a parse error on one file is logged and skipped, never aborts the run).
 2. **Selection** (`engine/selection.py`) — a small, portable set of creative rules applied
    to catalog rows before ordering: drop rows with no subtitle or no audio stream, and
    drop within-scene duplicate `(scene, speaker, subtitle)` triples while keeping the same
