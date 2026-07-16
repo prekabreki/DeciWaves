@@ -26,7 +26,9 @@ from deciwaves.engine.catalog_io import (
     CSV_COLUMNS, processed_core_paths, prune_incomplete_rows, write_core_paths_sidecar,
 )
 from deciwaves.games.hzd.sentence_fw import parse_sentences_fw
-from deciwaves.games.hzd.profile import HZD_ANCHORED_PREFIXES, HZD_FAMILY_PREFIXES
+from deciwaves.games.hzd.profile import (
+    HZD_ANCHORED_PREFIXES, HZD_FAMILY_PREFIXES, cores_sidecar_header,
+)
 
 _SENTENCES_PREFIX = "localized/sentences/"
 _SENTENCES_SUFFIX = "/sentences"
@@ -116,7 +118,9 @@ def main(argv=None):
     if args.sample_cap > 0:
         print(f"sample-cap active: catalog-cores sidecar left untouched ({args.cores_out})")
     else:
-        write_core_paths_sidecar(args.cores_out, paths)
+        # Header = a locators-file fingerprint (issue #45): lets wem_metadata detect a
+        # sidecar harvested from a since-patched pack instead of trusting it forever.
+        write_core_paths_sidecar(args.cores_out, paths, header=cores_sidecar_header(args.package))
     # The processed sidecar is the SOLE resume authority (issue #21): a core's sidecar
     # line is only written after all of its rows are in the CSV, so a mid-core crash
     # can leave partial CSV rows for a core the sidecar never confirmed. Drop those

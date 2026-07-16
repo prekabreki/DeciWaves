@@ -63,6 +63,32 @@ def hzd_package_error(package_dir: str) -> str | None:
     )
 
 
+def locators_fingerprint(package_dir: str) -> str:
+    """Cheap ``size:mtime_ns`` fingerprint of ``<package_dir>/PackFileLocators.bin``.
+
+    Used to detect a stale ``catalog-cores.txt`` sidecar (issue #45): any game patch
+    that adds/moves/removes dialogue cores rewrites the locator index, so a changed
+    fingerprint is a sufficient (and much cheaper than re-hashing the whole pack)
+    signal that a previously-harvested core-path list may no longer match the pack.
+    Raises the same way ``os.stat`` would if *package_dir* doesn't contain the file --
+    callers that need an actionable message first check ``hzd_package_error``.
+    """
+    st = os.stat(os.path.join(package_dir, "PackFileLocators.bin"))
+    return f"{st.st_size}:{st.st_mtime_ns}"
+
+
+def cores_sidecar_header(package_dir: str) -> str:
+    """Comment header line stamped into the ``catalog-cores.txt`` sidecar's first line
+    (via ``engine.catalog_io.write_core_paths_sidecar``'s ``header=``), recording
+    ``locators_fingerprint(package_dir)`` at write time. ``games.hzd.wem_metadata`` reads
+    it back (``read_core_paths_sidecar_header``) to detect a sidecar harvested from a
+    pack that has since been patched (issue #45). One shared place so the writer
+    (``games.hzd.catalog``) and reader (``games.hzd.wem_metadata``) can never drift on
+    the header's format.
+    """
+    return f"# locators: {locators_fingerprint(package_dir)}"
+
+
 def build_profile(package_dir: str | None) -> GameProfile:
     """Build and return the HZD GameProfile.
 

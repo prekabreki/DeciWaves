@@ -2,8 +2,13 @@
 import csv
 from deciwaves.games.hzd import catalog
 from deciwaves.games.hzd.catalog import classify_hzd, select_sentence_cores
-from deciwaves.games.hzd.profile import build_profile, hzd_package_error, HZD_FAMILY_PREFIXES
-from deciwaves.engine.catalog_io import read_core_paths_sidecar
+from deciwaves.games.hzd.profile import (
+    build_profile, hzd_package_error, HZD_FAMILY_PREFIXES,
+    cores_sidecar_header, locators_fingerprint,
+)
+from deciwaves.engine.catalog_io import (
+    read_core_paths_sidecar, read_core_paths_sidecar_header, write_core_paths_sidecar,
+)
 
 
 # --- classify_hzd: (category, scene) from a sentence-core virtual path ---
@@ -228,6 +233,70 @@ def test_catalog_main_uncapped_still_writes_cores_sidecar(tmp_path, monkeypatch)
     assert read_core_paths_sidecar(str(cores_sidecar)) == ["localized/sentences/full/scene/sentences"]
 
 
+def test_catalog_main_uncapped_cores_sidecar_carries_locators_header(tmp_path, monkeypatch):
+    """Issue #45: an uncapped run's cores sidecar must carry a locators-fingerprint
+    header wem_metadata can check for staleness against a patched pack."""
+    import deciwaves.games.hzd.profile as profile_mod
+    import deciwaves.games.hzd.inventory as inventory_mod
+    from deciwaves.games.hzd import catalog as catalog_mod
+
+    reader = _FakeReader()
+    monkeypatch.setattr(profile_mod, "build_profile", lambda package: _FakeProfile(reader))
+    monkeypatch.setattr(inventory_mod, "harvest_sentence_cores",
+                         lambda fw, sample_cap=None: ["localized/sentences/full/scene/sentences"])
+    monkeypatch.setattr(catalog_mod, "parse_sentences_fw", lambda core_bytes, on_line_error=None: [])
+
+    fake_pkg = tmp_path / "package"; fake_pkg.mkdir()
+    (fake_pkg / "PackFileLocators.bin").write_bytes(b"x")
+
+    cores_sidecar = tmp_path / "catalog-cores.txt"
+    rc = catalog_mod.main([
+        "--package", str(fake_pkg),
+        "--out", str(tmp_path / "catalog.csv"),
+        "--errors", str(tmp_path / "catalog-errors.log"),
+        "--processed", str(tmp_path / "catalog-processed.txt"),
+        "--cores-out", str(cores_sidecar),
+    ])
+    assert rc == 0
+    assert read_core_paths_sidecar_header(str(cores_sidecar)) == cores_sidecar_header(str(fake_pkg))
+    # the header line must not leak into the actual path list
+    assert read_core_paths_sidecar(str(cores_sidecar)) == ["localized/sentences/full/scene/sentences"]
+
+
+def test_catalog_main_sample_capped_cores_sidecar_unchanged_including_header(tmp_path, monkeypatch, capsys):
+    """The sample-cap guard (finding 6) must still leave an existing header-carrying
+    sidecar byte-identical -- a capped run never touches catalog-cores.txt at all."""
+    import deciwaves.games.hzd.profile as profile_mod
+    import deciwaves.games.hzd.inventory as inventory_mod
+    from deciwaves.games.hzd import catalog as catalog_mod
+
+    reader = _FakeReader()
+    monkeypatch.setattr(profile_mod, "build_profile", lambda package: _FakeProfile(reader))
+    monkeypatch.setattr(inventory_mod, "harvest_sentence_cores",
+                         lambda fw, sample_cap=None: ["localized/sentences/capped/scene/sentences"])
+    monkeypatch.setattr(catalog_mod, "parse_sentences_fw", lambda core_bytes, on_line_error=None: [])
+
+    fake_pkg = tmp_path / "package"; fake_pkg.mkdir()
+    (fake_pkg / "PackFileLocators.bin").write_bytes(b"x")
+
+    cores_sidecar = tmp_path / "catalog-cores.txt"
+    write_core_paths_sidecar(str(cores_sidecar), ["localized/sentences/full/run/sentences"],
+                             header=cores_sidecar_header(str(fake_pkg)))
+    before = cores_sidecar.read_bytes()
+
+    rc = catalog_mod.main([
+        "--package", str(fake_pkg),
+        "--out", str(tmp_path / "catalog.csv"),
+        "--errors", str(tmp_path / "catalog-errors.log"),
+        "--processed", str(tmp_path / "catalog-processed.txt"),
+        "--cores-out", str(cores_sidecar),
+        "--sample-cap", "5",
+    ])
+    assert rc == 0
+    assert cores_sidecar.read_bytes() == before
+    assert "sample-cap active" in capsys.readouterr().out.lower()
+
+
 class _FakeLine:
     line_id = "L0"; line_index = 0; speaker_code = "localized/voices/aloy"
     subtitle_en = "hi"; wem_path_en = "loc/x.wem"
@@ -323,6 +392,37 @@ def test_hzd_package_error_message_when_dir_missing_entirely(tmp_path):
     assert msg is not None
     assert "--hzd-package" in msg
     assert "PackFileLocators.bin" in msg
+
+
+# ---------------------------------------------------------------------------
+# locators_fingerprint / cores_sidecar_header (issue #45): a cheap size:mtime_ns
+# fingerprint of PackFileLocators.bin, stamped into catalog-cores.txt's sidecar header
+# so a downstream stage (wem_metadata) can tell a post-patch pack apart from the one
+# the sidecar was harvested from.
+# ---------------------------------------------------------------------------
+
+def test_locators_fingerprint_is_size_colon_mtime_ns(tmp_path):
+    locators = tmp_path / "PackFileLocators.bin"
+    locators.write_bytes(b"abcdef")
+    st = locators.stat()
+    assert locators_fingerprint(str(tmp_path)) == f"{st.st_size}:{st.st_mtime_ns}"
+
+
+def test_locators_fingerprint_changes_when_locators_file_changes(tmp_path):
+    locators = tmp_path / "PackFileLocators.bin"
+    locators.write_bytes(b"abcdef")
+    before = locators_fingerprint(str(tmp_path))
+    locators.write_bytes(b"abcdef-and-more-after-a-patch")   # size changes
+    after = locators_fingerprint(str(tmp_path))
+    assert before != after
+
+
+def test_cores_sidecar_header_is_a_comment_line_wrapping_the_fingerprint(tmp_path):
+    locators = tmp_path / "PackFileLocators.bin"
+    locators.write_bytes(b"abcdef")
+    header = cores_sidecar_header(str(tmp_path))
+    assert header.startswith("#")
+    assert locators_fingerprint(str(tmp_path)) in header
 
 
 def test_catalog_main_missing_package_fails_actionably(tmp_path, monkeypatch, capsys):

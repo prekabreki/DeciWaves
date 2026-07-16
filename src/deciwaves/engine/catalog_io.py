@@ -100,7 +100,7 @@ def prune_incomplete_rows(csv_path, processed_path):
     return dropped
 
 
-def write_core_paths_sidecar(sidecar_path, core_paths) -> None:
+def write_core_paths_sidecar(sidecar_path, core_paths, header=None) -> None:
     """Atomically persist a catalog stage's resolved core-path list (one path per line),
     so a downstream stage can reuse it instead of repeating the (potentially full-pack)
     scan/harvest that produced it -- see issue #31 (HZD's wem-metadata stage used to
@@ -111,12 +111,22 @@ def write_core_paths_sidecar(sidecar_path, core_paths) -> None:
     it sees either the previous sidecar or the complete new one, never a torn one. On any
     failure the temp file is cleaned up and the exception re-raised; the target path is
     left untouched (either absent, or holding the last complete write).
+
+    ``header``, if given, is written verbatim as the sidecar's first line (expected to
+    start with ``#`` so ``read_core_paths_sidecar`` skips it as a comment rather than a
+    path -- read it back with ``read_core_paths_sidecar_header``). This module stays
+    game-agnostic about what a header means; it's just an optional leading comment line.
+    HZD's ``games.hzd.profile.cores_sidecar_header`` uses this to stamp a locators-file
+    staleness fingerprint (issue #45). Default (no header) is byte-for-byte the old
+    format, so existing sidecars/readers are unaffected.
     """
     out_dir = os.path.dirname(sidecar_path) or "."
     os.makedirs(out_dir, exist_ok=True)
     fd, tmp_path = tempfile.mkstemp(dir=out_dir, prefix=".catalog-cores-", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
+            if header is not None:
+                f.write(header.rstrip("\n") + "\n")
             for p in core_paths:
                 f.write(p + "\n")
         os.replace(tmp_path, sidecar_path)
@@ -136,8 +146,28 @@ def read_core_paths_sidecar(sidecar_path):
     it stays usable standalone/without a prior catalog run). An existing-but-empty file
     is a valid "catalog found zero cores" result and returns ``[]`` (not ``None``),
     distinguishing "never ran" from "ran and found nothing."
+
+    A leading ``#``-prefixed first line (a header written via ``write_core_paths_sidecar``'s
+    ``header=``) is treated as a comment and excluded from the returned paths -- read it
+    back separately with ``read_core_paths_sidecar_header``.
     """
     if not os.path.isfile(sidecar_path):
         return None
     with open(sidecar_path, "r", encoding="utf-8") as f:
-        return [ln.strip() for ln in f if ln.strip()]
+        lines = [ln.strip() for ln in f]
+    if lines and lines[0].startswith("#"):
+        lines = lines[1:]
+    return [ln for ln in lines if ln]
+
+
+def read_core_paths_sidecar_header(sidecar_path):
+    """Return the sidecar's leading ``#``-prefixed header/comment line verbatim (as
+    written by ``write_core_paths_sidecar``'s ``header=``), or ``None`` if the sidecar
+    doesn't exist, is empty, or its first line isn't a comment -- e.g. a legacy sidecar
+    written before this feature existed (see games.hzd.wem_metadata's staleness check,
+    issue #45)."""
+    if not os.path.isfile(sidecar_path):
+        return None
+    with open(sidecar_path, "r", encoding="utf-8") as f:
+        first = f.readline().rstrip("\n")
+    return first if first.startswith("#") else None

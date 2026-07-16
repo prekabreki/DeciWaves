@@ -3,7 +3,7 @@ from deciwaves.games.ds import catalog as ds_catalog
 from deciwaves.games.ds.catalog import select_core_paths, classify
 from deciwaves.engine.catalog_io import (
     done_core_paths, processed_core_paths, prune_incomplete_rows, CSV_COLUMNS,
-    write_core_paths_sidecar, read_core_paths_sidecar,
+    write_core_paths_sidecar, read_core_paths_sidecar, read_core_paths_sidecar_header,
 )
 import csv
 import pytest
@@ -302,6 +302,40 @@ def test_write_core_paths_sidecar_overwrites_existing_atomically(tmp_path):
     write_core_paths_sidecar(str(sidecar), ["old/path/sentences"])
     write_core_paths_sidecar(str(sidecar), ["new/path/sentences"])
     assert read_core_paths_sidecar(str(sidecar)) == ["new/path/sentences"]
+
+
+# ---------------------------------------------------------------------------
+# write_core_paths_sidecar(..., header=...) / read_core_paths_sidecar_header (issue
+# #45): an optional leading comment line -- purely mechanical here (this module stays
+# game-agnostic about what a header means); HZD's wem-metadata stage uses it to stamp/
+# check a locators-file staleness fingerprint.
+# ---------------------------------------------------------------------------
+
+def test_header_roundtrips_and_is_excluded_from_paths(tmp_path):
+    sidecar = tmp_path / "catalog-cores.txt"
+    write_core_paths_sidecar(str(sidecar), ["a/b/sentences"], header="# locators: 1:2")
+    assert read_core_paths_sidecar_header(str(sidecar)) == "# locators: 1:2"
+    assert read_core_paths_sidecar(str(sidecar)) == ["a/b/sentences"]
+
+
+def test_no_header_argument_writes_no_header_line(tmp_path):
+    """Default (no header=) behavior is byte-for-byte unchanged: no comment line, and
+    read_core_paths_sidecar_header reports None (indistinguishable from a legacy
+    sidecar written before this feature existed)."""
+    sidecar = tmp_path / "catalog-cores.txt"
+    write_core_paths_sidecar(str(sidecar), ["a/b/sentences", "c/d/sentences"])
+    assert read_core_paths_sidecar_header(str(sidecar)) is None
+    assert read_core_paths_sidecar(str(sidecar)) == ["a/b/sentences", "c/d/sentences"]
+
+
+def test_read_core_paths_sidecar_header_missing_file_returns_none(tmp_path):
+    assert read_core_paths_sidecar_header(str(tmp_path / "missing.txt")) is None
+
+
+def test_read_core_paths_sidecar_header_empty_file_returns_none(tmp_path):
+    sidecar = tmp_path / "catalog-cores.txt"
+    write_core_paths_sidecar(str(sidecar), [])
+    assert read_core_paths_sidecar_header(str(sidecar)) is None
 
 
 # ---------------------------------------------------------------------------
