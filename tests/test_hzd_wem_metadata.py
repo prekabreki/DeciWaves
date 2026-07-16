@@ -72,7 +72,9 @@ def _argv(tmp_path, cores, catalog=None, out=None, errors=None, extra=()):
     out = out or (tmp_path / "wem-metadata.csv")
     errors = errors or (tmp_path / "wem-metadata-errors.log")
     return [
-        "--package", "FAKE_PKG",
+        # A real, valid package dir so the issue-#53 preflight passes; build_profile
+        # itself stays mocked via _patch_profile, so no real pack is read.
+        "--package", _real_package_dir(tmp_path),
         "--out", str(out),
         "--catalog", str(catalog),
         "--cores", str(cores),
@@ -358,3 +360,25 @@ def test_records_line_level_parse_error(tmp_path, monkeypatch):
     err_text = errors_path.read_text(encoding="utf-8")
     assert "L_broken" in err_text
     assert "no sound body for sentence uuid" in err_text
+
+
+# ---------------------------------------------------------------------------
+# (c) main(): a bad --package (issue #53) must fail actionably, like every other
+# HZD stage got in #49/#34 -- not with a raw FileNotFoundError traceback from
+# HzdLocators. This stage is documented standalone-usable, so the gap was
+# user-visible. The check must run before build_profile touches the pack, so this
+# needs no sidecar/catalog files to exist.
+# ---------------------------------------------------------------------------
+
+def test_wem_metadata_main_missing_package_fails_actionably(tmp_path, capsys):
+    bad_package = tmp_path / "install_root"  # exists, but no PackFileLocators.bin
+    bad_package.mkdir()
+
+    rc = wem_metadata.main(["--package", str(bad_package),
+                            "--out", str(tmp_path / "wem-metadata.csv")])
+
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "--hzd-package" in captured.out
+    assert "PackFileLocators.bin" in captured.out
+    assert captured.err == ""  # no traceback

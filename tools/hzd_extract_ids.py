@@ -63,7 +63,8 @@ def main(argv=None) -> int:
             try:
                 core_bytes = fw.read_core(core_path)
                 rows = parse_sentence_ids(
-                    core_bytes, on_line_error=lambda i, e: errs.append((i, e)))
+                    core_bytes, on_line_error=lambda i, e: errs.append((i, e)),
+                    core_path=core_path)
             except Exception as exc:  # fail-soft per core
                 cores_failed += 1
                 ferr.write(f"{core_path}\t{type(exc).__name__}: {exc}\n")
