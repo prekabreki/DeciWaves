@@ -131,13 +131,18 @@ def _find_oodle(ds_install: str) -> str:
     return str(candidate) if candidate.is_file() else ""
 
 
-def _fetch_tools(tools_dir: Path, skip_downloads: bool):
+def _fetch_tools(tools_dir: Path, skip_downloads: bool, force: bool = False):
     """Returns ([(label, status, path), ...], any_failed) for the summary
     table and exit-code decision. Each tool's download/unpack is isolated:
     an exception (or a post-unpack missing exe) marks that tool FAILED and
     the loop moves on to the next tool rather than aborting the whole run.
+
     --skip-downloads never downloads and never counts as a failure -- it
-    only reports what's already present ("found"/"MISSING")."""
+    only reports what's already present ("found"/"MISSING"). Otherwise, a
+    tool whose exe is already sitting in tools_dir is left alone instead of
+    re-fetched -- most runs used to re-download all ~200 MB of tools every
+    time, even when nothing was missing (issue #32) -- unless --force says
+    to refetch it anyway."""
     rows = []
     any_failed = False
     for label, url, exe in _TOOLS:
@@ -145,6 +150,9 @@ def _fetch_tools(tools_dir: Path, skip_downloads: bool):
         if skip_downloads:
             status = "found" if exe_path.is_file() else "MISSING"
             rows.append((label, status, str(exe_path)))
+            continue
+        if exe_path.is_file() and not force:
+            rows.append((label, "found (skipped -- use --force to refetch)", str(exe_path)))
             continue
         try:
             _download_and_unpack(url, tools_dir)
@@ -183,6 +191,7 @@ def run_setup(argv) -> int:
                     "match/full-reel/render without passing --gamescript every time")
     ap.add_argument("--tools-dir", default=None, help="where to fetch vgmstream/VGAudio/ffmpeg (default: %%LOCALAPPDATA%%\\DeciWaves\\tools)")
     ap.add_argument("--skip-downloads", action="store_true", help="don't fetch tools, just re-check what's already there and rewrite config")
+    ap.add_argument("--force", action="store_true", help="re-download a tool even if its exe is already present in --tools-dir (default: skip it)")
     args = ap.parse_args(argv)
 
     # Merge this run's flags over whatever was already saved -- an omitted
@@ -207,7 +216,7 @@ def run_setup(argv) -> int:
     )
     tools_dir.mkdir(parents=True, exist_ok=True)
 
-    tool_rows, tools_failed = _fetch_tools(tools_dir, args.skip_downloads)
+    tool_rows, tools_failed = _fetch_tools(tools_dir, args.skip_downloads, args.force)
 
     # Recomputed (not merely carried forward) from the merged ds_install so a
     # DS install that moved, or gained/lost the Oodle DLL since last run, is

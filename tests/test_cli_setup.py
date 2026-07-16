@@ -258,6 +258,64 @@ def test_setup_after_corrupted_config_yields_only_current_game(tmp_path, monkeyp
     assert cfg["ds_install"] == ""
 
 
+def test_existing_tools_are_not_redownloaded_without_force(tmp_path, monkeypatch):
+    # issue #32: every non-skip run used to re-fetch all ~200 MB regardless of
+    # whether the exe was already sitting in tools_dir. A present exe must now
+    # be left alone unless --force is passed.
+    tools_dir = tmp_path / "tools"
+    tools_dir.mkdir()
+    for exe in _TOOL_EXES.values():
+        (tools_dir / exe).write_bytes(b"already-here")
+
+    def _boom(url, dest):
+        raise AssertionError("must not re-download an already-present tool without --force")
+
+    monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.setattr(s, "_download_and_unpack", _boom)
+    rc = s.run_setup(["--tools-dir", str(tools_dir)])
+    assert rc == 0
+    out = ""  # nothing to assert on captured output here; the _boom guard is the real check
+
+
+def test_force_redownloads_even_when_already_present(tmp_path, monkeypatch):
+    tools_dir = tmp_path / "tools"
+    tools_dir.mkdir()
+    for exe in _TOOL_EXES.values():
+        (tools_dir / exe).write_bytes(b"stale")
+
+    calls = []
+
+    def _record(url, dest):
+        calls.append(url)
+        _stub_download_ok(url, dest)
+
+    monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.setattr(s, "_download_and_unpack", _record)
+    rc = s.run_setup(["--tools-dir", str(tools_dir), "--force"])
+    assert rc == 0
+    assert calls == [s.VGMSTREAM_URL, s.VGAUDIO_URL, s.FFMPEG_URL]
+
+
+def test_missing_tool_is_still_fetched_even_without_force(tmp_path, monkeypatch):
+    # Only some tools present -- the missing one must still be fetched on a
+    # normal (non---force) run; only already-present ones are skipped.
+    tools_dir = tmp_path / "tools"
+    tools_dir.mkdir()
+    (tools_dir / "vgmstream-cli.exe").write_bytes(b"already-here")
+
+    calls = []
+
+    def _record(url, dest):
+        calls.append(url)
+        _stub_download_ok(url, dest)
+
+    monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.setattr(s, "_download_and_unpack", _record)
+    rc = s.run_setup(["--tools-dir", str(tools_dir)])
+    assert rc == 0
+    assert calls == [s.VGAUDIO_URL, s.FFMPEG_URL]  # vgmstream skipped, the other two fetched
+
+
 def test_skip_downloads_never_calls_download(tmp_path, monkeypatch):
     tools_dir = tmp_path / "tools"; tools_dir.mkdir()
     (tools_dir / "vgmstream-cli.exe").write_bytes(b"x")  # only one of the three present
