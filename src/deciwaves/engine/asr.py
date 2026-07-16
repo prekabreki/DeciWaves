@@ -1,4 +1,8 @@
-"""WhisperX transcription wrapper for HZDR clips (ASR content-binding pass). Heavy GPU deps — install with `pip install deciwaves[asr]` (plus a CUDA-matched torch build)."""
+"""WhisperX transcription wrapper (ASR content-binding / validation pass). Game-agnostic:
+used by HZD's ASR content-binding (`games/hzd/asr_bind.py`), FW's transcript pass
+(`games/fw/asr_run.py`) and DLC labeling (`games/fw/dlc.py`), and DS's cutscene
+speech-region trim (`games/ds/cutscene_trim.py`). Heavy GPU deps — install with
+`pip install deciwaves[asr]` (plus a CUDA-matched torch build)."""
 from __future__ import annotations
 from dataclasses import dataclass
 

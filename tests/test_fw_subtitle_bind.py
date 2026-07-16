@@ -11,7 +11,7 @@ from deciwaves.games.fw import subtitle_bind
 from deciwaves.games.fw.subtitle_bind import (
     clean_subtitle, assign_subtitles, build_subtitle_rows, types_json_error,
 )
-from deciwaves.games.fw.bind import MANIFEST_COLS
+from deciwaves.games.fw.manifest import MANIFEST_COLS
 
 
 def test_clean_subtitle_strips_markup_and_newlines():

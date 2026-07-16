@@ -1,7 +1,8 @@
 """FW story weave: pull scene dialogue into the precise reel, skip barks.
 
-The precise matcher (bind.py) binds only lines that fuzzy-match the gamescript, so
-it drops short interjections and uncovered lines even inside scenes it DID find.
+The precise matcher (`subtitle_match`) binds only lines that fuzzy-match the
+gamescript, so it drops short interjections and uncovered lines even inside
+scenes it DID find.
 This recovers them WITHOUT shipping barks: a group with >=2 matched anchors whose
 script indices cluster tightly IS a real scene (e.g. the Beta media-portal convo,
 anchors 4293-4307); place ALL its clips at that scene's story position, in clip
@@ -21,7 +22,7 @@ import os
 import re
 import statistics
 
-from deciwaves.games.fw.bind import MANIFEST_COLS
+from deciwaves.games.fw.manifest import MANIFEST_COLS
 
 _GROUP_RE = re.compile(r"g(\d+)_")
 

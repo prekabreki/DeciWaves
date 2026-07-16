@@ -78,7 +78,7 @@ class FakeTranscript:
 
 def _patch_asr_stack(monkeypatch, dsar, decode_fail_marker=None, transcribe_fn=None):
     """Wire fakes so main() never touches VGAudioCli/WhisperX/a real archive."""
-    import deciwaves.games.hzd.asr as asr_mod
+    import deciwaves.engine.asr as asr_mod
 
     monkeypatch.setattr(asr_bind, "FwPackage", FakePackage(dsar))
     monkeypatch.setattr(asr_mod, "load_model", lambda *a, **k: object())

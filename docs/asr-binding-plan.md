@@ -3,7 +3,7 @@
 > **Historical.** This plan shipped. HZD Remastered voice binding is offline content
 > fingerprinting: an exact `(A, B)` byte-length/sample-count structural join
 > (`games/hzd/binding.py`) resolves the large majority of lines for free, and the ASR
-> text-match pipeline described below (`games/hzd/asr.py`, `games/hzd/match.py`,
+> text-match pipeline described below (`engine/asr.py`, `games/hzd/match.py`,
 > `games/hzd/asr_bind.py`) resolves only the "collision bucket" minority — see
 > `docs/architecture.md`'s Horizon Zero Dawn Remastered section for the shipped shape.
 > Forbidden West never needed this route; it ships an actual streaming-graph positional

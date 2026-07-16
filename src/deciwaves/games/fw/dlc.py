@@ -7,8 +7,8 @@ order is clip sequence — within a group by `lssr_index` (~dialogue order), gro
 by id (arbitrary but scene-clustered). "Doesn't have to be perfect."
 
 DLC clips are identified structurally by `file_index == 101` (the dlc/en stream;
-see fw-batch-extractor-status). Output uses the same manifest schema as `bind.py`
-so `render.py` consumes it unchanged (tier "D").
+see fw-batch-extractor-status). Output uses the same manifest schema as
+`manifest.MANIFEST_COLS` so `render.py` consumes it unchanged (tier "D").
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from __future__ import annotations
 import argparse
 import csv
 
-from deciwaves.games.fw.bind import MANIFEST_COLS
+from deciwaves.games.fw.manifest import MANIFEST_COLS
 
 DLC_FILE_INDEX = "101"
 DLC_QUEST = "Burning Shores"
@@ -38,7 +38,7 @@ def build_dlc_rows(dlc_clips, transcripts_by_id, min_words, quest=DLC_QUEST):
     default of 0 previously meant a direct caller got NO bark filtering — the
     opposite of this module's purpose. Pass min_words=0 explicitly to keep everything.
     """
-    from deciwaves.games.hzd.match import normalize
+    from deciwaves.engine.text_normalize import normalize
     rows = []
     for c in sorted(dlc_clips, key=lambda c: (int(c["group_id"]), int(c["lssr_index"]))):
         t = transcripts_by_id.get(c["line_id"])

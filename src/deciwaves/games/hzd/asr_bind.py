@@ -6,10 +6,11 @@ import os
 import sys
 import tempfile
 import wave
+from deciwaves.engine import asr
 from deciwaves.engine.pack.fw_package import FwPackage
-from deciwaves.games.hzd import asr, match
+from deciwaves.games.hzd import match
 from deciwaves.games.hzd.atrac9 import Atrac9Error, decode_wem_to_wav
-from deciwaves.games.hzd.binding import build_buckets, structural_binds
+from deciwaves.games.hzd.binding import build_buckets, relevant_buckets, structural_binds
 
 ARCHIVE = "package.01.00.core.stream"
 # Single source of truth for the incremental checkpoint sidecar's default path --
@@ -115,13 +116,7 @@ def main(argv=None):
     keep = None if a.all_buckets else (lambda lid: lid in story_ids)
     # Story-relevant ambiguous buckets, each resolved as a WHOLE (assign_bucket needs all of
     # a bucket's clips together to do unique assignment + elimination).
-    relevant = []
-    for grp in buckets.values():
-        if not grp["lines"] or (len(grp["lines"]) == 1 and len(grp["clips"]) == 1):
-            continue
-        if keep is not None and not any(keep(l["line_id"]) for l in grp["lines"]):
-            continue
-        relevant.append(grp)
+    relevant = relevant_buckets(buckets, keep_line=keep)
     # Cap at BUCKET granularity, never mid-bucket: assign_bucket resolves a bucket as a whole,
     # so a cap that split a bucket would starve it of clips and (formerly) fabricate binds by
     # exclusion. Include whole buckets until the cap is reached (may slightly overshoot).

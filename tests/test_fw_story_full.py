@@ -6,7 +6,7 @@ position; unanchored base groups follow as scene-clustered blocks; DLC last as
 the post-game epilogue. Matched lines keep their speaker.
 """
 from deciwaves.games.fw.story_full import build_full_reel
-from deciwaves.games.fw.bind import MANIFEST_COLS
+from deciwaves.games.fw.manifest import MANIFEST_COLS
 
 
 def _s(line_id, subtitle):
