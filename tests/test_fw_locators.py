@@ -75,6 +75,37 @@ def test_items_dedupes_first_wins():
     assert len(items) == len(loc)
 
 
+def test_trailing_garbage_raises():
+    """Unexpected bytes after the last parsed record must not be silently
+    ignored -- a truncated/corrupted PackFileLocators.bin should fail loudly,
+    not silently under-read."""
+    data = _build_locators([("a.core", [(0xAA, 0, 10)])]) + b"\x01\x02\x03"
+    with pytest.raises(ValueError, match="3"):
+        FwLocators.from_bytes(data)
+
+
+def test_no_trailing_garbage_does_not_raise():
+    data = _build_locators([("a.core", [(0xAA, 0, 10), (0xBB, 16, 20)])])
+    FwLocators.from_bytes(data)  # must not raise
+
+
+def test_duplicate_count_reflects_collapsed_duplicates():
+    # 0xBB appears in both archives -> one duplicate collapsed by the dict.
+    data = _build_locators([
+        ("a.core", [(0xAA, 0, 10), (0xBB, 16, 20)]),
+        ("b.core.stream", [(0xBB, 0, 30), (0xCC, 64, 40)]),
+    ])
+    loc = FwLocators.from_bytes(data)
+    assert loc.duplicate_count == 1
+    assert len(loc.entries()) - len(loc) == loc.duplicate_count
+
+
+def test_duplicate_count_zero_when_no_duplicates():
+    data = _build_locators([("a.core", [(0xAA, 0, 10), (0xBB, 16, 20)])])
+    loc = FwLocators.from_bytes(data)
+    assert loc.duplicate_count == 0
+
+
 HZD_PACKAGE = Path(r"C:\Program Files (x86)\Steam\steamapps\common\Horizon - Zero Dawn Remastered\LocalCacheDX12\package")
 
 
