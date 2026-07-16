@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import struct
+import threading
 
 from deciwaves.engine.pack.dsar_archive import DsarArchive
 
@@ -27,18 +28,27 @@ class FwStreamStore:
         # strip the "cache:package/" device prefix -> path relative to package dir
         self.files = [f.replace("cache:package/", "") for f in files]
         self._dsar: dict[int, DsarArchive | None] = {}
+        # Guards the lazy _dsar cache: the FW extract worker pool calls
+        # read_riff_clip from several threads at once. Without the lock two
+        # workers could both sniff+construct a reader for the same file_index
+        # (redundant, and a torn check-then-set). Only the one-time reader
+        # construction is guarded; DsarArchive.read / the raw-file read both
+        # reopen the file per call, so concurrent reads through a cached reader
+        # need no lock.
+        self._lock = threading.Lock()
 
     def _path(self, file_index: int) -> str:
         return os.path.join(self.package_dir, self.files[file_index])
 
     def _reader(self, file_index: int) -> DsarArchive | None:
         """Return a DsarArchive for DSAR files, or None for raw files."""
-        if file_index not in self._dsar:
-            path = self._path(file_index)
-            with open(path, "rb") as f:
-                magic = f.read(4)
-            self._dsar[file_index] = DsarArchive(path) if magic == b"DSAR" else None
-        return self._dsar[file_index]
+        with self._lock:
+            if file_index not in self._dsar:
+                path = self._path(file_index)
+                with open(path, "rb") as f:
+                    magic = f.read(4)
+                self._dsar[file_index] = DsarArchive(path) if magic == b"DSAR" else None
+            return self._dsar[file_index]
 
     def read(self, file_index: int, offset: int, length: int) -> bytes:
         """Read *length* bytes at logical *offset* (DSAR-decompressed if needed)."""
