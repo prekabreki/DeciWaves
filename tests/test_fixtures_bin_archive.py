@@ -43,6 +43,7 @@ import struct
 
 import pytest
 
+from deciwaves.engine.pack import bin_archive
 from deciwaves.engine.pack.bin_archive import (
     BinArchive,
     FileEntry,
@@ -283,3 +284,72 @@ def test_encrypted_archive_round_trips(tmp_path):
     assert entry.size == len(payload)
 
     assert arc.extract(entry, oodle_dll="unused") == payload
+
+
+# --- Oodle loader: per-path caching --------------------------------------
+#
+# _load_oodle can't be exercised against a real oo2core DLL in CI (no game
+# install), so ctypes.WinDLL itself is faked -- this only targets the
+# caching/argtypes contract, not the real Kraken decompress call.
+
+class _FakeOodleLib:
+    def __init__(self, dll_path):
+        self.dll_path = dll_path
+        self.OodleLZ_Decompress = lambda *a, **k: 0
+
+
+@pytest.fixture(autouse=True)
+def _reset_oodle_cache(monkeypatch):
+    """Every test in this module gets a clean, isolated Oodle DLL cache --
+    without this, whichever test runs first would permanently poison the
+    real module-level cache for every later test (and any other test file
+    importing bin_archive in the same process)."""
+    monkeypatch.setattr(bin_archive, "_oodle_cache", {})
+
+
+def test_load_oodle_caches_per_dll_path(monkeypatch):
+    """A second _load_oodle call with a DIFFERENT dll_path must load its OWN
+    DLL, not silently reuse whatever was cached for the first path."""
+    constructed = []
+
+    def _fake_windll(path):
+        constructed.append(path)
+        return _FakeOodleLib(path)
+
+    monkeypatch.setattr(bin_archive.ctypes, "WinDLL", _fake_windll)
+
+    lib_a = bin_archive._load_oodle("path_a.dll")
+    lib_b = bin_archive._load_oodle("path_b.dll")
+
+    assert constructed == ["path_a.dll", "path_b.dll"]  # one WinDLL() call per distinct path
+    assert lib_a is not lib_b
+    assert lib_a.dll_path == "path_a.dll"
+    assert lib_b.dll_path == "path_b.dll"
+
+
+def test_load_oodle_reuses_same_dll_path(monkeypatch):
+    """Calling _load_oodle twice with the SAME path must not reload the DLL."""
+    constructed = []
+
+    def _fake_windll(path):
+        constructed.append(path)
+        return _FakeOodleLib(path)
+
+    monkeypatch.setattr(bin_archive.ctypes, "WinDLL", _fake_windll)
+
+    lib_1 = bin_archive._load_oodle("same.dll")
+    lib_2 = bin_archive._load_oodle("same.dll")
+
+    assert constructed == ["same.dll"]  # loaded once
+    assert lib_1 is lib_2
+
+
+def test_load_oodle_declares_argtypes(monkeypatch):
+    """OodleLZ_Decompress.argtypes must be explicitly declared (not left to
+    ctypes' fragile default int marshalling) alongside its .restype."""
+    monkeypatch.setattr(bin_archive.ctypes, "WinDLL", lambda path: _FakeOodleLib(path))
+
+    lib = bin_archive._load_oodle("argtypes.dll")
+
+    assert lib.OodleLZ_Decompress.argtypes is not None
+    assert len(lib.OodleLZ_Decompress.argtypes) == 14  # matches the 14-arg call in oodle_decompress()

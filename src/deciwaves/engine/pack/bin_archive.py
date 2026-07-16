@@ -92,26 +92,35 @@ def _decrypt_chunk_data(key_block: bytes, data: bytearray):
         data[i] ^= digest[i % 16]
 
 
-_oodle = None
+_oodle_cache: dict[str, ctypes.WinDLL] = {}
 _oodle_lock = threading.Lock()
+
+_OODLE_DECOMPRESS_ARGTYPES = [
+    ctypes.c_char_p, ctypes.c_int64, ctypes.c_char_p, ctypes.c_int64,
+    ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_int64,
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int64, ctypes.c_int,
+]
 
 
 def _load_oodle(dll_path: str):
-    # Lock-guarded lazy init: the DS render worker pool calls oodle_decompress
-    # from several threads. Without the lock two threads could both observe
-    # `_oodle is None` and, worse, one could read the freshly-assigned global
-    # before the other finished setting `.restype`, calling OodleLZ_Decompress
-    # with the default (32-bit) return type and misreading the decompressed
-    # size. The decompress call itself is a stateless C function (ctypes drops
-    # the GIL around it), so only the one-time init needs guarding.
-    global _oodle
-    if _oodle is None:
+    # Lock-guarded lazy init, keyed by dll_path: the DS render worker pool calls
+    # oodle_decompress from several threads. Without the lock two threads could
+    # both observe `dll_path not in _oodle_cache` and, worse, one could read the
+    # freshly-cached lib before the other finished setting `.restype`/`.argtypes`,
+    # calling OodleLZ_Decompress with the default (32-bit) return type and
+    # misreading the decompressed size. The decompress call itself is a stateless
+    # C function (ctypes drops the GIL around it), so only the one-time
+    # per-path init needs guarding. Keyed (not a single global) so a second
+    # PackIndex pointed at a different Oodle DLL doesn't silently reuse the
+    # first one ever loaded.
+    if dll_path not in _oodle_cache:
         with _oodle_lock:
-            if _oodle is None:
+            if dll_path not in _oodle_cache:
                 lib = ctypes.WinDLL(dll_path)
                 lib.OodleLZ_Decompress.restype = ctypes.c_int64
-                _oodle = lib
-    return _oodle
+                lib.OodleLZ_Decompress.argtypes = _OODLE_DECOMPRESS_ARGTYPES
+                _oodle_cache[dll_path] = lib
+    return _oodle_cache[dll_path]
 
 
 def oodle_decompress(dll_path: str, src: bytes, dst_size: int) -> bytes:
