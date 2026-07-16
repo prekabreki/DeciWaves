@@ -72,6 +72,52 @@ def test_absolutize_existing_paths_ignores_flag_tokens_even_if_coincidentally_a_
     assert out == ["--gamescript"]  # never treated as a path token, existing or not
 
 
+def test_absolutize_existing_paths_rewrites_flag_equals_value_form(tmp_path, monkeypatch):
+    """Finding 2: `--gamescript=real.md` (the '=' spelling) was skipped wholesale
+    because the token starts with '-', so it was never absolutized before the
+    workspace chdir -- the exact #32 bug, alive for the '=' form. The value part
+    must be absolutized the same way the bare two-token form is."""
+    monkeypatch.chdir(tmp_path)
+    existing = tmp_path / "real.md"
+    existing.write_text("x", encoding="utf-8")
+
+    out = config.absolutize_existing_paths(["--gamescript=real.md", "--bitrate=96"])
+
+    assert out == [f"--gamescript={existing}", "--bitrate=96"]
+
+
+def test_absolutize_existing_paths_equals_form_leaves_nonexistent_and_absolute_alone(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    existing = tmp_path / "real.md"
+    existing.write_text("x", encoding="utf-8")
+    argv = [f"--gamescript={existing}", "--data-dir=does-not-exist"]
+    assert config.absolutize_existing_paths(argv) == argv  # already-abs + typo untouched
+
+
+def test_absolutize_existing_paths_prints_notice_when_rewriting(tmp_path, monkeypatch, capsys):
+    """Whenever a token is rewritten (bare or '=' form) a one-line notice must be
+    printed, so the invocation-dir -> absolute redirect is never silent."""
+    monkeypatch.chdir(tmp_path)
+    existing = tmp_path / "real.md"
+    existing.write_text("x", encoding="utf-8")
+
+    config.absolutize_existing_paths(["--gamescript", "real.md"])
+    bare_out = capsys.readouterr().out
+    assert "real.md" in bare_out
+    assert str(existing) in bare_out
+
+    config.absolutize_existing_paths(["--gamescript=real.md"])
+    eq_out = capsys.readouterr().out
+    assert "real.md" in eq_out
+    assert str(existing) in eq_out
+
+
+def test_absolutize_existing_paths_silent_when_nothing_rewritten(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    config.absolutize_existing_paths(["--data-dir", "does-not-exist", "--bitrate=96"])
+    assert capsys.readouterr().out == ""
+
+
 def test_load_returns_empty_dict_when_file_missing(tmp_path, monkeypatch):
     monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(tmp_path / "cfg"))
     assert config.load() == {}

@@ -92,13 +92,31 @@ def absolutize_existing_paths(argv: list) -> list:
     to the workspace instead of the original cwd -- no behavior change for
     that already-loud, already-nonzero failure case (see run.py's fw
     --gamescript checks, issue #38).
+
+    Both the bare two-token form (``--gamescript real.md``) and the joined
+    ``--flag=value`` form (``--gamescript=real.md``) are handled: the latter used
+    to be skipped wholesale because the whole token starts with '-', leaving the
+    #32 bug alive for that spelling (finding 2). Every rewrite prints a one-line
+    notice so the invocation-dir -> absolute redirect is never silent.
     """
     out = []
     for tok in argv:
-        if tok and not tok.startswith("-") and not os.path.isabs(tok) and os.path.exists(tok):
-            tok = str(Path(tok).resolve())
+        if tok.startswith("--") and "=" in tok:
+            flag, _, value = tok.partition("=")
+            if value and not os.path.isabs(value) and os.path.exists(value):
+                resolved = str(Path(value).resolve())
+                _print_resolution_notice(value, resolved)
+                tok = f"{flag}={resolved}"
+        elif tok and not tok.startswith("-") and not os.path.isabs(tok) and os.path.exists(tok):
+            resolved = str(Path(tok).resolve())
+            _print_resolution_notice(tok, resolved)
+            tok = resolved
         out.append(tok)
     return out
+
+
+def _print_resolution_notice(original: str, resolved: str) -> None:
+    print(f"resolved {original} -> {resolved} (invocation dir)")
 
 def enter_workspace(workspace) -> Path:
     """Resolve *workspace* to an absolute path, create it, and chdir into it.
