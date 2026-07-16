@@ -421,6 +421,74 @@ def test_hzd_bind_argv_includes_transcripts_when_sidecar_present(tmp_path, monke
     assert _after(bind_argv, "--transcripts") == run_mod.asr_bind.DEFAULT_TRANSCRIPTS_OUT
 
 
+def test_hzd_bind_argv_omits_sample_cap_when_not_given(tmp_path, monkeypatch):
+    """No --sample-cap given to `hzd run`: bind's argv must not include it at all, so
+    the bind stage falls back to its own bounded default (300) -- issue #35."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    mods = _mods("hzd")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _hzd_outputs(mods)))
+
+    rc = run_mod.run_game("hzd", {"hzd_package": "PKG"}, [])
+    assert rc == 0
+
+    bind_argv = dict(calls)[mods["bind"]]
+    assert "--sample-cap" not in bind_argv
+
+
+def test_hzd_bind_argv_forwards_sample_cap_when_given(tmp_path, monkeypatch):
+    """`--sample-cap` passed to `hzd run` must reach the bind stage (issue #35) --
+    it's the flag that governs how much ASR work bind actually does; without
+    forwarding, a user-supplied cap would be silently ignored by the chain."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    mods = _mods("hzd")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _hzd_outputs(mods)))
+
+    rc = run_mod.run_game("hzd", {"hzd_package": "PKG"}, ["--sample-cap", "42"])
+    assert rc == 0
+
+    bind_argv = dict(calls)[mods["bind"]]
+    assert _after(bind_argv, "--sample-cap") == "42"
+
+
+def test_hzd_bind_argv_forwards_sample_cap_zero_for_full_pass(tmp_path, monkeypatch):
+    """0 must be forwarded as-is, never treated as falsy/omitted -- it's the
+    documented "unlimited full pass" sentinel asr_bind.py's --sample-cap already
+    understands (issue #35)."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    mods = _mods("hzd")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _hzd_outputs(mods)))
+
+    rc = run_mod.run_game("hzd", {"hzd_package": "PKG"}, ["--sample-cap", "0"])
+    assert rc == 0
+
+    bind_argv = dict(calls)[mods["bind"]]
+    assert _after(bind_argv, "--sample-cap") == "0"
+
+
+def test_hzd_run_help_documents_sample_cap_flag(tmp_path, monkeypatch, capsys):
+    """`deciwaves hzd run --help` must document --sample-cap and that 0 means an
+    unlimited full pass (issue #35) -- a forwarded flag `run --help` never mentions
+    is undiscoverable."""
+    monkeypatch.chdir(tmp_path)
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, {}))
+
+    with pytest.raises(SystemExit) as exc:
+        run_mod.run_game("hzd", {"hzd_package": "PKG"}, ["--help"])
+
+    assert exc.value.code == 0
+    assert calls == []
+    out = capsys.readouterr().out
+    assert "--sample-cap" in out
+    assert "unlimited" in out.lower()
+
+
 def test_hzd_bind_gpu_gate_aborts_without_whisperx(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("importlib.util.find_spec", lambda name: None)
