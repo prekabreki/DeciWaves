@@ -15,7 +15,7 @@ from deciwaves.games.hzd.sentence_fw import LineMedia
 
 
 class _FakeReader:
-    """Stand-in for FwPackage.read_core: returns fixed per-path bytes, or raises for
+    """Stand-in for HzdPackage.read_core: returns fixed per-path bytes, or raises for
     paths listed in fail_paths (simulating a corrupt/unreadable core)."""
 
     def __init__(self, cores: dict, fail_paths=()):

@@ -14,7 +14,7 @@ import argparse
 import os
 from bisect import bisect_right
 
-from deciwaves.engine.pack.fw_locators import FwLocators, Entry
+from deciwaves.engine.pack.hzd_locators import HzdLocators, Entry
 from deciwaves.engine.pack.dsar_archive import DsarArchive
 
 DEFAULT_PACKAGE = r"C:\Program Files (x86)\Steam\steamapps\common\Horizon - Zero Dawn Remastered\LocalCacheDX12\package"
@@ -22,7 +22,7 @@ DEFAULT_ARCHIVE = "package.01.00.core.stream"
 
 
 def load(package_dir: str, archive: str):
-    loc = FwLocators(os.path.join(package_dir, "PackFileLocators.bin"))
+    loc = HzdLocators(os.path.join(package_dir, "PackFileLocators.bin"))
     entries = loc.entries(archive)
     dsar = DsarArchive(os.path.join(package_dir, archive))
     return entries, dsar

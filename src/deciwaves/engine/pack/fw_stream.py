@@ -1,6 +1,10 @@
 """Read payload bytes from a Forbidden West package file at a streaming-graph
 locator address.
 
+``fw_`` here is real FW specifically, not HZD Remastered -- HZD reads its
+packages through :mod:`engine.pack.hzd_package` / :mod:`engine.pack.hzd_locators`
+instead (issue #48).
+
 A :class:`~engine.pack.fw_streaming_graph.Locator` gives ``(file_index, offset)``.
 The file may be a DSAR container (compressed, logical offsets) or a raw payload
 store (e.g. ``en/package.01.00.core.stream`` — dialogue audio, stored as

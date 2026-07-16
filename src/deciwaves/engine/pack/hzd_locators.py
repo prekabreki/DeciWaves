@@ -19,6 +19,15 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Locator:
+    """One ``PackFileLocators.bin`` index entry: an (archive, offset, length)
+    triple locating a resource inside a DSAR archive.
+
+    Not the same concept as :class:`engine.pack.fw_streaming_graph.Locator`,
+    which addresses a streamed audio payload by ``(file_index, offset)`` into
+    Forbidden West's ``streaming_graph.core`` positional index -- different
+    on-disk index format, different fields, different game path (HZD
+    Remastered here vs. real FW there).
+    """
     archive: str
     offset: int
     length: int
@@ -33,13 +42,13 @@ class Entry:
     length: int
 
 
-class FwLocators:
+class HzdLocators:
     def __init__(self, path: str):
         with open(path, "rb") as f:
             self._init_from(f.read())
 
     @classmethod
-    def from_bytes(cls, data: bytes) -> "FwLocators":
+    def from_bytes(cls, data: bytes) -> "HzdLocators":
         self = cls.__new__(cls)
         self._init_from(data)
         return self

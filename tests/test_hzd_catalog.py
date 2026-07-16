@@ -123,7 +123,7 @@ def test_build_profile_fields():
 #          this instead of repeating catalog's own full-pack harvest ---
 
 class _FakeReader:
-    """Stand-in for FwPackage: read_core returns fixed bytes regardless of path;
+    """Stand-in for HzdPackage: read_core returns fixed bytes regardless of path;
     parse_sentences_fw is monkeypatched below, so the bytes' content never matters."""
     def read_core(self, path):
         return b"CORE_BYTES"
@@ -368,7 +368,7 @@ def test_catalog_main_accepts_bare_filename_out(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 # hzd_package_error: actionable failure when --package doesn't point at the
 # LocalCacheDX12\package dir, instead of a bare FileNotFoundError traceback
-# from fw_locators.py (issue #34). Mirrors games.fw.subtitle_bind.types_json_error.
+# from hzd_locators.py (issue #34). Mirrors games.fw.subtitle_bind.types_json_error.
 # ---------------------------------------------------------------------------
 
 def test_hzd_package_error_none_when_locators_present(tmp_path):
@@ -427,7 +427,7 @@ def test_cores_sidecar_header_is_a_comment_line_wrapping_the_fingerprint(tmp_pat
 
 def test_catalog_main_missing_package_fails_actionably(tmp_path, monkeypatch, capsys):
     # The observed bug (issue #34): `hzd run`/`hzd catalog --package <install root>`
-    # used to die with a raw FileNotFoundError traceback from fw_locators.py. It
+    # used to die with a raw FileNotFoundError traceback from hzd_locators.py. It
     # must instead print an actionable message and return nonzero.
     monkeypatch.chdir(tmp_path)
     bad_package = tmp_path / "install_root"  # exists, but no PackFileLocators.bin

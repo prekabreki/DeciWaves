@@ -1,9 +1,9 @@
-# tests/test_fw_package.py
+# tests/test_hzd_package.py
 import struct
 import lz4.block
 import pytest
 from deciwaves.engine.pack.base import PackReader
-from deciwaves.engine.pack.fw_package import FwPackage
+from deciwaves.engine.pack.hzd_package import HzdPackage
 from deciwaves.engine.pack.bin_archive import file_hash
 
 from conftest import HZD_PACKAGE
@@ -24,9 +24,9 @@ def _rtti_walk_len(buf: bytes) -> int:
     return pos
 
 
-def _locator_hash(fw, loc):
+def _locator_hash(hzd, loc):
     # reverse-lookup the hash for a given Locator, via the public items() view
-    for h, l in fw.locators.items():
+    for h, l in hzd.locators.items():
         if l is loc:
             return h
     raise AssertionError("locator not found")
@@ -35,9 +35,9 @@ def _locator_hash(fw, loc):
 def test_real_roundtrip_self_verify():
     if not (HZD_PACKAGE / "PackFileLocators.bin").is_file():
         pytest.skip("HZD Remastered install not present")
-    fw = FwPackage(str(HZD_PACKAGE))
-    loc = fw.first_locator()
-    raw = fw.read_by_hash(_locator_hash(fw, loc))
+    hzd = HzdPackage(str(HZD_PACKAGE))
+    loc = hzd.first_locator()
+    raw = hzd.read_by_hash(_locator_hash(hzd, loc))
     # 1. exact length: DSAR logical read returned precisely what the locator promised
     assert len(raw) == loc.length
     # 2. RTTI self-verify: the extracted resource walks cleanly to its end
@@ -78,58 +78,58 @@ def _make_package(tmp_path, entries):
     return str(pkg)
 
 
-def test_fw_package_satisfies_pack_reader(tmp_path):
+def test_hzd_package_satisfies_pack_reader(tmp_path):
     pkg = _make_package(tmp_path, [("localized/x/sentences.core", b"core-bytes")])
-    assert isinstance(FwPackage(pkg), PackReader)
+    assert isinstance(HzdPackage(pkg), PackReader)
 
 
 def test_read_core_roundtrip(tmp_path):
     payload = b"SENTENCES-RESOURCE-" * 50
     pkg = _make_package(tmp_path, [("localized/x/sentences.core", payload),
                                    ("localized/y/other.core", b"other")])
-    fw = FwPackage(pkg)
-    assert fw.has_core("localized/x/sentences")
-    assert fw.read_core("localized/x/sentences") == payload
-    assert fw.read("localized/y/other.core") == b"other"
+    hzd = HzdPackage(pkg)
+    assert hzd.has_core("localized/x/sentences")
+    assert hzd.read_core("localized/x/sentences") == payload
+    assert hzd.read("localized/y/other.core") == b"other"
 
 
 def test_missing_path(tmp_path):
-    fw = FwPackage(_make_package(tmp_path, [("a.core", b"a")]))
-    assert not fw.has_core("nope/missing")
+    hzd = HzdPackage(_make_package(tmp_path, [("a.core", b"a")]))
+    assert not hzd.has_core("nope/missing")
     with pytest.raises(KeyError):
-        fw.read("nope/missing.core")
+        hzd.read("nope/missing.core")
     with pytest.raises(KeyError):
-        fw.read_by_hash(0xDEADBEEF)
+        hzd.read_by_hash(0xDEADBEEF)
 
 
 def test_has_present_and_missing(tmp_path):
     pkg = _make_package(tmp_path, [("localized/x/sentences.core", b"payload"),
                                     ("localized/y/other.core", b"other")])
-    fw = FwPackage(pkg)
-    assert fw.has("localized/x/sentences.core") is True
-    assert fw.has("localized/y/other.core") is True
-    assert fw.has("nope/missing.core") is False
+    hzd = HzdPackage(pkg)
+    assert hzd.has("localized/x/sentences.core") is True
+    assert hzd.has("localized/y/other.core") is True
+    assert hzd.has("nope/missing.core") is False
 
 
 def test_has_core_delegates_to_has(tmp_path):
     pkg = _make_package(tmp_path, [("localized/x/sentences.core", b"payload")])
-    fw = FwPackage(pkg)
-    assert fw.has_core("localized/x/sentences") == fw.has("localized/x/sentences.core")
+    hzd = HzdPackage(pkg)
+    assert hzd.has_core("localized/x/sentences") == hzd.has("localized/x/sentences.core")
 
 
 def test_read_by_hash_matches_read(tmp_path):
     payload = b"payload-bytes"
     pkg = _make_package(tmp_path, [("localized/x/sentences.core", payload)])
-    fw = FwPackage(pkg)
-    assert fw.read_by_hash(file_hash("localized/x/sentences.core")) == payload
-    assert fw.read("localized/x/sentences.core") == fw.read_by_hash(
+    hzd = HzdPackage(pkg)
+    assert hzd.read_by_hash(file_hash("localized/x/sentences.core")) == payload
+    assert hzd.read("localized/x/sentences.core") == hzd.read_by_hash(
         file_hash("localized/x/sentences.core"))
 
 
 def test_first_locator_empty_package(tmp_path):
-    fw = FwPackage(_make_package(tmp_path, []))
+    hzd = HzdPackage(_make_package(tmp_path, []))
     with pytest.raises(RuntimeError):
-        fw.first_locator()
+        hzd.first_locator()
 
 
 def test_first_locator_picks_smallest_nonempty_core(tmp_path):
@@ -151,6 +151,6 @@ def test_first_locator_picks_smallest_nonempty_core(tmp_path):
             out += struct.pack("<QII", h, off, length)
     (pkg / "PackFileLocators.bin").write_bytes(out)
 
-    loc = FwPackage(str(pkg)).first_locator()
+    loc = HzdPackage(str(pkg)).first_locator()
     assert loc.archive == "package.00.00.core"
     assert loc.length == 40

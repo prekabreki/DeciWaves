@@ -42,7 +42,7 @@ def _write_fixture(tmp_path, n_clips=3):
 
 
 class FakeDsar:
-    """Stands in for FwPackage(...).dsar_for(...): raises ValueError for offsets in
+    """Stands in for HzdPackage(...).dsar_for(...): raises ValueError for offsets in
     `fail_offsets` (simulating the hardened dsar_archive.read on a corrupt region),
     else returns dummy "wem" bytes tagged with the offset."""
 
@@ -58,7 +58,7 @@ class FakeDsar:
 
 
 class FakePackage:
-    """Stand-in for FwPackage: callable class instance so `FwPackage(path)` returns self,
+    """Stand-in for HzdPackage: callable class instance so `HzdPackage(path)` returns self,
     same lazily-cached-dsar shape asr_bind.py expects (`.dsar_for(ARCHIVE)`)."""
 
     def __init__(self, dsar):
@@ -80,7 +80,7 @@ def _patch_asr_stack(monkeypatch, dsar, decode_fail_marker=None, transcribe_fn=N
     """Wire fakes so main() never touches VGAudioCli/WhisperX/a real archive."""
     import deciwaves.engine.asr as asr_mod
 
-    monkeypatch.setattr(asr_bind, "FwPackage", FakePackage(dsar))
+    monkeypatch.setattr(asr_bind, "HzdPackage", FakePackage(dsar))
     monkeypatch.setattr(asr_mod, "load_model", lambda *a, **k: object())
 
     def fake_decode(wem_bytes, wav_path):
@@ -130,7 +130,7 @@ def _write_multi_bucket_fixture(tmp_path, n_buckets):
 
 def _fake_package_dir(tmp_path):
     """A real directory shaped like a valid HZDR package dir (has
-    PackFileLocators.bin), so it passes hzd_package_error while FwPackage itself
+    PackFileLocators.bin), so it passes hzd_package_error while HzdPackage itself
     stays fully mocked (see FakePackage -- it ignores the path value entirely).
     Reused across tests via a fixed subdirectory name so repeated calls are
     idempotent."""
@@ -596,9 +596,9 @@ def test_sample_cap_zero_means_unlimited_full_pass_no_cap_message(tmp_path, monk
 
 # ---------------------------------------------------------------------------
 # main(): a bad --package (issue #49, mirrors #34's hzd_catalog check) must fail
-# actionably, not with a raw FileNotFoundError traceback from fw_locators.py --
-# FwPackage is deliberately left unmocked here: the check must fire before
-# FwPackage is ever constructed.
+# actionably, not with a raw FileNotFoundError traceback from hzd_locators.py --
+# HzdPackage is deliberately left unmocked here: the check must fire before
+# HzdPackage is ever constructed.
 # ---------------------------------------------------------------------------
 
 def test_asr_bind_main_missing_package_fails_actionably(tmp_path, monkeypatch, capsys):

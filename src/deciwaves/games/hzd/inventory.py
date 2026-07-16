@@ -27,7 +27,7 @@ def harvest_sentence_cores(fw, sample_cap: int | None = None,
     Parameters
     ----------
     fw:
-        An ``engine.pack.fw_package.FwPackage``.
+        An ``engine.pack.hzd_package.HzdPackage``.
     sample_cap:
         If set, stop after scanning this many qualifying ``.core`` records (useful for
         tests / quick runs). ``None`` scans the whole pack.

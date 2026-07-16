@@ -1,6 +1,6 @@
-"""PackReader over HZD Remastered's Forbidden-West package format.
+"""PackReader over HZD Remastered's Forbidden-West-generation package format.
 
-Composes FwLocators (PackFileLocators.bin index) + DsarArchive (per-archive DSAR reader).
+Composes HzdLocators (PackFileLocators.bin index) + DsarArchive (per-archive DSAR reader).
 The virtual-path hash is identical to DS, so we reuse engine.pack.bin_archive.file_hash.
 Satisfies engine.pack.base.PackReader structurally.
 """
@@ -8,14 +8,14 @@ from __future__ import annotations
 import os
 
 from deciwaves.engine.pack.bin_archive import file_hash
-from deciwaves.engine.pack.fw_locators import FwLocators, Locator
+from deciwaves.engine.pack.hzd_locators import HzdLocators, Locator
 from deciwaves.engine.pack.dsar_archive import DsarArchive
 
 
-class FwPackage:
+class HzdPackage:
     def __init__(self, package_dir: str):
         self.package_dir = package_dir
-        self._locators = FwLocators(os.path.join(package_dir, "PackFileLocators.bin"))
+        self._locators = HzdLocators(os.path.join(package_dir, "PackFileLocators.bin"))
         self._archives: dict[str, DsarArchive] = {}  # lazily opened by name
 
     def _archive(self, name: str) -> DsarArchive:
@@ -52,7 +52,7 @@ class FwPackage:
         return self._read_locator(loc)
 
     @property
-    def locators(self) -> FwLocators:
+    def locators(self) -> HzdLocators:
         """Public read-only view of the PackFileLocators index."""
         return self._locators
 

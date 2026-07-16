@@ -1,6 +1,9 @@
 """Deserialise the objects of one Forbidden West streaming group and resolve
 each line's audio locator by positional pairing.
 
+``fw_`` here means the real FW game specifically -- HZD Remastered has no
+streaming graph and never goes through this reader (issue #48).
+
 Ported from odradek's ``StreamingObjectReader``: a group allocates one object
 per entry in its type table, then its span bytes are read sequentially, filling
 each object as a compound. Every *valid* ``StreamingDataSource``

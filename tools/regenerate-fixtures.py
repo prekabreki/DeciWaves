@@ -20,7 +20,7 @@ FIXTURES = {
     "localized/sentences/ds_lines_cutscene/sq_cs04_s01650/sentences": "out/sq_cs04_s01650.core",
 }
 
-# HZD Remastered (Forbidden-West package format) — extracted via FwPackage, no Oodle/DSPC.
+# HZD Remastered (Forbidden-West-generation package format) — extracted via HzdPackage, no Oodle/DSPC.
 _HZD_PACKAGE = (r"C:\Program Files (x86)\Steam\steamapps\common"
                 r"\Horizon - Zero Dawn Remastered\LocalCacheDX12\package")
 
@@ -49,11 +49,11 @@ def _regen_hzd(package_dir: str) -> None:
     if not os.path.isdir(package_dir):
         print(f"skipping HZD fixtures: package dir absent ({package_dir})")
         return
-    from deciwaves.engine.pack.fw_package import FwPackage
+    from deciwaves.engine.pack.hzd_package import HzdPackage
 
-    fw = FwPackage(package_dir)
+    hzd = HzdPackage(package_dir)
     for vpath, out in HZD_FIXTURES.items():
-        data = fw.read_core(vpath)
+        data = hzd.read_core(vpath)
         os.makedirs(os.path.dirname(os.path.join(REPO, out)), exist_ok=True)
         with open(os.path.join(REPO, out), "wb") as f:
             f.write(data)

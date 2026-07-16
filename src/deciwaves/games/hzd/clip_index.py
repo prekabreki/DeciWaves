@@ -4,7 +4,7 @@ import argparse
 import csv
 import os
 from deciwaves.engine.parallel import default_jobs, ordered_parallel
-from deciwaves.engine.pack.fw_package import FwPackage
+from deciwaves.engine.pack.hzd_package import HzdPackage
 from deciwaves.games.hzd.atrac9 import fact_sample_count
 from deciwaves.games.hzd.profile import VOICE_ARCHIVE as ARCHIVE
 
@@ -74,7 +74,7 @@ def main(argv=None):
         print(err)
         return 1
 
-    pkg = FwPackage(a.package)                       # composes FwLocators + DsarArchive
+    pkg = HzdPackage(a.package)                      # composes HzdLocators + DsarArchive
     dsar = pkg.dsar_for(ARCHIVE)                     # lazy-cached DsarArchive
     entries = pkg.locators.entries(ARCHIVE)
     skipped = build_clip_index(dsar, entries, a.out, a.errors, jobs=a.jobs)
