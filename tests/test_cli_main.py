@@ -17,6 +17,21 @@ def _restore_cwd():
     os.chdir(cwd)
 
 
+def test_workspace_help_documents_ordering_and_path_resolution_semantics(capsys):
+    """--workspace's help text must actually explain the two easy-to-get-wrong
+    semantics (issue #32): it must precede the game name, and a relative
+    stage-flag path resolves against the invocation cwd, not --workspace."""
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["--help"])
+
+    assert exc.value.code == 0
+    # argparse wraps --workspace's help text across lines -- normalize
+    # whitespace before substring-checking so wrap points don't matter.
+    out = " ".join(capsys.readouterr().out.split())
+    assert "BEFORE the game name" in out
+    assert "resolved against the directory you ran" in out
+
+
 def test_version(capsys):
     with pytest.raises(SystemExit) as e:
         cli.main(["--version"])
