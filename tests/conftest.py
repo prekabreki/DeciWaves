@@ -21,6 +21,15 @@ FW_INSTALL_ROOT = Path(os.environ.get("DECIWAVES_FW_INSTALL", r"\\nonexistent"))
 FW_PACKAGE_DIR = FW_INSTALL_ROOT / "LocalCacheWinGame" / "package"
 FW_STREAMING_GRAPH = FW_PACKAGE_DIR / "streaming_graph.core"
 
+# Horizon Zero Dawn Remastered package dir — integration tests skip when absent.
+# Override with DECIWAVES_HZD_PACKAGE, mirroring DECIWAVES_DS_INSTALL / DECIWAVES_FW_INSTALL
+# above (c626874). Previously copy-pasted across test_dsar_archive.py / test_fw_package.py /
+# test_fw_locators.py / test_hzd_inventory.py, each hardcoding the same personal Steam path
+# (issue #51 item 6).
+HZD_PACKAGE = Path(os.environ.get(
+    "DECIWAVES_HZD_PACKAGE",
+    r"C:\Program Files (x86)\Steam\steamapps\common\Horizon - Zero Dawn Remastered\LocalCacheDX12\package"))
+
 
 @pytest.fixture(scope="session", autouse=True)
 def _ds_mode():

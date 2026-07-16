@@ -5,6 +5,7 @@ exact retail line count. Skips when the FW install / odradek types.json is absen
 """
 import os
 
+import numpy as np
 import pytest
 
 from deciwaves.engine.pack.fw_streaming_graph import StreamingGraph
@@ -12,7 +13,8 @@ from deciwaves.engine.pack.fw_stream import FwStreamStore
 from deciwaves.engine.pack.fw_rtti import TypeRegistry
 from deciwaves.engine.pack.fw_object_reader import GroupReader, read_group_spans
 from deciwaves.engine.pack.fw_fast_extract import (
-    iter_english_lines, english_file_indices, FastLine, strip_cache_prefix)
+    iter_english_lines, english_file_indices, FastLine, strip_cache_prefix,
+    arith_clean_lssr_count, LANGS)
 
 # Override with DECIWAVES_FW_TYPES_JSON; falls back to the old dev-checkout
 # layout (an odradek vendor checkout) for backward compatibility.
@@ -62,6 +64,28 @@ def test_english_file_indices_only_strips_leading_device_prefix():
         "cache:package/fr/package.01.00.core.stream",   # non-English -> excluded
     ])
     assert english_file_indices(graph) == {0}
+
+
+# --- arith_clean_lssr_count: shared by iter_english_lines and
+# games.fw.subtitle_bind.scan_arith_clean_groups (issue #51 item 8) ---------
+
+LSSR_HASH = 0xAAAA
+OTHER_HASH = 0xBBBB
+
+
+def test_arith_clean_lssr_count_none_when_no_lssrs_present():
+    tt = np.array([OTHER_HASH, OTHER_HASH], dtype=np.uint64)
+    assert arith_clean_lssr_count(tt, LSSR_HASH, locator_count=0) is None
+
+
+def test_arith_clean_lssr_count_returns_n_when_locator_count_matches():
+    tt = np.array([LSSR_HASH, OTHER_HASH, LSSR_HASH], dtype=np.uint64)  # n=2
+    assert arith_clean_lssr_count(tt, LSSR_HASH, locator_count=LANGS * 2) == 2
+
+
+def test_arith_clean_lssr_count_none_when_locator_count_does_not_match():
+    tt = np.array([LSSR_HASH, LSSR_HASH], dtype=np.uint64)  # n=2
+    assert arith_clean_lssr_count(tt, LSSR_HASH, locator_count=LANGS * 2 - 1) is None
 
 
 def test_fast_path_resolves_expected_line_count(fw_graph):

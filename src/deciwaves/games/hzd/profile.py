@@ -41,6 +41,25 @@ HZD_ANCHORED_PREFIXES: frozenset[str] = frozenset({"mq", "sq", "ec", "dlc"})
 VOICE_ARCHIVE = "package.01.00.core.stream"
 
 
+HZD_LOCATORS_NAME = "PackFileLocators.bin"
+
+
+def is_valid_hzd_package_dir(package_dir: str) -> bool:
+    """True iff *package_dir* directly contains ``PackFileLocators.bin`` -- the
+    one shape check for "does this look like the HZDR
+    ...\\LocalCacheDX12\\package directory", shared by ``cli.doctor``'s
+    ``check_hzd_package``, ``cli.setup``'s ``_hzd_package_warning``, and this
+    module's own ``hzd_package_error`` (previously each independently
+    reimplemented the same ``os.path.isfile(os.path.join(dir,
+    "PackFileLocators.bin"))`` check -- issue #51 item 2). Each caller keeps
+    its own message wording: a doctor preflight status line, a setup WARNING
+    with an install-root-typo suggestion, and this module's stage-time hard
+    error are genuinely different audiences, so only the predicate and the
+    filename constant are unified here.
+    """
+    return os.path.isfile(os.path.join(package_dir, HZD_LOCATORS_NAME))
+
+
 def hzd_package_error(package_dir: str) -> str | None:
     """Return an actionable error message if *package_dir* doesn't contain
     ``PackFileLocators.bin`` (the file ``FwPackage``/``FwLocators`` need), else
@@ -52,7 +71,7 @@ def hzd_package_error(package_dir: str) -> str | None:
     of ...\\LocalCacheDX12\\package) surfaced only as a raw FileNotFoundError
     traceback from engine.pack.fw_locators at catalog time (issue #34).
     """
-    if os.path.isfile(os.path.join(package_dir, "PackFileLocators.bin")):
+    if is_valid_hzd_package_dir(package_dir):
         return None
     return (
         f"HZD package not found: no PackFileLocators.bin under {package_dir}. "

@@ -1,9 +1,9 @@
-import os
 import struct
-from pathlib import Path
 
 import pytest
 from deciwaves.engine.pack.fw_locators import FwLocators, Locator, Entry
+
+from conftest import HZD_PACKAGE
 
 
 def _build_locators(packfiles):
@@ -120,13 +120,6 @@ def test_duplicate_count_zero_when_no_duplicates():
     data = _build_locators([("a.core", [(0xAA, 0, 10), (0xBB, 16, 20)])])
     loc = FwLocators.from_bytes(data)
     assert loc.duplicate_count == 0
-
-
-# Override with DECIWAVES_HZD_PACKAGE, mirroring the DECIWAVES_DS_INSTALL /
-# DECIWAVES_FW_INSTALL convention (see conftest.py).
-HZD_PACKAGE = Path(os.environ.get(
-    "DECIWAVES_HZD_PACKAGE",
-    r"C:\Program Files (x86)\Steam\steamapps\common\Horizon - Zero Dawn Remastered\LocalCacheDX12\package"))
 
 
 @pytest.fixture

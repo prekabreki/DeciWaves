@@ -29,12 +29,13 @@ from __future__ import annotations
 
 import argparse
 import enum
-import os
 import shutil
 from pathlib import Path
 from typing import NamedTuple
 
 from deciwaves.cli import config
+from deciwaves.engine import tool_paths
+from deciwaves.games.hzd import profile as hzd_profile
 
 
 class Availability(enum.Enum):
@@ -51,6 +52,15 @@ class CheckResult(NamedTuple):
     ``ok, msg = check_x(...)`` call site/test, unchanged. ``status`` is the
     structured signal callers that need more than pass/fail (guided.py)
     should read instead of the message text.
+
+    Positional indexing (``result[0]``) is kept consistent with iteration/
+    unpacking via the ``__getitem__`` override below: without it, indexing
+    would silently fall back to ``NamedTuple``'s inherited ``tuple.__getitem__``
+    -- which reads the raw underlying fields (``status``, ``message``), NOT
+    ``(ok, message)`` -- so ``result[0]`` would hand back the ``Availability``
+    enum instead of the boolean ``ok`` that iteration/unpacking gives. That
+    mismatch (only ``__iter__`` had been overridden, not ``__getitem__``) is
+    exactly the footgun this closes.
     """
     status: Availability
     message: str
@@ -62,6 +72,9 @@ class CheckResult(NamedTuple):
     def __iter__(self):
         yield self.ok
         yield self.message
+
+    def __getitem__(self, index):
+        return (self.ok, self.message)[index]
 
 
 # --- tool resolution ---------------------------------------------------
@@ -75,6 +88,15 @@ class CheckResult(NamedTuple):
 def check_tool(display: str, exe: str, env_var: str | None, tools_dir: str) -> tuple[bool, str]:
     """Resolve *exe* the same way the pipeline will: env var -> tools_dir -> PATH.
 
+    The actual env var -> tools_dir -> PATH order is delegated to
+    ``engine.tool_paths.locate()`` -- the same function ``resolve()`` (what
+    stages call at decode-subprocess-spawn time) is built on -- instead of
+    reimplementing it here (issue #51 item 1: this used to be a second,
+    independent copy of that order). This function's own job is the
+    doctor-specific part on top: validating that a SET env var actually
+    resolves to something usable, and turning the result into a
+    human-readable report line.
+
     An env var that's set but resolves to nothing usable is reported as a
     failure, not silently accepted: ``engine/tool_paths.py``'s own ``resolve()``
     uses the env var unconditionally when set (broken or not), so this is exactly
@@ -84,22 +106,18 @@ def check_tool(display: str, exe: str, env_var: str | None, tools_dir: str) -> t
     (``shutil.which``) works at spawn time, so doctor must not fail it just
     because it isn't an absolute file path -- that rejected a working config.
     """
-    if env_var and os.environ.get(env_var):
-        p = os.environ[env_var]
+    found = tool_paths.locate(env_var, exe, tools_dir)
+    if found.source == "env":
+        p = found.path
         if not Path(p).is_file() and not shutil.which(p):
             return False, (f"[--] {display}: env {env_var} is set to {p}, but that "
                             f"file doesn't exist (and it isn't on PATH). Fix: unset "
                             f"{env_var} or point it at the real executable.")
         return True, f"[ok] {display}: {p} (env {env_var})"
-    if tools_dir:
-        names = {exe} if exe.lower().endswith(".exe") else {exe, exe + ".exe"}
-        for name in names:
-            candidate = Path(tools_dir) / name
-            if candidate.is_file():
-                return True, f"[ok] {display}: {candidate} (tools_dir)"
-    found = shutil.which(exe)
-    if found:
-        return True, f"[ok] {display}: {found} (PATH)"
+    if found.source == "tools_dir":
+        return True, f"[ok] {display}: {found.path} (tools_dir)"
+    if found.source == "PATH":
+        return True, f"[ok] {display}: {found.path} (PATH)"
     return False, (f"[--] {display}: not found. "
                     f"Fix: run `deciwaves setup` to fetch it (or put it on PATH).")
 
@@ -130,10 +148,14 @@ def check_ds_install(ds_install: str) -> CheckResult:
 
 
 def check_hzd_package(hzd_package: str) -> CheckResult:
+    """The "does this look like a real HZDR package dir" predicate itself is
+    ``games.hzd.profile.is_valid_hzd_package_dir`` -- shared with ``cli.setup``'s
+    ``_hzd_package_warning`` and ``games.hzd.profile.hzd_package_error``
+    (issue #51 item 2); this function's own report wording stays as-is."""
     if not hzd_package:
         return CheckResult(Availability.NOT_CONFIGURED,
                             "[--] HZD package: not configured (fine if you don't own it)")
-    if Path(hzd_package, "PackFileLocators.bin").is_file():
+    if hzd_profile.is_valid_hzd_package_dir(hzd_package):
         return CheckResult(Availability.OK, f"[ok] HZD package: {hzd_package}")
     return CheckResult(Availability.BROKEN,
                         f"[--] HZD package: {hzd_package!r} has no PackFileLocators.bin. "

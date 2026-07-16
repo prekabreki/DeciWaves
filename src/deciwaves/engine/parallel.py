@@ -26,8 +26,30 @@ from __future__ import annotations
 
 import os
 import threading
+import weakref
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
+
+
+class _LockHandle:
+    """A ``threading.Lock`` wrapped in a plain object so it can live in a
+    ``weakref.WeakValueDictionary`` -- the bare ``_thread.lock`` objects
+    ``threading.Lock()`` returns don't support weak references themselves.
+    Acts as its own context manager so ``with locks(key):`` (see
+    :class:`KeyedLocks`) is unaffected by the wrapping."""
+
+    __slots__ = ("_lock", "__weakref__")
+
+    def __init__(self):
+        self._lock = threading.Lock()
+
+    def __enter__(self):
+        self._lock.acquire()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self._lock.release()
+        return False
 
 
 class KeyedLocks:
@@ -44,17 +66,29 @@ class KeyedLocks:
 
     The `with locks(key):` holder must re-check the cache after acquiring -- a
     peer may have produced it while we waited.
+
+    Entries are held only WEAKLY (via ``_LockHandle``, above): once every
+    caller that was holding or waiting on a given key's lock has exited its
+    ``with locks(key):`` block, and nothing else references that lock, it
+    becomes eligible for garbage collection -- so a long-running process
+    (``engine.audio_clip``'s module-level ``_cache_locks``, reused across
+    every clip decoded for the process's whole life) never accumulates one
+    permanent lock per distinct cache path it has ever seen. A key currently
+    IN USE can never be collected: each caller's own local reference for the
+    duration of its `with` block keeps it alive, so mutual exclusion under
+    concurrency is unaffected -- only the unbounded growth of finished
+    entries is fixed.
     """
 
     def __init__(self):
         self._guard = threading.Lock()
-        self._locks: dict = {}
+        self._locks: "weakref.WeakValueDictionary" = weakref.WeakValueDictionary()
 
-    def __call__(self, key) -> threading.Lock:
+    def __call__(self, key) -> _LockHandle:
         with self._guard:
             lk = self._locks.get(key)
             if lk is None:
-                lk = self._locks[key] = threading.Lock()
+                lk = self._locks[key] = _LockHandle()
             return lk
 
 

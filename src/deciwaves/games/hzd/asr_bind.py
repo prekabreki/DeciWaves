@@ -97,11 +97,14 @@ def main(argv=None):
                      help="MVP cap on ASR work: transcribe at most this many clips' worth of "
                           "ambiguous buckets (whole buckets, so it may slightly overshoot -- "
                           "see the cap loop below), never the full library, since structural "
-                          "binding already resolves most rows without any ASR at all. 0 = "
-                          "unlimited (a full pass over every ambiguous bucket -- hours on a "
-                          "full library). When a nonzero cap actually truncates work, this "
-                          "prints exactly how many ambiguous buckets were left "
-                          "untranscribed. Forwarded through `hzd run` (issue #35).")
+                          "binding already resolves most rows without any ASR at all. Unit: "
+                          "approximate CLIP count, bucket-granular (contrast "
+                          "games.hzd.catalog's --sample-cap, which counts raw harvest-scan "
+                          "RECORDS, not clips). 0 = unlimited (a full pass over every "
+                          "ambiguous bucket -- hours on a full library). When a nonzero cap "
+                          "actually truncates work, this prints exactly how many ambiguous "
+                          "buckets were left untranscribed. Forwarded through `hzd run` "
+                          "(issue #35).")
     ap.add_argument("--all-buckets", action="store_true",
                     help="transcribe every ambiguous bucket, not just story-relevant "
                          "ones (default skips pure ambient/bark collision buckets)")

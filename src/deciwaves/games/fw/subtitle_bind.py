@@ -137,7 +137,7 @@ def scan_arith_clean_groups(graph, reader, store, transcripts_by_id,
     """
     from deciwaves.engine.pack.fw_rtti import type_hash
     from deciwaves.engine.pack.fw_object_reader import read_group_spans
-    from deciwaves.engine.pack.fw_fast_extract import LANGS
+    from deciwaves.engine.pack.fw_fast_extract import arith_clean_lssr_count
 
     LSSR = type_hash("LocalizedSimpleSoundResource")
     if en_indices is None:
@@ -147,8 +147,8 @@ def scan_arith_clean_groups(graph, reader, store, transcripts_by_id,
 
     for grp in graph.groups:
         tt = graph.type_table[grp.type_start:grp.type_start + grp.type_count]
-        n = int((tt == LSSR).sum())
-        if n == 0 or grp.locator_count != LANGS * n:
+        n = arith_clean_lssr_count(tt, LSSR, grp.locator_count)
+        if n is None:
             continue
         if int(fidx[grp.locator_start]) not in en_indices:
             continue

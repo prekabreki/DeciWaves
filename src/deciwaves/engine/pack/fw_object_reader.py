@@ -98,42 +98,12 @@ class GroupReader:
 
     def read_group(self, group: Group, span_blobs: list[bytes]) -> list[FwObject]:
         """Deserialise *group*'s objects. *span_blobs* are the raw bytes of each
-        of the group's spans (caller reads them so this stays I/O-free)."""
-        type_names = [
-            self.reg.name_for_hash(int(h))
-            for h in self.graph.type_table[group.type_start:group.type_start + group.type_count]
-        ]
-        objects = [FwObject(tn) for tn in type_names]
-        # locator cursor: consumed by every valid StreamingDataSource (including
-        # ones nested inside the LSSR's LocalizedDataSources array), in order.
-        self._locators = iter(
-            self.graph.locators[group.locator_start:group.locator_start + group.locator_count]
-        )
-        self._check_span_blobs(group, span_blobs)
-        self._group_id = group.group_id
+        of the group's spans (caller reads them so this stays I/O-free).
 
-        index = 0
-        for blob in span_blobs:
-            cur = _Cur(blob, 0, len(blob))
-            while cur.p < cur.end:
-                if index >= len(objects):
-                    raise ValueError(
-                        f"group {group.group_id}: span data holds more objects "
-                        f"than the type table declares ({len(objects)}) -> walk desync"
-                    )
-                obj = objects[index]
-                index += 1
-                self._fill_compound(obj.type_name, cur, obj.fields)
-            if cur.p != cur.end:
-                raise ValueError(
-                    f"span not size-exact in group {group.group_id}: "
-                    f"{cur.p} != {cur.end}"
-                )
-        if index != len(objects):
-            raise ValueError(
-                f"group {group.group_id}: filled {index} of {len(objects)} objects"
-            )
-        return objects
+        A full deserialize is exactly what :meth:`scan_group` does when told to
+        capture every walked object, so this is just that call -- previously a
+        second, independent copy of the same walk (issue #51 item 5)."""
+        return self.scan_group(group, span_blobs, capture=CAPTURE_ALL)
 
     @staticmethod
     def _sds_valid(fields: dict) -> bool:

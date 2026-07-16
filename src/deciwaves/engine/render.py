@@ -367,9 +367,18 @@ def main(argv=None):
     # imports deferred into main() (consistent with cutscene_audio.py): avoids
     # constructing PackIndex at module import time; keeps `import engine.render` test-clean
     from deciwaves.engine import audio_clip
+    from deciwaves.engine.tool_paths import resolve
     from deciwaves.games.ds import story_order
     from deciwaves.engine.pack.bin_index import PackIndex
     from deciwaves.games.ds import episode_map as em
+
+    # Resolved once per render() invocation and passed to every clip_wav call below,
+    # instead of clip_wav's own default re-resolving DECIWAVES_VGMSTREAM (env var ->
+    # PATH -> bare name) on every single clip (issue #51 item 7b) -- clip_wav's OWN
+    # default-arg resolution stays as-is for callers that don't pre-resolve (see its
+    # docstring / issue #25: it must still re-resolve at call time, not freeze at
+    # import time, for a caller that never hoists it).
+    vgmstream = resolve("DECIWAVES_VGMSTREAM", "vgmstream-cli")
 
     idx = PackIndex(args.data_dir, args.oodle)
     os.makedirs(args.out_dir, exist_ok=True)
@@ -401,7 +410,7 @@ def main(argv=None):
 
     def _decode(s):
         entry = keepspans.get(s.stream_path)
-        wav, dur = audio_clip.clip_wav(idx, s.stream_path, args.cache)
+        wav, dur = audio_clip.clip_wav(idx, s.stream_path, args.cache, vgmstream=vgmstream)
         if entry:                             # keep-span trim (cutscene)
             wav, dur = audio_clip.apply_keep_spans(
                 wav, entry[0], os.path.join(args.cache, "kept"))

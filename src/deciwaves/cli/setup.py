@@ -32,9 +32,7 @@ from deciwaves.cli import config
 # module) -- re-exported here under their old names since tests (and anyone
 # scripting against this module) reference `setup.VGMSTREAM_URL` etc. directly.
 from deciwaves.cli.config import FFMPEG_URL, VGAUDIO_URL, VGMSTREAM_URL  # noqa: F401
-
-# (label, url, exe expected to land directly in the tools dir once unpacked).
-_TOOLS = tuple((t.key, t.url, t.exe) for t in config.TOOLS)
+from deciwaves.games.hzd.profile import HZD_LOCATORS_NAME, is_valid_hzd_package_dir
 
 OODLE_DLL_NAME = "oo2core_7_win64.dll"
 
@@ -108,9 +106,6 @@ def _download_and_unpack(url: str, dest_dir: Path, timeout: float = DOWNLOAD_TIM
         manifest_path.write_text("\n".join(extracted) + "\n", encoding="utf-8")
 
 
-HZD_LOCATORS_NAME = "PackFileLocators.bin"
-
-
 def _hzd_package_warning(hzd_package: str) -> str | None:
     """Return a WARNING message if *hzd_package* is set but doesn't look like
     the HZDR ...\\LocalCacheDX12\\package dir (the one containing
@@ -122,13 +117,19 @@ def _hzd_package_warning(hzd_package: str) -> str | None:
     If the user pointed --hzd-package at the game install root, detect that
     ...\\LocalCacheDX12\\package exists underneath and name the exact corrected
     path in the hint, rather than just describing the pattern.
+
+    The "is this a valid package dir" predicate is
+    ``games.hzd.profile.is_valid_hzd_package_dir`` -- shared with
+    ``cli.doctor``'s ``check_hzd_package`` and ``games.hzd.profile``'s own
+    ``hzd_package_error`` (issue #51 item 2); this function's WARNING wording
+    (with its install-root-typo suggestion) stays its own.
     """
     if not hzd_package:
         return None
-    if os.path.isfile(os.path.join(hzd_package, HZD_LOCATORS_NAME)):
+    if is_valid_hzd_package_dir(hzd_package):
         return None
     suggestion = Path(hzd_package) / "LocalCacheDX12" / "package"
-    if (suggestion / HZD_LOCATORS_NAME).is_file():
+    if is_valid_hzd_package_dir(str(suggestion)):
         return (f"WARNING: {hzd_package!r} has no {HZD_LOCATORS_NAME} directly inside -- "
                 f"looks like the HZD install root, not the package dir. Did you mean "
                 f"--hzd-package {suggestion}?")
@@ -189,28 +190,28 @@ def _fetch_tools(tools_dir: Path, skip_downloads: bool, force: bool = False):
     was missing (issue #32) -- unless --force says to refetch it anyway."""
     rows = []
     any_failed = False
-    for label, url, exe in _TOOLS:
-        exe_path = tools_dir / exe
-        manifest_path = _manifest_path_for(exe, tools_dir)
+    for tool in config.TOOLS:
+        exe_path = tools_dir / tool.exe
+        manifest_path = _manifest_path_for(tool.exe, tools_dir)
         if skip_downloads:
             status = "found" if exe_path.is_file() else "MISSING"
-            rows.append((label, status, str(exe_path)))
+            rows.append((tool.key, status, str(exe_path)))
             continue
         if not force and _tool_fully_installed(exe_path, manifest_path, tools_dir):
-            rows.append((label, "found (skipped -- use --force to refetch)", str(exe_path)))
+            rows.append((tool.key, "found (skipped -- use --force to refetch)", str(exe_path)))
             continue
         try:
-            _download_and_unpack(url, tools_dir, manifest_path=manifest_path)
+            _download_and_unpack(tool.url, tools_dir, manifest_path=manifest_path)
         except Exception as exc:  # fail-soft per tool: record and keep going
-            status = f"FAILED: {label} ({_short_reason(exc)})"
+            status = f"FAILED: {tool.key} ({_short_reason(exc)})"
             any_failed = True
         else:
             if exe_path.is_file():
                 status = "fetched"
             else:
-                status = f"FAILED: {label} (exe not found after unpack)"
+                status = f"FAILED: {tool.key} (exe not found after unpack)"
                 any_failed = True
-        rows.append((label, status, str(exe_path)))
+        rows.append((tool.key, status, str(exe_path)))
     return rows, any_failed
 
 

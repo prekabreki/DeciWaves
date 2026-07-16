@@ -2,9 +2,10 @@
 import json
 import os
 import sys
-import tempfile
 from pathlib import Path
 from typing import NamedTuple, Optional
+
+from deciwaves.engine.atomic_io import atomic_write
 
 KEYS = ("tools_dir", "ds_install", "hzd_package", "fw_package", "oodle_dll", "fw_gamescript")
 
@@ -201,19 +202,16 @@ def enter_workspace(workspace) -> Path:
     return ws
 
 def save(cfg: dict) -> None:
+    """Persist *cfg* to config.json atomically, via ``engine.atomic_io.atomic_write``
+    (a temp file beside config.json, moved into place with ``os.replace`` only once
+    fully written) -- so a crash/interrupt mid-write never leaves config.json half
+    written; readers see either the previous file or the complete new one."""
     cfg_path = path()
     cfg_path.parent.mkdir(parents=True, exist_ok=True)
     data = json.dumps({k: cfg.get(k, "") for k in KEYS}, indent=2)
-    fd, tmp_name = tempfile.mkstemp(
-        dir=cfg_path.parent, prefix=cfg_path.name + ".", suffix=".tmp"
-    )
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
+
+    def _write(tmp_path):
+        with open(tmp_path, "w", encoding="utf-8") as f:
             f.write(data)
-        os.replace(tmp_name, cfg_path)
-    except BaseException:
-        try:
-            os.remove(tmp_name)
-        except OSError:
-            pass
-        raise
+
+    atomic_write(str(cfg_path), _write)

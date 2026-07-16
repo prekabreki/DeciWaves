@@ -38,15 +38,19 @@ def test_tools_table_urls_are_pinned_releases():
 
 
 def test_setup_and_main_and_doctor_all_consume_the_same_tools_table():
-    """Guards against the table being reintroduced as separate copies: setup's
-    own _TOOLS and doctor's check list must be *derived from* config.TOOLS,
-    not restate its facts independently."""
+    """Guards against the table being reintroduced as a separate copy: setup
+    used to re-map config.TOOLS into an anonymous (key, url, exe) 3-tuple
+    (`_TOOLS`) purely to unpack it positionally in `_fetch_tools` -- issue #51
+    item 3 replaced that with `_fetch_tools` iterating config.TOOLS (ToolSpec)
+    directly, so there is no second copy of the table left to drift."""
     from deciwaves.cli import setup as setup_mod
 
     assert setup_mod.VGMSTREAM_URL == config.TOOLS[0].url
     assert setup_mod.VGAUDIO_URL == config.TOOLS[1].url
     assert setup_mod.FFMPEG_URL == config.TOOLS[2].url
-    assert setup_mod._TOOLS == tuple((t.key, t.url, t.exe) for t in config.TOOLS)
+    assert not hasattr(setup_mod, "_TOOLS"), (
+        "setup.py should iterate config.TOOLS directly, not keep a redundant "
+        "_TOOLS re-mapping")
 
 
 def test_absolutize_existing_paths_rewrites_only_existing_relative_tokens(tmp_path, monkeypatch):

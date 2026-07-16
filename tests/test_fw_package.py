@@ -1,18 +1,12 @@
 # tests/test_fw_package.py
-import os
 import struct
 import lz4.block
 import pytest
-from pathlib import Path
 from deciwaves.engine.pack.base import PackReader
 from deciwaves.engine.pack.fw_package import FwPackage
 from deciwaves.engine.pack.bin_archive import file_hash
 
-# Override with DECIWAVES_HZD_PACKAGE, mirroring the DECIWAVES_DS_INSTALL /
-# DECIWAVES_FW_INSTALL convention (see conftest.py).
-HZD_PACKAGE = Path(os.environ.get(
-    "DECIWAVES_HZD_PACKAGE",
-    r"C:\Program Files (x86)\Steam\steamapps\common\Horizon - Zero Dawn Remastered\LocalCacheDX12\package"))
+from conftest import HZD_PACKAGE
 
 
 def _rtti_walk_len(buf: bytes) -> int:
