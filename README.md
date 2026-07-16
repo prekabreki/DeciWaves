@@ -32,16 +32,18 @@ modifies your install (read-only), and its output is for your personal use.
 
 ## Install
 
-DeciWaves is not on PyPI yet, so install it from a clone:
-
-    git clone https://github.com/prekabreki/DeciWaves
-    cd DeciWaves
-    pip install .
+    pip install deciwaves
 
 HZD and FW also need the GPU transcription extra (WhisperX). Install it together with a
 PyTorch build that matches your CUDA version (see https://pytorch.org/get-started/locally/):
 
-    pip install ".[asr]"
+    pip install deciwaves[asr]
+
+Or install from a clone -- for development, or to run the latest unreleased code:
+
+    git clone https://github.com/prekabreki/DeciWaves
+    cd DeciWaves
+    pip install .
 
 Then fetch the decode tools, point DeciWaves at your game, and check the result:
 
@@ -92,7 +94,7 @@ longer on a slow disk. No GPU is involved anywhere in the default DS chain.
 
 ### Horizon Zero Dawn Remastered
 
-    pip install ".[asr]"
+    pip install deciwaves[asr]
     deciwaves --workspace D:\deciwaves hzd run
 
 HZD chains catalog -> clip-index -> wem-metadata -> bind -> render. Structural binding
