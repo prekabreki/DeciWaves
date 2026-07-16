@@ -13,14 +13,10 @@ import unicodedata
 
 MIN_LEN = 20
 _SPEAKER_RE = re.compile(r"^[A-Z][\w .'-]{0,20}:\s*(.+)$")
-_QUOTES = (("'", "'"), ("'", "'"), ("“", '"'), ("”", '"'))
 
 
 def normalize(s: str) -> str:
     s = unicodedata.normalize("NFKD", s)
-    for a, b in _QUOTES:
-        s = s.replace(a, b)
-    s = s.replace("\n", " ")
     s = re.sub(r"[^a-z0-9 ]", " ", s.lower())
     return re.sub(r"\s+", " ", s).strip()
 
