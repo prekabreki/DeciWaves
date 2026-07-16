@@ -75,18 +75,21 @@ class CheckResult(NamedTuple):
 def check_tool(display: str, exe: str, env_var: str | None, tools_dir: str) -> tuple[bool, str]:
     """Resolve *exe* the same way the pipeline will: env var -> tools_dir -> PATH.
 
-    An env var that's set but points at a file that doesn't exist is reported
-    as a failure, not silently accepted: ``engine/tool_paths.py``'s own
-    ``resolve()`` uses the env var unconditionally when set (broken or not),
-    so this is exactly the failure mode doctor exists to catch before a
-    decode subprocess fails at spawn time.
+    An env var that's set but resolves to nothing usable is reported as a
+    failure, not silently accepted: ``engine/tool_paths.py``'s own ``resolve()``
+    uses the env var unconditionally when set (broken or not), so this is exactly
+    the failure mode doctor exists to catch before a decode subprocess fails at
+    spawn time. "Usable" matches what ``subprocess.run`` accepts, though (finding
+    5): a value that is either an existing file OR a bare name resolvable on PATH
+    (``shutil.which``) works at spawn time, so doctor must not fail it just
+    because it isn't an absolute file path -- that rejected a working config.
     """
     if env_var and os.environ.get(env_var):
         p = os.environ[env_var]
-        if not Path(p).is_file():
+        if not Path(p).is_file() and not shutil.which(p):
             return False, (f"[--] {display}: env {env_var} is set to {p}, but that "
-                            f"file doesn't exist. Fix: unset {env_var} or point it "
-                            f"at the real executable.")
+                            f"file doesn't exist (and it isn't on PATH). Fix: unset "
+                            f"{env_var} or point it at the real executable.")
         return True, f"[ok] {display}: {p} (env {env_var})"
     if tools_dir:
         names = {exe} if exe.lower().endswith(".exe") else {exe, exe + ".exe"}

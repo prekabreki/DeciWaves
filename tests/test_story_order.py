@@ -205,6 +205,44 @@ def test_stale_dupes_file_removed_on_clean_rerun(tmp_path):
     assert not dupes.exists(), "stale dupes file must not survive a clean (zero-dupe) re-run"
 
 
+def _write_min_catalog_and_tracks(tmp_path):
+    cat = tmp_path / "catalog.csv"
+    with open(cat, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=["line_id", "core_path", "line_index", "category",
+                                          "scene", "speaker_code", "speaker_name",
+                                          "subtitle_en", "wem_path_en", "language"])
+        w.writeheader()
+        w.writerow(_row())
+    tracks = tmp_path / "cutscene_tracks.csv"
+    with open(tracks, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=["scene", "status", "track_index", "voice_track_stream"])
+        w.writeheader()
+        w.writerow(_crow("sq_cs00_s00100", "a/b_voice_track.english.core.stream"))
+    return cat, tracks
+
+
+def test_order_explicit_missing_transcript_errors_and_names_path(tmp_path, capsys):
+    """Finding 8: an explicitly-passed --transcript that doesn't exist must fail
+    loud (nonzero) naming the path -- not print 'anchoring disabled' and exit 0.
+    Same shape #38 fixed for fw --gamescript and #33 for --speech-trim; otherwise
+    anything scripted on the exit code believes anchoring silently succeeded."""
+    cat, tracks = _write_min_catalog_and_tracks(tmp_path)
+    bad = str(tmp_path / "typo-transcript.md")
+    rc = so.main(["--catalog", str(cat), "--cutscene-tracks", str(tracks),
+                 "--out", str(tmp_path / "playlist.csv"), "--transcript", bad])
+    assert rc != 0
+    assert bad in capsys.readouterr().out
+
+
+def test_order_omitted_transcript_still_exits_0(tmp_path):
+    """The omitted (empty) flag keeps today's behavior: anchoring disabled, exit 0."""
+    cat, tracks = _write_min_catalog_and_tracks(tmp_path)
+    out = tmp_path / "playlist.csv"
+    rc = so.main(["--catalog", str(cat), "--cutscene-tracks", str(tracks),
+                 "--out", str(out), "--transcript", ""])
+    assert rc == 0 and out.exists()
+
+
 def test_playlist_round_trip(tmp_path):
     segs = [so.Segment(0, 0, 12.5, 0, "sq_cs00_s00100", 0, 0, "cutscene", "(scene)", "",
                        "a.core.stream", "x#track0")]

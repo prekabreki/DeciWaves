@@ -1,4 +1,5 @@
 # tests/test_build_catalog.py
+from deciwaves.games.ds import catalog as ds_catalog
 from deciwaves.games.ds.catalog import select_core_paths, classify
 from deciwaves.engine.catalog_io import (
     done_core_paths, processed_core_paths, prune_incomplete_rows, CSV_COLUMNS,
@@ -188,6 +189,47 @@ def test_prune_incomplete_rows_missing_csv_is_noop(tmp_path):
     assert prune_incomplete_rows(str(tmp_path / "missing.csv"), str(proc_path)) == 0
 
 
+def test_prune_incomplete_rows_missing_sidecar_keeps_csv_and_reconstructs(tmp_path, capsys):
+    """Finding 3: a catalog.csv restored/copied WITHOUT its processed sidecar must
+    not be wiped to a bare header. When the sidecar FILE is absent (state arrived
+    from a backup / selective copy, not this workspace's bookkeeping) and the CSV
+    has data rows, prune must keep every row, LOUDLY warn, and self-heal by
+    reconstructing the sidecar from the CSV's distinct core_paths -- restoring the
+    old union behavior for exactly the lost-sidecar case."""
+    csv_path = tmp_path / "catalog.csv"
+    proc_path = tmp_path / "catalog-processed.txt"  # deliberately never created
+    _write_csv_rows(csv_path, ["a/sentences", "a/sentences", "b/sentences"])
+    before = csv_path.read_bytes()
+
+    dropped = prune_incomplete_rows(str(csv_path), str(proc_path))
+
+    assert dropped == 0
+    assert csv_path.read_bytes() == before, "CSV must be untouched when sidecar is missing"
+    # sidecar reconstructed from the CSV's distinct cores
+    assert proc_path.is_file()
+    assert processed_core_paths(str(proc_path)) == {"a/sentences", "b/sentences"}
+    out = capsys.readouterr().out.lower()
+    assert "warning" in out
+
+
+def test_prune_incomplete_rows_present_but_empty_sidecar_still_prunes(tmp_path):
+    """A sidecar that EXISTS but is empty is this workspace's own bookkeeping
+    (possibly empty after a crash before any core finished) -- pruning is correct
+    there and must still fire, dropping every unconfirmed row. Only a MISSING
+    sidecar file is treated as 'arrived from elsewhere' (see test above)."""
+    csv_path = tmp_path / "catalog.csv"
+    proc_path = tmp_path / "catalog-processed.txt"
+    _write_csv_rows(csv_path, ["a/sentences", "b/sentences"])
+    proc_path.write_text("", encoding="utf-8")  # exists, empty
+
+    dropped = prune_incomplete_rows(str(csv_path), str(proc_path))
+
+    assert dropped == 2
+    with open(csv_path, newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    assert rows == []  # header only, all unconfirmed rows pruned
+
+
 def test_sidecar_is_sole_resume_authority_after_prune(tmp_path):
     """End-to-end regression for the silent-row-loss bug: before the fix, resume used
     done_core_paths(csv) | processed_core_paths(processed) -- a union where the crashed
@@ -260,3 +302,65 @@ def test_write_core_paths_sidecar_overwrites_existing_atomically(tmp_path):
     write_core_paths_sidecar(str(sidecar), ["old/path/sentences"])
     write_core_paths_sidecar(str(sidecar), ["new/path/sentences"])
     assert read_core_paths_sidecar(str(sidecar)) == ["new/path/sentences"]
+
+
+# ---------------------------------------------------------------------------
+# Finding 9: a 0-byte resume file (a crash right after creating but before
+# writing the header) must be treated as a fresh file so the header is written.
+# Mirrors fcc0d1c's fix for fw extract/asr_run, not applied to the DS catalog.
+# ---------------------------------------------------------------------------
+
+class _FakeLine:
+    line_id = "L0"; line_index = 0; speaker_code = "c"
+    subtitle_en = "hi"; wem_path_en = "loc/x.wem.english"
+
+
+class _FakeReader:
+    def read_core(self, path):
+        return b"CORE_BYTES"
+
+
+class _FakeSmap:
+    def __init__(self, *a, **k):
+        pass
+
+    def __len__(self):
+        return 0
+
+    def name_for(self, code):
+        return "Name"
+
+
+def test_ds_catalog_main_resumes_after_zero_byte_out(tmp_path, monkeypatch):
+    """A 0-byte out/catalog.csv left by a crash must get a real header on resume --
+    an is_file()-only 'new file' check treats the 0-byte file as already-headered,
+    so the first data row silently becomes the CSV's fieldnames on the next load."""
+    import deciwaves.games.ds.profile as ds_profile
+
+    class _Profile:
+        decima_version = "DS"
+        core_prefixes = {"localized/sentences/ds_lines_cutscene": "cutscene"}
+        pack_reader = _FakeReader()
+        speaker_simpletext_filter = None
+
+    monkeypatch.setattr(ds_profile, "build_profile", lambda data_dir, oodle: _Profile())
+    monkeypatch.setattr(ds_catalog._pydecima_reader, "set_globals", lambda **k: None)
+    monkeypatch.setattr(ds_catalog, "SpeakerMap", _FakeSmap)
+    monkeypatch.setattr(ds_catalog, "parse_sentences", lambda b, on_line_error=None: [_FakeLine()])
+
+    file_list = tmp_path / "fl.txt"
+    file_list.write_text("localized/sentences/ds_lines_cutscene/scene/sentences\n", encoding="utf-8")
+    out = tmp_path / "catalog.csv"
+    out.write_bytes(b"")  # 0-byte crash artifact
+
+    rc = ds_catalog.main([
+        "--data-dir", "X", "--oodle", "Y",
+        "--file-list", str(file_list),
+        "--out", str(out),
+        "--errors", str(tmp_path / "err.log"),
+        "--processed", str(tmp_path / "proc.txt"),
+    ])
+    assert rc == 0
+    rows = list(csv.DictReader(open(out, encoding="utf-8")))
+    assert len(rows) == 1
+    assert rows[0]["core_path"] == "localized/sentences/ds_lines_cutscene/scene/sentences"

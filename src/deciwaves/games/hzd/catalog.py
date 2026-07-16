@@ -88,7 +88,9 @@ def main(argv=None):
                          "select_sentence_cores filtering); wem-metadata reads this "
                          "back (--cores) instead of repeating the content scan below")
     ap.add_argument("--sample-cap", type=int, default=0,
-                    help="0 = scan the whole pack; >0 caps records scanned during harvest")
+                    help="0 = scan the whole pack; >0 caps records scanned during harvest "
+                         "(smoke test). A capped run leaves --cores-out untouched, since a "
+                         "truncated core list would poison the sidecar wem-metadata trusts.")
     args = ap.parse_args(argv)
 
     from deciwaves.games.hzd.profile import build_profile, hzd_package_error
@@ -105,8 +107,16 @@ def main(argv=None):
     harvested = harvest_sentence_cores(fw, sample_cap=args.sample_cap or None)
     paths = select_sentence_cores(harvested)
     # Persist this run's resolved dialogue-core list so wem-metadata (--cores) can
-    # reuse it instead of repeating this same full-pack scan (issue #31).
-    write_core_paths_sidecar(args.cores_out, paths)
+    # reuse it instead of repeating this same full-pack scan (issue #31) -- BUT NOT
+    # when the harvest was capped (finding 6): a --sample-cap'd smoke-test run yields
+    # a TRUNCATED core list, and wem-metadata trusts the sidecar (ignoring its own
+    # --sample-cap when one exists), so overwriting the shared sidecar with the capped
+    # subset would silently shrink wem-metadata.csv. Leave any existing full sidecar
+    # standing and say so.
+    if args.sample_cap > 0:
+        print(f"sample-cap active: catalog-cores sidecar left untouched ({args.cores_out})")
+    else:
+        write_core_paths_sidecar(args.cores_out, paths)
     # The processed sidecar is the SOLE resume authority (issue #21): a core's sidecar
     # line is only written after all of its rows are in the CSV, so a mid-core crash
     # can leave partial CSV rows for a core the sidecar never confirmed. Drop those
@@ -119,7 +129,10 @@ def main(argv=None):
     todo = [p for p in paths if p not in done]
     print(f"{len(paths)} dialogue cores; {len(done)} done; {len(todo)} to do")
 
-    new_file = not os.path.isfile(args.out)
+    # exists AND non-empty -- a 0-byte file left by a crash right after creating
+    # (but before writing) the CSV must still get a header, else the first data
+    # row silently becomes the fieldnames on the next load (fcc0d1c, finding 9).
+    new_file = not os.path.isfile(args.out) or os.path.getsize(args.out) == 0
     cores_ok = cores_failed = total_lines = 0
     with open(args.out, "a", newline="", encoding="utf-8") as fout, \
          open(args.errors, "a", encoding="utf-8") as ferr, \

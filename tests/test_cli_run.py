@@ -531,6 +531,63 @@ def test_hzd_bind_gpu_gate_ignored_when_bind_already_done(tmp_path, monkeypatch,
     assert called == [mods["render"]]  # every earlier stage skipped via its marker
 
 
+def test_hzd_gpu_gate_fires_upfront_when_early_marker_deleted_forces_bind_rerun(
+        tmp_path, monkeypatch, capsys):
+    """Finding 1 (WORST): the upfront GPU scan must be invalidation-aware. A user
+    without the [asr] extra deletes .done-catalog to force a re-catalog; every
+    other marker (including .done-bind) is still present. Because catalog WILL
+    re-run, it will invalidate .done-bind mid-chain -- so bind WILL effectively
+    run and hit the missing-whisperx wall. The gate must recognise this UP FRONT
+    (bind's own marker present is not enough), abort before catalog's hours of
+    work, and run ZERO stages."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: None)  # whisperx absent
+    mods = _mods("hzd")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _hzd_outputs(mods)))
+    # Seed EVERY stage's done-marker (a fully-resumed workspace)...
+    for stage in ("catalog", "clip-index", "wem-metadata", "bind", "render"):
+        marker = _marker("hzd", stage)
+        os.makedirs(os.path.dirname(marker), exist_ok=True)
+        Path(marker).write_text("", encoding="utf-8")
+    # ...then delete only the EARLY one, forcing a re-catalog that will cascade
+    # invalidation down to bind.
+    os.remove(_marker("hzd", "catalog"))
+
+    rc = run_mod.run_game("hzd", {"hzd_package": "PKG"}, [])
+    assert rc == 1
+
+    assert [m for m, _ in calls] == []  # nothing ran -- gate fired before catalog
+    out = capsys.readouterr().out
+    assert "pip install deciwaves[asr]" in out
+
+
+def test_fw_gpu_gate_fires_upfront_when_extract_marker_deleted_forces_asr_rerun(
+        tmp_path, monkeypatch, capsys):
+    """Finding 1, fw variant: the invalidation-aware scan must reason over the
+    FULL chain even though fw splits it into two `_run_chain` calls. Deleting
+    .done-extract forces extract to re-run, which invalidates the (present)
+    .done-asr marker -- so the GPU-gated asr stage will effectively run. Gate
+    must fire upfront with no stages executed."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: None)  # whisperx absent
+    mods = _mods("fw")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _fw_outputs(mods)))
+    for stage in ("extract", "asr", "subtitle-bind", "match", "full-reel", "render"):
+        marker = _marker("fw", stage)
+        os.makedirs(os.path.dirname(marker), exist_ok=True)
+        Path(marker).write_text("", encoding="utf-8")
+    os.remove(_marker("fw", "extract"))
+
+    rc = run_mod.run_game("fw", {"fw_package": "PKG"}, [])
+    assert rc == 1
+
+    assert [m for m, _ in calls] == []
+    out = capsys.readouterr().out
+    assert "pip install deciwaves[asr]" in out
+
+
 def test_hzd_missing_config_errors(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     rc = run_mod.run_game("hzd", {}, [])
@@ -850,6 +907,13 @@ def test_fw_byo_message_shows_exact_rerun_command(tmp_path, monkeypatch, capsys)
     assert "--package PKG" in out
     assert "--gamescript" in out
     assert "deciwaves setup --fw-gamescript" in out
+
+
+def test_fw_byo_message_quotes_package_path_with_spaces():
+    """Finding 10: the suggested re-run command must survive a package path with
+    spaces -- an unquoted path breaks the command it tells the user to paste."""
+    msg = run_mod._fw_byo_message(r"C:\Games\Forbidden West\package")
+    assert '"C:\\Games\\Forbidden West\\package"' in msg
 
 
 def test_fw_asr_gpu_gate_aborts_without_whisperx(tmp_path, monkeypatch, capsys):

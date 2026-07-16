@@ -99,7 +99,10 @@ def main(argv=None):
     smap = SpeakerMap(idx, file_list_lines, cache_path=speakers_cache,
                       simpletext_filter=profile.speaker_simpletext_filter)
     print(f"speaker map: {len(smap)} voices loaded")
-    new_file = not os.path.isfile(args.out)
+    # exists AND non-empty -- a 0-byte file left by a crash right after creating
+    # (but before writing) the CSV must still get a header, else the first data
+    # row silently becomes the fieldnames on the next load (fcc0d1c, finding 9).
+    new_file = not os.path.isfile(args.out) or os.path.getsize(args.out) == 0
     cores_ok = cores_failed = total_lines = 0
     with open(args.out, "a", newline="", encoding="utf-8") as fout, \
          open(args.errors, "a", encoding="utf-8") as ferr, \

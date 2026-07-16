@@ -197,7 +197,10 @@ somewhere else.
 
 Each run merges its flags over what's already saved -- an omitted flag keeps its previous
 value, so running `deciwaves setup --hzd-package ...` later doesn't blank out a `--ds-install`
-configured earlier. Pass a flag again (with a new path) to update it.
+configured earlier. Pass a flag again (with a new path) to update it. To *clear* a saved path
+(e.g. a stale `ds_install` or `fw_gamescript` that now points nowhere and makes `doctor` fail),
+pass it as an explicit empty string: `deciwaves setup --ds-install ""` unsets it (omitting the
+flag keeps it; only an explicit `""` clears).
 
 Environment overrides, all optional:
 

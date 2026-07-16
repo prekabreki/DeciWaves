@@ -251,6 +251,58 @@ def test_setup_reregistering_same_game_updates_not_stuck_on_old_path(tmp_path, m
     assert cfg["oodle_dll"] == str(ds_new / "oo2core_7_win64.dll")
 
 
+def test_setup_explicit_empty_clears_saved_ds_install(tmp_path, monkeypatch):
+    # Finding 4: a stale ds_install must be recoverable from the CLI. An explicit
+    # empty string clears the saved value (the None-default argparse trick makes
+    # "explicit empty" distinguishable from "omitted"); oodle_dll, recomputed from
+    # the now-empty ds_install, clears too.
+    ds = tmp_path / "DS"; ds.mkdir(); (ds / "oo2core_7_win64.dll").write_bytes(b"x"); (ds / "data").mkdir()
+    cfg_dir = tmp_path / "cfg"
+    monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(cfg_dir))
+    monkeypatch.setattr(s, "_download_and_unpack", _stub_download_ok)
+
+    assert s.run_setup(["--ds-install", str(ds), "--tools-dir", str(tmp_path / "tools")]) == 0
+    cfg = json.loads((cfg_dir / "config.json").read_text())
+    assert cfg["ds_install"] == str(ds)
+    assert cfg["oodle_dll"].endswith("oo2core_7_win64.dll")
+
+    assert s.run_setup(["--ds-install", "", "--tools-dir", str(tmp_path / "tools")]) == 0
+    cfg = json.loads((cfg_dir / "config.json").read_text())
+    assert cfg["ds_install"] == ""
+    assert cfg["oodle_dll"] == ""
+
+
+def test_setup_explicit_empty_clears_saved_fw_gamescript(tmp_path, monkeypatch):
+    # The finding's headline recovery case: a configured-but-now-broken
+    # fw_gamescript makes doctor exit 1 forever; `--fw-gamescript ""` clears it.
+    gamescript = tmp_path / "gamescript.md"
+    gamescript.write_text("Aloy: Hi.\n", encoding="utf-8")
+    cfg_dir = tmp_path / "cfg"
+    monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(cfg_dir))
+    monkeypatch.setattr(s, "_download_and_unpack", _stub_download_ok)
+
+    assert s.run_setup(["--fw-gamescript", str(gamescript), "--tools-dir", str(tmp_path / "tools")]) == 0
+    assert json.loads((cfg_dir / "config.json").read_text())["fw_gamescript"] == str(gamescript)
+
+    assert s.run_setup(["--fw-gamescript", "", "--tools-dir", str(tmp_path / "tools")]) == 0
+    assert json.loads((cfg_dir / "config.json").read_text())["fw_gamescript"] == ""
+
+
+def test_setup_omitted_flag_still_keeps_saved_value(tmp_path, monkeypatch):
+    # Guard for finding 4's None-default change: omitting a flag must still keep
+    # the saved value (only an explicit "" clears). Complements the existing
+    # preserve-other-game tests.
+    hzd = tmp_path / "hzd.package"
+    cfg_dir = tmp_path / "cfg"
+    monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(cfg_dir))
+    monkeypatch.setattr(s, "_download_and_unpack", _stub_download_ok)
+
+    assert s.run_setup(["--hzd-package", str(hzd), "--tools-dir", str(tmp_path / "tools")]) == 0
+    # Re-run with hzd-package omitted entirely -- must NOT be blanked.
+    assert s.run_setup(["--tools-dir", str(tmp_path / "tools")]) == 0
+    assert json.loads((cfg_dir / "config.json").read_text())["hzd_package"] == str(hzd)
+
+
 def test_setup_after_corrupted_config_yields_only_current_game(tmp_path, monkeypatch, capsys):
     # Per the load()-hardening fix landed on this branch: a corrupted
     # config.json is ignored (with a warning) and treated as if empty, so a

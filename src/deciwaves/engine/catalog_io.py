@@ -59,14 +59,34 @@ def prune_incomplete_rows(csv_path, processed_path):
     single, non-drifting resume authority. The rewrite is atomic (write a temp file,
     then `os.replace()`) so a crash during the prune itself can't corrupt the CSV: the
     original file is left untouched until the replacement is fully written.
+
+    One case is deliberately NOT pruned (finding 3): the sidecar FILE is entirely
+    absent while the CSV holds data rows. An empty ``processed`` set would otherwise
+    prune EVERY row -- silently wiping a multi-hour catalog to a bare header. A missing
+    sidecar file means the CSV state arrived from elsewhere (a backup, a selective
+    copy) rather than being this workspace's own bookkeeping, so the CSV is trusted:
+    we warn loudly, reconstruct the sidecar from the CSV's distinct core_paths (self-
+    healing the resume state to the old union behavior for exactly this case), and skip
+    pruning. A sidecar that EXISTS but is empty is genuine local bookkeeping (e.g. a
+    crash before any core finished) and pruning still fires as designed.
     """
     if not os.path.isfile(csv_path):
         return 0
-    processed = processed_core_paths(processed_path)
     with open(csv_path, "r", newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         fieldnames = reader.fieldnames
         rows = list(reader)
+    if not os.path.isfile(processed_path):
+        if rows:
+            distinct = list(dict.fromkeys(row["core_path"] for row in rows))
+            print(f"WARNING: resume sidecar {processed_path} is missing but {csv_path} "
+                  f"has {len(rows)} data row(s) -- treating the CSV as authoritative "
+                  f"(looks restored/copied without its sidecar). Reconstructing the "
+                  f"sidecar from {len(distinct)} distinct core(s) and skipping the "
+                  f"incomplete-row prune.")
+            write_core_paths_sidecar(processed_path, distinct)
+        return 0
+    processed = processed_core_paths(processed_path)
     kept = [row for row in rows if row["core_path"] in processed]
     dropped = len(rows) - len(kept)
     if dropped == 0:
