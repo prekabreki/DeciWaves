@@ -152,8 +152,12 @@ def main(argv=None):
                          "back (--cores) instead of repeating the content scan below")
     ap.add_argument("--sample-cap", type=int, default=0,
                     help="0 = scan the whole pack; >0 caps records scanned during harvest "
-                         "(smoke test). A capped run leaves --cores-out untouched, since a "
-                         "truncated core list would poison the sidecar wem-metadata trusts.")
+                         "(smoke test). Unit: raw qualifying .core locator RECORDS scanned "
+                         "during the content harvest -- NOT clips or lines (contrast "
+                         "games.hzd.asr_bind's --sample-cap, which counts approximate CLIP "
+                         "count via whole ambiguous buckets). A capped run leaves --cores-out "
+                         "untouched, since a truncated core list would poison the sidecar "
+                         "wem-metadata trusts.")
     args = ap.parse_args(argv)
 
     from deciwaves.games.hzd.profile import build_profile, hzd_package_error
