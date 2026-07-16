@@ -13,6 +13,7 @@ import os
 import re
 import subprocess
 import wave
+from collections import namedtuple
 
 from deciwaves.engine.atomic_io import atomic_write
 
@@ -37,9 +38,11 @@ def budget_seconds(target_mb: float = 285.0, overhead: float = MP3_OVERHEAD,
     framing overhead is included. Real bytes ~= seconds*(kbps*1000/8)*(1+overhead);
     this inverts that so a packed file lands at `target_mb`, not
     `target_mb`*(1+overhead). Default 285 MB keeps output safely under the 290 MB
-    buffer. `kbps` must match the encode bitrate passed to :func:`_ffmpeg_concat`,
-    or packing and real file size diverge. Pass this to :func:`pack_episodes`
-    rather than mutating the shared :data:`BUDGET_SECONDS`."""
+    buffer. `kbps` must match the encode bitrate passed to :func:`_ffmpeg_concat` (or
+    whatever `concat_fn` :func:`assemble_reels` was given, via its `concat_kwargs`),
+    or packing and real file size diverge. Pass this as :func:`pack_episodes`'s or
+    :func:`assemble_reels`'s `budget`, rather than mutating the shared
+    :data:`BUDGET_SECONDS`."""
     return target_mb * 1_000_000 * 8 / (kbps * 1_000) / (1 + overhead)
 
 
@@ -175,6 +178,129 @@ def _ffmpeg_concat(wav_list, out_mp3, list_path, norm_dir, kbps=DEFAULT_BITRATE_
         raise RuntimeError(f"ffmpeg concat failed: {proc.stderr[-500:]}")
 
 
+def accumulate_episode_seconds(segs, dur_of, *, gap_key, err_key, errors_path,
+                               catch=Exception):
+    """Decode/measure each segment in `segs`, accumulating the per-episode duration
+    that :func:`pack_episodes` packs against.
+
+    This is the "measure durations -> per-episode gap accounting" half of the render
+    loop, shared across all three games: each game supplies its own `dur_of` (a Wwise
+    decode for DS, an ATRAC9 decode for HZD, a bare `wave.open` read of an
+    already-decoded clip for FW) and everything downstream -- gap bookkeeping, fail-soft
+    error logging -- is identical.
+
+    `dur_of(seg) -> (payload, duration_seconds)` does the game-specific decode/measure
+    work. Raising anything in `catch` fails that one segment soft: logged to
+    `errors_path` as ``<line_id>\\t<err_key(seg)>\\t<exc>``, then skipped -- never
+    aborting the whole render.
+
+    `gap_key(seg)` is the "same scene" key (e.g. ``lambda s: s.scene``,
+    ``lambda s: s.quest``) used to price the silence gap ahead of each segment within
+    its episode: SCENE_GAP when it differs from the episode's previous segment,
+    LINE_GAP when it matches, 0.0 for an episode's first segment. Pass the *same*
+    `gap_key` to :func:`assemble_reels` afterwards, or the packed durations won't match
+    the gaps the assembly step actually inserts.
+
+    `err_key(seg)` picks the second error-log column (DS logs `stream_path`, HZD logs
+    `clip_row`, FW logs `wav`).
+
+    Returns `(results, ep_secs, n_failed)`: `results` maps `line_id -> (payload,
+    duration_seconds)` for every segment that succeeded -- this is the `durations`
+    argument :func:`assemble_reels` expects; `ep_secs` maps `episode -> accumulated
+    seconds` (gaps included) for :func:`pack_episodes`.
+    """
+    results: dict = {}
+    ep_secs: dict = {}
+    prev_key_by_ep: dict = {}
+    n_failed = 0
+    with open(errors_path, "w", encoding="utf-8") as ferr:
+        for s in segs:
+            try:
+                payload, dur = dur_of(s)
+            except catch as e:
+                n_failed += 1
+                ferr.write(f"{s.line_id}\t{err_key(s)}\t{e}\n")
+                continue
+            results[s.line_id] = (payload, dur)
+            key = gap_key(s)
+            if s.episode in prev_key_by_ep:
+                gap = SCENE_GAP if key != prev_key_by_ep[s.episode] else LINE_GAP
+            else:
+                gap = 0.0
+            prev_key_by_ep[s.episode] = key
+            ep_secs[s.episode] = ep_secs.get(s.episode, 0.0) + gap + dur
+    return results, ep_secs, n_failed
+
+
+ReelColumns = namedtuple("ReelColumns", ["header", "row_of"])
+"""Per-game tracklist shape for :func:`assemble_reels`.
+
+`header`: the tracklist CSV header row (a list of column names).
+`row_of(seg, timestamp_seconds) -> list`: builds one tracklist data row for a segment
+at its assembled timestamp. The shape genuinely differs per game (DS ships
+episode+category columns; HZD ships scene; FW ships quest), so it's supplied rather
+than hardcoded.
+"""
+
+
+def assemble_reels(spine, ep_secs, durations, *, out_dir, cache_dir, stem, columns,
+                   budget, gap_key, concat_fn=None, silence_fn=None,
+                   concat_kwargs=None, unit_label="lines"):
+    """Pack `spine` into <=`budget`-second reel files (:func:`pack_episodes`), splice
+    each file's clips together with LINE_GAP/SCENE_GAP silence between them --
+    SCENE_GAP when `gap_key(seg)` changes within an episode, matching the gaps already
+    priced into `ep_secs` by :func:`accumulate_episode_seconds` -- concatenate to MP3,
+    and write a `<stem>_NN.tracklist.csv` sidecar per reel.
+
+    `durations`: `line_id -> (wav_path, duration_seconds)`, e.g. the `results` returned
+    by :func:`accumulate_episode_seconds`.
+    `columns`: a :data:`ReelColumns` (or plain `(header, row_of)` tuple).
+    `concat_fn`/`silence_fn`: default to :func:`_ffmpeg_concat`/:func:`silence_wav`; a
+    game with its own concat/silence implementation (FW's `--uniform-mono` fast path)
+    passes its own instead.
+    `concat_kwargs`: extra keyword arguments forwarded to `concat_fn` (e.g. DS's
+    `kbps=args.bitrate`).
+
+    Returns the number of reel files written (0 if every packed group ended up empty,
+    e.g. every segment in it failed to decode).
+    """
+    concat_fn = concat_fn or _ffmpeg_concat
+    silence_fn = silence_fn or silence_wav
+    concat_kwargs = concat_kwargs or {}
+    header, row_of = columns
+    line_sil = silence_fn(LINE_GAP, cache_dir)
+    scene_sil = silence_fn(SCENE_GAP, cache_dir)
+    norm_dir = os.path.join(cache_dir, "norm")
+
+    n_files = 0
+    for fi, eps in enumerate(pack_episodes(list(ep_secs.items()), budget=budget)):
+        eps_set = set(eps)
+        file_segs = [s for s in spine if s.episode in eps_set and s.line_id in durations]
+        wav_list, rows, t, prev = [], [], 0.0, None
+        for s in file_segs:
+            wav, dur = durations[s.line_id]
+            key = gap_key(s)
+            new_scene = key != prev
+            if wav_list:
+                wav_list.append(scene_sil if new_scene else line_sil)
+                t += SCENE_GAP if new_scene else LINE_GAP
+            wav_list.append(wav)
+            rows.append(row_of(s, t))
+            t += dur
+            prev = key
+        if not wav_list:
+            continue
+        base = os.path.join(out_dir, f"{stem}_{fi:02d}")
+        concat_fn(wav_list, base + ".mp3", base + ".concat.txt", norm_dir, **concat_kwargs)
+        with open(base + ".tracklist.csv", "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(header)
+            w.writerows(rows)
+        print(f"{base}.mp3  ({len(rows)} {unit_label}, {format_ts(t)})")
+        n_files += 1
+    return n_files
+
+
 def main(argv=None):
     import argparse
     ap = argparse.ArgumentParser(description="Render Phase D story audio")
@@ -220,43 +346,34 @@ def main(argv=None):
               f"{sorted(em.NON_STORY_CS_GROUPS)})")
         segs = kept
     stem = file_stem(args.main_story)
-    line_sil = silence_wav(LINE_GAP, args.cache)
-    scene_sil = silence_wav(SCENE_GAP, args.cache)
 
     keepspans = load_keepspans(args.speech_trim) if args.speech_trim else {}
     if keepspans:
         n_drop = sum(1 for s in segs if keepspans.get(s.stream_path, (None, False))[1])
         print(f"speech-trim: {len(keepspans)} tracks in map; {n_drop} segments will be dropped")
 
-    decoded, ep_secs = {}, {}
-    prev_scene_by_ep = {}
-    n_attempted = n_failed = 0
-    with open(args.errors, "w", encoding="utf-8") as ferr:
-        for s in segs:
-            entry = keepspans.get(s.stream_path)
-            if entry and entry[1]:                    # dropped pure-grunt track
-                continue
-            n_attempted += 1
-            try:
-                wav, dur = audio_clip.clip_wav(idx, s.stream_path, args.cache)
-                if entry:                             # keep-span trim (cutscene)
-                    wav, dur = audio_clip.apply_keep_spans(
-                        wav, entry[0], os.path.join(args.cache, "kept"))
-                elif args.min_silence > 0:            # unchanged silencedetect path
-                    wav, dur = audio_clip.trim_long_silences(
-                        wav, os.path.join(args.cache, "trimmed"),
-                        min_silence=args.min_silence, threshold_db=args.silence_db,
-                        keep=args.silence_keep)
-            except audio_clip.ClipError as e:
-                n_failed += 1
-                ferr.write(f"{s.line_id}\t{s.stream_path}\t{e}\n"); continue
-            decoded[s.line_id] = (wav, dur)
-            if s.episode in prev_scene_by_ep:
-                gap = SCENE_GAP if s.scene != prev_scene_by_ep[s.episode] else LINE_GAP
-            else:
-                gap = 0.0
-            prev_scene_by_ep[s.episode] = s.scene
-            ep_secs[s.episode] = ep_secs.get(s.episode, 0.0) + gap + dur
+    # dropped pure-grunt tracks (speech-trim) never even get attempted -- filter them
+    # out before decoding so n_attempted below matches the original per-clip accounting.
+    decode_segs = [s for s in segs
+                   if not (keepspans.get(s.stream_path) and keepspans[s.stream_path][1])]
+    n_attempted = len(decode_segs)
+
+    def _decode(s):
+        entry = keepspans.get(s.stream_path)
+        wav, dur = audio_clip.clip_wav(idx, s.stream_path, args.cache)
+        if entry:                             # keep-span trim (cutscene)
+            wav, dur = audio_clip.apply_keep_spans(
+                wav, entry[0], os.path.join(args.cache, "kept"))
+        elif args.min_silence > 0:            # unchanged silencedetect path
+            wav, dur = audio_clip.trim_long_silences(
+                wav, os.path.join(args.cache, "trimmed"),
+                min_silence=args.min_silence, threshold_db=args.silence_db,
+                keep=args.silence_keep)
+        return wav, dur
+
+    decoded, ep_secs, n_failed = accumulate_episode_seconds(
+        decode_segs, _decode, gap_key=lambda s: s.scene, err_key=lambda s: s.stream_path,
+        errors_path=args.errors, catch=audio_clip.ClipError)
 
     n_decoded = len(decoded)
     print(f"render: decoded {n_decoded} clips, {n_failed} failed (see {args.errors})")
@@ -268,31 +385,15 @@ def main(argv=None):
               f"is dying with a DLL-not-found / exit-code error.")
         return 1
 
-    for fi, eps in enumerate(pack_episodes(list(ep_secs.items()),
-                                           budget=budget_seconds(kbps=args.bitrate))):
-        eps_set = set(eps)
-        file_segs = [s for s in segs if s.episode in eps_set and s.line_id in decoded]
-        wav_list, rows, t, prev = [], [], 0.0, None
-        for s in file_segs:
-            wav, dur = decoded[s.line_id]
-            new_scene = s.scene != prev
-            if wav_list:
-                wav_list.append(scene_sil if new_scene else line_sil)
-                t += SCENE_GAP if new_scene else LINE_GAP
-            wav_list.append(wav)
-            rows.append([format_ts(t), s.episode, s.category, s.speaker, s.subtitle, s.line_id])
-            t += dur
-            prev = s.scene
-        if not wav_list:
-            continue
-        base = os.path.join(args.out_dir, f"{stem}_{fi:02d}")
-        _ffmpeg_concat(wav_list, base + ".mp3", base + ".concat.txt",
-                       os.path.join(args.cache, "norm"), kbps=args.bitrate)
-        with open(base + ".tracklist.csv", "w", newline="", encoding="utf-8") as f:
-            w = csv.writer(f)
-            w.writerow(["timestamp", "episode", "category", "speaker", "subtitle", "line_id"])
-            w.writerows(rows)
-        print(f"{base}.mp3  ({len(rows)} segments, {format_ts(t)})")
+    columns = ReelColumns(
+        header=["timestamp", "episode", "category", "speaker", "subtitle", "line_id"],
+        row_of=lambda s, t: [format_ts(t), s.episode, s.category, s.speaker, s.subtitle,
+                             s.line_id])
+    assemble_reels(
+        segs, ep_secs, decoded, out_dir=args.out_dir, cache_dir=args.cache, stem=stem,
+        columns=columns, budget=budget_seconds(kbps=args.bitrate),
+        gap_key=lambda s: s.scene, concat_kwargs={"kbps": args.bitrate},
+        unit_label="segments")
     return 0
 
 
