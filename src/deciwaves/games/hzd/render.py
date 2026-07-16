@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from deciwaves.engine.render import (
     accumulate_episode_seconds, assemble_reels, budget_seconds, format_ts, ReelColumns,
 )
+from deciwaves.engine.parallel import KeyedLocks, default_jobs
 from deciwaves.engine.pack.fw_package import FwPackage
 from deciwaves.games.hzd.atrac9 import decode_wem_to_wav, Atrac9Error
 
@@ -141,7 +142,7 @@ def build_spine(manifest_rows, catalog, clip_index, episode_map=None) -> list[Sp
     return spine
 
 
-def decode_spine_clips(spine, dsar, cache_dir, errors_path):
+def decode_spine_clips(spine, dsar, cache_dir, errors_path, jobs=1):
     """Decode each clip once (cached by clip_row) into ``cache_dir/<clip_row>.wav``.
 
     Fail-soft per clip: a decode failure (``Atrac9Error``, ``OSError``,
@@ -149,23 +150,34 @@ def decode_spine_clips(spine, dsar, cache_dir, errors_path):
     dsar_archive/fw_stream read hardening) is logged to *errors_path* with the
     line id and clip row, then skipped -- never aborting the whole render.
 
+    ``jobs`` decodes that many clips concurrently (each a VGAudio subprocess);
+    ``jobs=1`` (default) is the old serial path. ``dsar.read`` reopens the archive
+    per call so it is safe under the pool; a per-clip_row lock serializes the two
+    spine items that can share one clip_row so the shared cache file is written
+    exactly once (see engine.parallel.KeyedLocks).
+
     Returns ``(decoded, ep_secs, skipped)``: ``decoded`` maps
     ``line_id -> (wav_path, duration_seconds)``; ``ep_secs`` is the
     per-episode accumulated duration ``pack_episodes`` packs against. Thin wrapper
     around engine.render's shared ``accumulate_episode_seconds``: this function
     supplies the HZD-specific per-clip decode, the gap/error bookkeeping is shared.
     """
+    clip_locks = KeyedLocks()
+
     def dur_of(s):
         wav = os.path.join(cache_dir, f"{s.clip_row}.wav")
         if not (os.path.isfile(wav) and os.path.getsize(wav) > 44):
-            decode_wem_to_wav(dsar.read(s.offset, s.a_bytes), wav)
+            with clip_locks(wav):
+                if not (os.path.isfile(wav) and os.path.getsize(wav) > 44):
+                    decode_wem_to_wav(dsar.read(s.offset, s.a_bytes), wav)
         with wave.open(wav) as w:
             dur = w.getnframes() / float(w.getframerate())
         return wav, dur
 
     decoded, ep_secs, skipped = accumulate_episode_seconds(
         spine, dur_of, gap_key=lambda s: s.scene, err_key=lambda s: s.clip_row,
-        errors_path=errors_path, catch=(Atrac9Error, OSError, wave.Error, ValueError))
+        errors_path=errors_path, catch=(Atrac9Error, OSError, wave.Error, ValueError),
+        jobs=jobs)
     return decoded, ep_secs, skipped
 
 
@@ -185,6 +197,10 @@ def main(argv=None):
     ap.add_argument("--errors", default="out/hzd/render-errors.log")
     ap.add_argument("--spine-only", action="store_true",
                     help="render only the main-quest spine (skip side/DLC interleaving)")
+    ap.add_argument("--jobs", type=int, default=default_jobs(),
+                    help="number of clips to decode concurrently (each spawns one "
+                         f"VGAudioCli). Default min(8, cpu_count)={default_jobs()}; "
+                         "--jobs 1 forces the old serial decode")
     a = ap.parse_args(argv)
 
     catalog = {r["line_id"]: r for r in _load_csv(a.catalog)}
@@ -204,7 +220,7 @@ def main(argv=None):
     pkg = FwPackage(a.package)
     dsar = pkg.dsar_for(ARCHIVE)
 
-    decoded, ep_secs, skipped = decode_spine_clips(spine, dsar, a.cache, a.errors)
+    decoded, ep_secs, skipped = decode_spine_clips(spine, dsar, a.cache, a.errors, jobs=a.jobs)
     if skipped:
         print(f"decode: {skipped} clips skipped (see {a.errors})")
 

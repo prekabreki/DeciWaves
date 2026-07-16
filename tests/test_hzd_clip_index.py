@@ -48,6 +48,44 @@ def test_build_clip_index_skips_bad_clip_and_continues(tmp_path):
     assert "no chunk contains offset 200" in err_text
 
 
+def test_build_clip_index_parallel_output_identical_to_serial(tmp_path):
+    """--jobs>1 reads/parses clip headers concurrently but must write a CSV
+    byte-identical to the serial build (rows stay in clip-row order) and the same
+    skip count (issue #41)."""
+    import struct
+    import time
+
+    class JitterDsar:
+        def __init__(self, fail_offsets):
+            self.fail_offsets = set(fail_offsets)
+
+        def read(self, offset, length):
+            time.sleep((offset // 100 % 4) * 0.001)   # completion order != input order
+            if offset in self.fail_offsets:
+                raise ValueError(f"no chunk contains offset {offset} in fake.core")
+            # a valid RIFF with a fact chunk so a_bytes/b_samples are non-trivial
+            fact = b"fact" + struct.pack("<II", 4, offset + 7)
+            body = b"WAVEfmt " + struct.pack("<I", 16) + b"\x00" * 16 + fact
+            return (b"RIFF" + struct.pack("<I", len(body)) + body)[:length]
+
+    entries = _entries([(i * 100, 100) for i in range(30)])
+    fails = {500, 1300, 2100}
+
+    def build(jobs, tag):
+        out = tmp_path / f"idx_{tag}.csv"
+        err = tmp_path / f"err_{tag}.log"
+        skipped = build_clip_index(JitterDsar(fails), entries, str(out), str(err), jobs=jobs)
+        return skipped, out.read_text(encoding="utf-8"), err.read_text(encoding="utf-8")
+
+    s_skip, s_csv, s_err = build(1, "serial")
+    p_skip, p_csv, p_err = build(8, "parallel")
+
+    assert p_skip == s_skip == 3
+    assert p_csv == s_csv, "parallel CSV must be byte-identical to serial"
+    # error lines: same set (order may differ across the pool) and same count
+    assert sorted(p_err.splitlines()) == sorted(s_err.splitlines())
+
+
 def test_build_clip_index_no_failures_no_skips(tmp_path):
     entries = _entries([(0, 100), (100, 100)])
     dsar = FakeDsar(fail_offsets=set())

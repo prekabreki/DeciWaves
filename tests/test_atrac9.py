@@ -39,6 +39,11 @@ def test_decode_wem_to_wav_resolves_vgaudio_at_spawn_time_not_import_time(tmp_pa
 
     def fake_run(args, **kwargs):
         seen.append(args[0])
+        # decode_wem_to_wav now writes atomically (tmp -> os.replace), so the
+        # stub must produce the output file the real VGAudio would, or the move
+        # into place has nothing to move. `-o <out>` is the last arg.
+        with open(args[args.index("-o") + 1], "wb") as f:
+            f.write(b"\x00" * 64)
         return _FakeProc()
 
     monkeypatch.setattr(atrac9.subprocess, "run", fake_run)
