@@ -5,8 +5,8 @@ by quest number then in-scene line_index. Quests sort cleanly into canonical sto
 (papooserider -> giftfromthepast -> ... -> thefaceofextinction), so no episode_map or
 transcript anchoring is needed for this spine (side/DLC content is a later pass).
 
-Reuses engine.render's game-agnostic packing/concat (pack_episodes, silence gaps,
-_ffmpeg_concat -> MP3 128k, tracklist sidecars); the HZD-specific part is decoding each
+Reuses engine.render's game-agnostic assembly kit (accumulate_episode_seconds ->
+assemble_reels -> MP3 128k, tracklist sidecars); the HZD-specific part is decoding each
 clip from package.01 by (offset, length) via VGAudio.
 
     deciwaves hzd render --package <pkg dir>
@@ -21,8 +21,7 @@ import wave
 from dataclasses import dataclass
 
 from deciwaves.engine.render import (
-    pack_episodes, budget_seconds, silence_wav, _ffmpeg_concat, format_ts,
-    LINE_GAP, SCENE_GAP,
+    accumulate_episode_seconds, assemble_reels, budget_seconds, format_ts, ReelColumns,
 )
 from deciwaves.engine.pack.fw_package import FwPackage
 from deciwaves.games.hzd.atrac9 import decode_wem_to_wav, Atrac9Error
@@ -152,30 +151,21 @@ def decode_spine_clips(spine, dsar, cache_dir, errors_path):
 
     Returns ``(decoded, ep_secs, skipped)``: ``decoded`` maps
     ``line_id -> (wav_path, duration_seconds)``; ``ep_secs`` is the
-    per-episode accumulated duration ``pack_episodes`` packs against.
+    per-episode accumulated duration ``pack_episodes`` packs against. Thin wrapper
+    around engine.render's shared ``accumulate_episode_seconds``: this function
+    supplies the HZD-specific per-clip decode, the gap/error bookkeeping is shared.
     """
-    decoded: dict = {}
-    ep_secs: dict = {}
-    prev_scene_by_ep: dict = {}
-    skipped = 0
-    with open(errors_path, "w", encoding="utf-8") as ferr:
-        for s in spine:
-            wav = os.path.join(cache_dir, f"{s.clip_row}.wav")
-            try:
-                if not (os.path.isfile(wav) and os.path.getsize(wav) > 44):
-                    decode_wem_to_wav(dsar.read(s.offset, s.a_bytes), wav)
-                with wave.open(wav) as w:
-                    dur = w.getnframes() / float(w.getframerate())
-            except (Atrac9Error, OSError, wave.Error, ValueError) as e:
-                ferr.write(f"{s.line_id}\t{s.clip_row}\t{e}\n")
-                skipped += 1
-                continue
-            decoded[s.line_id] = (wav, dur)
-            gap = 0.0
-            if s.episode in prev_scene_by_ep:
-                gap = SCENE_GAP if s.scene != prev_scene_by_ep[s.episode] else LINE_GAP
-            prev_scene_by_ep[s.episode] = s.scene
-            ep_secs[s.episode] = ep_secs.get(s.episode, 0.0) + gap + dur
+    def dur_of(s):
+        wav = os.path.join(cache_dir, f"{s.clip_row}.wav")
+        if not (os.path.isfile(wav) and os.path.getsize(wav) > 44):
+            decode_wem_to_wav(dsar.read(s.offset, s.a_bytes), wav)
+        with wave.open(wav) as w:
+            dur = w.getnframes() / float(w.getframerate())
+        return wav, dur
+
+    decoded, ep_secs, skipped = accumulate_episode_seconds(
+        spine, dur_of, gap_key=lambda s: s.scene, err_key=lambda s: s.clip_row,
+        errors_path=errors_path, catch=(Atrac9Error, OSError, wave.Error, ValueError))
     return decoded, ep_secs, skipped
 
 
@@ -210,8 +200,6 @@ def main(argv=None):
 
     os.makedirs(a.out_dir, exist_ok=True)
     os.makedirs(a.cache, exist_ok=True)
-    line_sil = silence_wav(LINE_GAP, a.cache)
-    scene_sil = silence_wav(SCENE_GAP, a.cache)
 
     pkg = FwPackage(a.package)
     dsar = pkg.dsar_for(ARCHIVE)
@@ -220,31 +208,13 @@ def main(argv=None):
     if skipped:
         print(f"decode: {skipped} clips skipped (see {a.errors})")
 
-    for fi, eps in enumerate(pack_episodes(list(ep_secs.items()), budget=budget_seconds())):
-        eps_set = set(eps)
-        file_segs = [s for s in spine if s.episode in eps_set and s.line_id in decoded]
-        wav_list, rows, t, prev = [], [], 0.0, None
-        for s in file_segs:
-            wav, dur = decoded[s.line_id]
-            new_scene = s.scene != prev
-            if wav_list:
-                wav_list.append(scene_sil if new_scene else line_sil)
-                t += SCENE_GAP if new_scene else LINE_GAP
-            wav_list.append(wav)
-            rows.append([format_ts(t), s.scene, s.speaker, s.subtitle, s.line_id])
-            t += dur
-            prev = s.scene
-        if not wav_list:
-            continue
-        stem = "hzd_mainquest" if a.spine_only else "hzd_story_reel"
-        base = os.path.join(a.out_dir, f"{stem}_{fi:02d}")
-        _ffmpeg_concat(wav_list, base + ".mp3", base + ".concat.txt",
-                       os.path.join(a.cache, "norm"))
-        with open(base + ".tracklist.csv", "w", newline="", encoding="utf-8") as f:
-            w = csv.writer(f)
-            w.writerow(["timestamp", "scene", "speaker", "subtitle", "line_id"])
-            w.writerows(rows)
-        print(f"{base}.mp3  ({len(rows)} lines, {format_ts(t)})")
+    stem = "hzd_mainquest" if a.spine_only else "hzd_story_reel"
+    columns = ReelColumns(
+        header=["timestamp", "scene", "speaker", "subtitle", "line_id"],
+        row_of=lambda s, t: [format_ts(t), s.scene, s.speaker, s.subtitle, s.line_id])
+    assemble_reels(
+        spine, ep_secs, decoded, out_dir=a.out_dir, cache_dir=a.cache, stem=stem,
+        columns=columns, budget=budget_seconds(), gap_key=lambda s: s.scene)
     return 0
 
 
