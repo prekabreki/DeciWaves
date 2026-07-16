@@ -1,8 +1,9 @@
 import os
+import threading
 
 import pytest
 
-from deciwaves.engine.atomic_io import atomic_write
+from deciwaves.engine.atomic_io import atomic_write, _tmp_path_for
 
 
 def _stray_files(tmp_path, dst):
@@ -85,3 +86,55 @@ def test_atomic_write_tmp_path_lives_in_destination_directory(tmp_path):
 
     atomic_write(dst, write_fn)
     assert seen_tmp_dir[0] == os.path.dirname(dst)
+
+
+# --- collision-proofing under concurrency (issue #41) ---------------------
+# When the decode loops run in a worker pool, two workers can decode the same
+# cache path at once (e.g. two DS lines sharing one cutscene stream, or two
+# spine items sharing one HZD clip_row). A DETERMINISTIC tmp name would make
+# both workers write the SAME tmp file and os.replace() it out from under each
+# other -- interleaved bytes / a vanished tmp. The tmp name must be unique per
+# call so two concurrent writes to one dst never share a tmp path.
+
+def test_tmp_path_is_unique_per_call_but_keeps_extension_and_dir():
+    dst = os.path.join("some", "dir", "clip.wav")
+    a = _tmp_path_for(dst)
+    b = _tmp_path_for(dst)
+    assert a != b, "two calls must yield distinct tmp paths (collision-proof)"
+    for t in (a, b):
+        assert t.endswith(".wav"), "tmp must keep dst's extension for ffmpeg/vgmstream"
+        assert os.path.dirname(t) == os.path.dirname(dst), "tmp must be a sibling of dst"
+        assert t != dst
+
+
+def test_concurrent_atomic_writes_to_same_dst_do_not_corrupt(tmp_path):
+    """Many threads atomically writing the SAME dst with the SAME content must
+    end with an intact file equal to that content and no leftover tmp files --
+    never a half-written / interleaved result."""
+    dst = str(tmp_path / "clip.wav")
+    payload = b"COMPLETE-IDENTICAL-PAYLOAD" * 100
+    barrier = threading.Barrier(12)
+    errors = []
+
+    def writer():
+        try:
+            barrier.wait()
+
+            def write_fn(tmp):
+                with open(tmp, "wb") as f:
+                    f.write(payload)
+
+            atomic_write(dst, write_fn)
+        except Exception as e:  # pragma: no cover - only on a real race bug
+            errors.append(e)
+
+    threads = [threading.Thread(target=writer) for _ in range(12)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert errors == [], f"a concurrent atomic_write raced: {errors}"
+    with open(dst, "rb") as f:
+        assert f.read() == payload, "final file must be the whole, uncorrupted payload"
+    assert _stray_files(tmp_path, dst) == [], "no tmp file may linger after the race"

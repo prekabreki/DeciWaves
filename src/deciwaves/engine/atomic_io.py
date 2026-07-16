@@ -16,20 +16,59 @@ final `os.replace()`. Any interruption or failure before that point leaves
 `dst` untouched (a prior valid cache entry, if any, survives) and removes the
 partial tmp file so it doesn't linger.
 
-The tmp path keeps `dst`'s extension (`name.tmp.ext`, not `name.ext.tmp`):
-ffmpeg and vgmstream both infer container/format from the output filename's
-extension, so a bare `dst + ".tmp"` (extension-less) makes ffmpeg fail with
-"Invalid argument" instead of writing WAV -- keeping the real extension on
-the tmp file is what lets it double as the actual subprocess output path.
+The tmp path keeps `dst`'s extension (`name.tmp.<token>.ext`, not
+`name.ext.tmp`): ffmpeg and vgmstream both infer container/format from the
+output filename's extension, so a bare `dst + ".tmp"` (extension-less) makes
+ffmpeg fail with "Invalid argument" instead of writing WAV -- keeping the real
+extension on the tmp file is what lets it double as the actual subprocess
+output path.
+
+The tmp name also carries a unique random token, so it is collision-proof
+*under concurrency*: when the per-clip decode loops run in a worker pool (see
+`engine.parallel`), two workers can legitimately target the same cache `dst` at
+once (two DS lines sharing one cutscene stream, two HZD spine items sharing one
+clip_row). A deterministic tmp name would make both write the same tmp file and
+`os.replace()` it out from under each other; a per-call random token means each
+worker owns its own tmp and the last `os.replace` simply wins with identical
+bytes.
 """
 from __future__ import annotations
 
 import os
+import time
+import uuid
 
 
 def _tmp_path_for(dst):
     root, ext = os.path.splitext(dst)
-    return f"{root}.tmp{ext}"
+    return f"{root}.tmp.{uuid.uuid4().hex}{ext}"
+
+
+def _replace(tmp, dst, attempts=100, delay=0.005):
+    """`os.replace(tmp, dst)`, tolerating a concurrent writer racing on the same
+    `dst`.
+
+    On Windows two threads replacing the same destination at once can hit a
+    transient sharing violation (``PermissionError``/``FileNotFoundError``) even
+    though each owns a distinct tmp file. Because every writer of a given cache
+    path produces identical bytes (the source -> decoded-output mapping is
+    deterministic), a peer that already put the file at `dst` has done our job
+    for us: on failure, if `dst` now exists we simply discard our redundant tmp.
+    Otherwise we briefly retry to ride out the window where a peer's replace is
+    mid-flight and `dst` isn't visible yet.
+    """
+    for i in range(attempts):
+        try:
+            os.replace(tmp, dst)
+            return
+        except OSError:
+            if os.path.isfile(dst):          # a peer won the race with an equivalent file
+                if os.path.isfile(tmp):
+                    os.remove(tmp)
+                return
+            if i == attempts - 1:
+                raise
+            time.sleep(delay)
 
 
 def atomic_write(dst, write_fn):
@@ -51,7 +90,7 @@ def atomic_write(dst, write_fn):
     tmp = _tmp_path_for(dst)
     try:
         write_fn(tmp)
-        os.replace(tmp, dst)
+        _replace(tmp, dst)
     except BaseException:
         if os.path.isfile(tmp):
             os.remove(tmp)
