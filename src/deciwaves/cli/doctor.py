@@ -36,6 +36,7 @@ from typing import NamedTuple
 
 from deciwaves.cli import config
 from deciwaves.engine import tool_paths
+from deciwaves.games.hzd import profile as hzd_profile
 
 
 class Availability(enum.Enum):
@@ -136,10 +137,14 @@ def check_ds_install(ds_install: str) -> CheckResult:
 
 
 def check_hzd_package(hzd_package: str) -> CheckResult:
+    """The "does this look like a real HZDR package dir" predicate itself is
+    ``games.hzd.profile.is_valid_hzd_package_dir`` -- shared with ``cli.setup``'s
+    ``_hzd_package_warning`` and ``games.hzd.profile.hzd_package_error``
+    (issue #51 item 2); this function's own report wording stays as-is."""
     if not hzd_package:
         return CheckResult(Availability.NOT_CONFIGURED,
                             "[--] HZD package: not configured (fine if you don't own it)")
-    if Path(hzd_package, "PackFileLocators.bin").is_file():
+    if hzd_profile.is_valid_hzd_package_dir(hzd_package):
         return CheckResult(Availability.OK, f"[ok] HZD package: {hzd_package}")
     return CheckResult(Availability.BROKEN,
                         f"[--] HZD package: {hzd_package!r} has no PackFileLocators.bin. "
