@@ -1,7 +1,7 @@
 """Abstract interface for pack readers.
 
-Both the DS `PackIndex` (bin archives) and the future HZD `fw_package` reader
-must satisfy this Protocol so `GameProfile.pack_reader` has a concrete type.
+Both the DS `PackIndex` (bin archives) and HZD's `fw_package.FwPackage` reader
+satisfy this Protocol so `GameProfile.pack_reader` has a concrete type.
 
 Using `typing.Protocol` (structural subtyping) so `PackIndex` and future
 implementations need no inheritance change — they conform automatically if they
