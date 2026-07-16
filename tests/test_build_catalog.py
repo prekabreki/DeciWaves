@@ -188,6 +188,47 @@ def test_prune_incomplete_rows_missing_csv_is_noop(tmp_path):
     assert prune_incomplete_rows(str(tmp_path / "missing.csv"), str(proc_path)) == 0
 
 
+def test_prune_incomplete_rows_missing_sidecar_keeps_csv_and_reconstructs(tmp_path, capsys):
+    """Finding 3: a catalog.csv restored/copied WITHOUT its processed sidecar must
+    not be wiped to a bare header. When the sidecar FILE is absent (state arrived
+    from a backup / selective copy, not this workspace's bookkeeping) and the CSV
+    has data rows, prune must keep every row, LOUDLY warn, and self-heal by
+    reconstructing the sidecar from the CSV's distinct core_paths -- restoring the
+    old union behavior for exactly the lost-sidecar case."""
+    csv_path = tmp_path / "catalog.csv"
+    proc_path = tmp_path / "catalog-processed.txt"  # deliberately never created
+    _write_csv_rows(csv_path, ["a/sentences", "a/sentences", "b/sentences"])
+    before = csv_path.read_bytes()
+
+    dropped = prune_incomplete_rows(str(csv_path), str(proc_path))
+
+    assert dropped == 0
+    assert csv_path.read_bytes() == before, "CSV must be untouched when sidecar is missing"
+    # sidecar reconstructed from the CSV's distinct cores
+    assert proc_path.is_file()
+    assert processed_core_paths(str(proc_path)) == {"a/sentences", "b/sentences"}
+    out = capsys.readouterr().out.lower()
+    assert "warning" in out
+
+
+def test_prune_incomplete_rows_present_but_empty_sidecar_still_prunes(tmp_path):
+    """A sidecar that EXISTS but is empty is this workspace's own bookkeeping
+    (possibly empty after a crash before any core finished) -- pruning is correct
+    there and must still fire, dropping every unconfirmed row. Only a MISSING
+    sidecar file is treated as 'arrived from elsewhere' (see test above)."""
+    csv_path = tmp_path / "catalog.csv"
+    proc_path = tmp_path / "catalog-processed.txt"
+    _write_csv_rows(csv_path, ["a/sentences", "b/sentences"])
+    proc_path.write_text("", encoding="utf-8")  # exists, empty
+
+    dropped = prune_incomplete_rows(str(csv_path), str(proc_path))
+
+    assert dropped == 2
+    with open(csv_path, newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    assert rows == []  # header only, all unconfirmed rows pruned
+
+
 def test_sidecar_is_sole_resume_authority_after_prune(tmp_path):
     """End-to-end regression for the silent-row-loss bug: before the fix, resume used
     done_core_paths(csv) | processed_core_paths(processed) -- a union where the crashed
