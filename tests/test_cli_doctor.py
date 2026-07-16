@@ -10,12 +10,26 @@ from deciwaves.cli import doctor
 
 # --- check_tool: env var -> tools_dir -> PATH -------------------------------
 
-def test_check_tool_found_via_env(monkeypatch):
-    monkeypatch.setenv("DECIWAVES_VGMSTREAM", r"C:\fake\vgmstream-cli.exe")
+def test_check_tool_found_via_env(tmp_path, monkeypatch):
+    exe = tmp_path / "vgmstream-cli.exe"
+    exe.write_bytes(b"x")
+    monkeypatch.setenv("DECIWAVES_VGMSTREAM", str(exe))
     ok, msg = doctor.check_tool("vgmstream-cli", "vgmstream-cli", "DECIWAVES_VGMSTREAM", "")
     assert ok
     assert "vgmstream-cli.exe" in msg
     assert msg.startswith("[ok]")
+
+
+def test_check_tool_env_var_points_to_missing_file(monkeypatch):
+    """An env var that's SET but points nowhere real must not pass doctor's
+    check silently -- doctor's whole job is to catch exactly this before a
+    decode subprocess fails at spawn time (engine/tool_paths.py resolves the
+    env var unconditionally, broken or not)."""
+    monkeypatch.setenv("DECIWAVES_VGMSTREAM", r"C:\fake\vgmstream-cli.exe")
+    ok, msg = doctor.check_tool("vgmstream-cli", "vgmstream-cli", "DECIWAVES_VGMSTREAM", "")
+    assert not ok
+    assert "DECIWAVES_VGMSTREAM" in msg
+    assert r"C:\fake\vgmstream-cli.exe" in msg
 
 
 def test_check_tool_found_via_tools_dir(tmp_path, monkeypatch):
