@@ -1356,6 +1356,34 @@ def test_hzd_from_equals_until_reruns_exactly_one_stage(tmp_path, monkeypatch):
         assert not os.path.exists(_marker("hzd", stage))  # stale -> invalidated
 
 
+def test_hzd_from_clears_stage_coverage_sections_with_markers(tmp_path, monkeypatch):
+    """A deleted done-marker says "not done" -- the stage's persisted coverage
+    section (engine/coverage.py, #63) must stop asserting the old completeness
+    too (issue #81), for --from's explicit delete AND for the cascade
+    invalidation of later stages. Section absent = coverage unknown, exactly
+    like markers; sections of stages that aren't invalidated stay."""
+    import json
+
+    from deciwaves.engine.coverage import default_coverage_path, write_stage_coverage
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    _seed_markers("hzd", ["catalog", "clip-index", "wem-metadata", "bind", "render"])
+    cov = default_coverage_path("hzd")
+    write_stage_coverage(cov, "wem-metadata", {"coverage_pct": 100.0})
+    write_stage_coverage(cov, "bind", {"bound": 54564})
+    mods = _mods("hzd")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _hzd_outputs(mods)))
+
+    rc = run_mod.run_game("hzd", {"hzd_package": "PKG"}, ["--from", "wem-metadata"])
+    assert rc == 0
+
+    data = json.loads(Path(cov).read_text(encoding="utf-8"))
+    assert "wem-metadata" not in data  # --from's own marker delete cleared it
+    assert "bind" not in data          # cascade invalidation cleared it too
+
+
 def test_hzd_from_bind_without_whisperx_gate_fires_after_marker_delete(tmp_path, monkeypatch, capsys):
     """--from bind without the [asr] extra: the marker is deleted FIRST (that's
     what makes the invalidation-aware upfront gate see bind as about-to-run and

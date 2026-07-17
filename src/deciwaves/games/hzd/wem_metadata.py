@@ -36,7 +36,9 @@ import os
 from deciwaves.engine.catalog_io import (
     read_core_paths_sidecar, read_core_paths_sidecar_header, write_core_paths_sidecar,
 )
-from deciwaves.engine.coverage import default_coverage_path, write_stage_coverage
+from deciwaves.engine.coverage import (
+    clear_stage_coverage, default_coverage_path, write_stage_coverage,
+)
 from deciwaves.games.hzd.profile import build_profile, cores_sidecar_header
 from deciwaves.games.hzd.inventory import harvest_sentence_cores
 from deciwaves.games.hzd.catalog import select_sentence_cores
@@ -150,6 +152,11 @@ def main(argv=None):
 
     cores_failed = 0
     lines_written = 0
+    # About to replace a.out: the previous run's persisted coverage section
+    # describes the OLD file, so drop it NOW -- a failure between this rewrite
+    # and the fresh section write at the end must leave "coverage unknown",
+    # not a stale claim about content that no longer exists (issue #81).
+    clear_stage_coverage(a.coverage_out, "wem-metadata")
     with open(a.out, "w", newline="", encoding="utf-8") as f, \
          open(a.errors, "w", encoding="utf-8") as ferr:
         w = csv.writer(f)
@@ -180,7 +187,10 @@ def main(argv=None):
     # were stdout-only, so a partial scan looked complete on disk.
     write_stage_coverage(a.coverage_out, "wem-metadata", {
         "cores": len(paths), "cores_failed": cores_failed,
-        "lines_written": lines_written, **report})
+        "lines_written": lines_written,
+        # The cap in effect (issue #81): a capped rescan must be
+        # distinguishable on disk from a complete scan, like bind's section.
+        "sample_cap": a.sample_cap, **report})
     return 0
 
 

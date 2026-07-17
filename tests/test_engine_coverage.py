@@ -73,3 +73,60 @@ def test_write_stage_coverage_rebuilds_non_object_file_with_warning(tmp_path, ca
     data = json.loads(open(path, encoding="utf-8").read())
     assert data == {"bind": {"buckets_skipped": 3}}
     assert "coverage.json" in capsys.readouterr().out
+
+
+def test_write_stage_coverage_rebuilds_non_utf8_file_with_warning(tmp_path, capsys):
+    """Byte-level corruption (a torn write, or a tool re-saving the file as
+    UTF-16 -- this is a Windows-only project) raises UnicodeDecodeError, which
+    the corrupt-file handler must treat exactly like invalid JSON: rebuild with
+    a warning, never crash every subsequent run until manual deletion (#81)."""
+    path = str(tmp_path / "coverage.json")
+    with open(path, "wb") as f:
+        f.write(b"\xff\xfe{ not utf-8 \xff")
+
+    coverage.write_stage_coverage(path, "bind", {"buckets_skipped": 3})
+
+    data = json.loads(open(path, encoding="utf-8").read())
+    assert data == {"bind": {"buckets_skipped": 3}}
+    assert "coverage.json" in capsys.readouterr().out
+
+
+def test_write_stage_coverage_never_raises_on_unwritable_path(tmp_path, capsys):
+    """The artifact is informational: a stage whose real work succeeded must
+    never be FAILED by a coverage-write problem (typo'd --coverage-out pointing
+    at an existing directory, a read-only location) -- warn and move on (#81).
+    Before this, the unguarded write crashed the stage with a raw traceback
+    after an hours-long GPU bind had already succeeded."""
+    path = str(tmp_path / "iamadir")
+    (tmp_path / "iamadir").mkdir()  # os.replace onto a directory fails on Windows
+
+    coverage.write_stage_coverage(path, "bind", {"buckets_skipped": 3})  # must not raise
+
+    out = capsys.readouterr().out
+    assert "warning" in out.lower()
+    assert "iamadir" in out
+
+
+def test_clear_stage_coverage_removes_section_keeps_others(tmp_path):
+    """Mirror of the done-marker contract (#81): marker absent = not done,
+    section absent = coverage unknown. Clearing one stage's section must not
+    touch its siblings'."""
+    path = str(tmp_path / "coverage.json")
+    coverage.write_stage_coverage(path, "wem-metadata", {"story_lines": 10})
+    coverage.write_stage_coverage(path, "bind", {"buckets_skipped": 3})
+
+    coverage.clear_stage_coverage(path, "bind")
+
+    data = json.loads(open(path, encoding="utf-8").read())
+    assert data == {"wem-metadata": {"story_lines": 10}}
+
+
+def test_clear_stage_coverage_noops_on_missing_file_and_section(tmp_path):
+    path = str(tmp_path / "coverage.json")
+    coverage.clear_stage_coverage(path, "bind")          # no file: no-op, no raise
+    assert not (tmp_path / "coverage.json").exists()     # and none created
+
+    coverage.write_stage_coverage(path, "wem-metadata", {"story_lines": 10})
+    coverage.clear_stage_coverage(path, "bind")          # no such section: no-op
+    data = json.loads(open(path, encoding="utf-8").read())
+    assert data == {"wem-metadata": {"story_lines": 10}}

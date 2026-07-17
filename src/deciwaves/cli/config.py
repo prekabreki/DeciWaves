@@ -67,7 +67,11 @@ def load() -> dict:
         cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return {}
-    except (json.JSONDecodeError, OSError) as exc:
+    except (ValueError, OSError) as exc:
+        # ValueError covers json.JSONDecodeError AND UnicodeDecodeError: a
+        # torn write or a tool re-saving the file as UTF-16 (Windows-only
+        # project) is corruption too, and must warn-and-start-fresh rather
+        # than crash every command until the file is hand-deleted (issue #81).
         _warn_corrupted(cfg_path, exc)
         return {}
     if not isinstance(cfg, dict):

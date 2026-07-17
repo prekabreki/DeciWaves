@@ -7,7 +7,9 @@ import sys
 import tempfile
 import wave
 from deciwaves.engine import asr
-from deciwaves.engine.coverage import default_coverage_path, write_stage_coverage
+from deciwaves.engine.coverage import (
+    clear_stage_coverage, default_coverage_path, write_stage_coverage,
+)
 from deciwaves.engine.pack.hzd_package import HzdPackage
 from deciwaves.games.hzd import match
 from deciwaves.games.hzd.atrac9 import Atrac9Error, decode_wem_to_wav
@@ -269,6 +271,11 @@ def main(argv=None):
                          "score": round(score, 1), "transcript": transcripts.get(cr, "")})
 
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
+    # About to replace the manifest: drop the old coverage section first, so a
+    # failure between this rewrite and the section write below leaves
+    # "coverage unknown" rather than a stale claim (issue #81, same contract
+    # as wem_metadata.py).
+    clear_stage_coverage(a.coverage_out, "bind")
     with open(a.out, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=MANIFEST_COLS)
         w.writeheader()
@@ -295,6 +302,12 @@ def main(argv=None):
         "buckets_skipped": n_bucket_skipped,
         "clips_transcribed": n_transcribed,
         "clips_reused": n_skipped,
+        # Wanted clips that ended the run with NO transcript (issue #81): the
+        # per-clip failures counted in clips_failed, plus -- crucially -- the
+        # silent shortfall of pure-reuse mode (--transcripts without
+        # --package), where clips absent from the sidecar are left unbound by
+        # design and would otherwise be invisible on disk.
+        "clips_untranscribed": sum(1 for cr in want if cr not in transcripts),
         "clips_failed": n_failed,
         "rows": len(rows), "bound": len(bound),
         "tiers": {t: tc[t] for t in ("S", "1", "2", "E", "3")},
