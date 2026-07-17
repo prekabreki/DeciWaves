@@ -10,6 +10,12 @@ directory existing is NOT a skip criterion: a stage's own mkdir (or a leftover
 output from an old build) must not look like "done", and one stage's output
 directory must never be mistaken for another stage's (see issues #15 and #6).
 
+``--until <stage>`` runs the chain only through that stage (the GPU gate then only
+considers stages inside the slice, so the pre-GPU stages run without the [asr]
+extra); ``--from <stage>`` deletes that stage's marker before running, so it and
+everything after it re-run. Together they are the GUI's Scan button and the stage
+strip's "Re-run from here" (issue #62, docs/deciwaves-gui-spec.md §5.2).
+
 Per-game chains (see task-9 brief):
     ds:  catalog -> order -> render (cutscene voice tracks come from the packaged,
          pre-resolved ds/cutscene_tracks.csv -- the `cutscenes` stage is NOT part of
@@ -163,6 +169,55 @@ def _run_chain(game: str, chain: list[Stage], ctx: dict, full_chain: list[Stage]
     return 0
 
 
+def _add_slice_flags(ap: argparse.ArgumentParser, chain: list[Stage]) -> None:
+    """--until/--from for a game's ``run`` parser (issue #62, GUI spec §5.2):
+    the Scan-button and re-run-from-here primitives. ``choices`` doubles as
+    validation and as the only place stage names are discoverable from --help."""
+    names = [s.name for s in chain]
+    ap.add_argument("--until", choices=names,
+                    help="run the chain only up to and including this stage; "
+                         "done-markers skip/invalidate as usual, and the GPU-extra "
+                         "check only considers stages inside the slice (so the "
+                         "pre-GPU stages run fine without deciwaves[asr])")
+    ap.add_argument("--from", dest="from_stage", choices=names,
+                    help="re-run from this stage: delete its done-marker before "
+                         "running, so it re-executes (and later stages re-run too, "
+                         "via the usual cascade invalidation); earlier stages "
+                         "still skip via their own markers")
+
+
+def _prepare_slice(game: str, chain: list[Stage], from_stage: str | None,
+                   until_stage: str | None) -> tuple[int, int]:
+    """Apply --from/--until before the chain runs. Returns ``(last_idx, rc)``:
+    a nonzero ``rc`` is a usage error (already printed) the caller must return;
+    ``last_idx`` is the inclusive index into ``chain`` of the last stage
+    --until keeps (the whole chain when --until wasn't given).
+
+    --from deletes the named stage's done-marker and nothing else -- the chain
+    then runs normally, exactly like the manual delete-the-marker-and-re-run
+    flow the skip message advertises: earlier stages still skip via their
+    markers (never blind-skipped -- a missing earlier marker still resumes
+    from there), and later stages re-run via cascade invalidation once the
+    stage actually re-executes. Deleting BEFORE the run also means the upfront
+    GPU gate sees the stage as about-to-run, so `--from bind` without the
+    [asr] extra aborts with the marker already deleted -- the same resumable
+    state a manual delete leaves behind."""
+    names = [s.name for s in chain]
+    last_idx = names.index(until_stage) if until_stage else len(names) - 1
+    if from_stage:
+        if names.index(from_stage) > last_idx:
+            print(f"deciwaves {game} run: --from {from_stage} comes after "
+                  f"--until {until_stage} in the {game} chain "
+                  f"({' -> '.join(names)}) -- the re-run target would never "
+                  f"execute.")
+            return last_idx, 2
+        try:
+            os.remove(_done_marker(game, from_stage))
+        except FileNotFoundError:
+            pass  # stage never ran (or already invalidated) -- nothing to delete
+    return last_idx, 0
+
+
 def _missing_config(game: str, hint: str, flag_hint: str) -> int:
     print(f"deciwaves {game} run: no {hint} configured -- run `deciwaves setup` first, "
           f"or pass {flag_hint} explicitly.")
@@ -231,12 +286,22 @@ def _ds_render_argv(ctx: dict) -> list:
 
 
 def _run_ds(cfg: dict, extra_argv: list) -> int:
+    # No "cutscenes" stage here: the default chain uses the bundled, pre-resolved
+    # ds/cutscene_tracks.csv (see _ds_order_argv) instead of regenerating it against
+    # the user's install. `deciwaves ds cutscenes` remains available standalone for
+    # anyone who wants to regenerate it (e.g. against a patched install).
+    chain = [
+        Stage("catalog", STAGES["ds"]["catalog"][0], _ds_catalog_argv),
+        Stage("order", STAGES["ds"]["order"][0], _ds_order_argv),
+        Stage("render", STAGES["ds"]["render"][0], _ds_render_argv),
+    ]
     ap = argparse.ArgumentParser(
         prog="deciwaves ds run",
         description="Run the DS pipeline end-to-end: catalog -> order -> render.",
     )
     ap.add_argument("--data-dir", help="DS install's data directory (default: from `deciwaves setup`)")
     ap.add_argument("--oodle", help="path to oo2core_7_win64.dll (default: from `deciwaves setup`)")
+    _add_slice_flags(ap, chain)
     ns = _parse_or_exit(ap, extra_argv)
     if isinstance(ns, int):
         return ns
@@ -249,16 +314,10 @@ def _run_ds(cfg: dict, extra_argv: list) -> int:
         return _missing_config("ds", "DS install (ds_install)", "--data-dir/--oodle")
 
     ctx = {"data_dir": data_dir, "oodle": oodle}
-    # No "cutscenes" stage here: the default chain uses the bundled, pre-resolved
-    # ds/cutscene_tracks.csv (see _ds_order_argv) instead of regenerating it against
-    # the user's install. `deciwaves ds cutscenes` remains available standalone for
-    # anyone who wants to regenerate it (e.g. against a patched install).
-    chain = [
-        Stage("catalog", STAGES["ds"]["catalog"][0], _ds_catalog_argv),
-        Stage("order", STAGES["ds"]["order"][0], _ds_order_argv),
-        Stage("render", STAGES["ds"]["render"][0], _ds_render_argv),
-    ]
-    return _run_chain("ds", chain, ctx)
+    last_idx, rc = _prepare_slice("ds", chain, ns.from_stage, ns.until)
+    if rc:
+        return rc
+    return _run_chain("ds", chain[:last_idx + 1], ctx, full_chain=chain)
 
 
 # ---------------------------------------------------------------------------
@@ -292,6 +351,13 @@ def _hzd_bind_argv(ctx: dict) -> list:
 
 
 def _run_hzd(cfg: dict, extra_argv: list) -> int:
+    chain = [
+        Stage("catalog", STAGES["hzd"]["catalog"][0], _hzd_package_argv),
+        Stage("clip-index", STAGES["hzd"]["clip-index"][0], _hzd_package_argv),
+        Stage("wem-metadata", STAGES["hzd"]["wem-metadata"][0], _hzd_package_argv),
+        Stage("bind", STAGES["hzd"]["bind"][0], _hzd_bind_argv, gpu=True),
+        Stage("render", STAGES["hzd"]["render"][0], _hzd_package_argv),
+    ]
     ap = argparse.ArgumentParser(
         prog="deciwaves hzd run",
         description="Run the HZD pipeline end-to-end: catalog -> clip-index -> "
@@ -308,6 +374,7 @@ def _run_hzd(cfg: dict, extra_argv: list) -> int:
                           "passing a different --sample-cap here has no effect until you "
                           "delete out/hzd/.done-bind and re-run -- the done-marker doesn't "
                           "know its own flags changed.")
+    _add_slice_flags(ap, chain)
     ns = _parse_or_exit(ap, extra_argv)
     if isinstance(ns, int):
         return ns
@@ -317,14 +384,10 @@ def _run_hzd(cfg: dict, extra_argv: list) -> int:
         return _missing_config("hzd", "HZD package (hzd_package)", "--package")
 
     ctx = {"package": package, "sample_cap": ns.sample_cap}
-    chain = [
-        Stage("catalog", STAGES["hzd"]["catalog"][0], _hzd_package_argv),
-        Stage("clip-index", STAGES["hzd"]["clip-index"][0], _hzd_package_argv),
-        Stage("wem-metadata", STAGES["hzd"]["wem-metadata"][0], _hzd_package_argv),
-        Stage("bind", STAGES["hzd"]["bind"][0], _hzd_bind_argv, gpu=True),
-        Stage("render", STAGES["hzd"]["render"][0], _hzd_package_argv),
-    ]
-    return _run_chain("hzd", chain, ctx)
+    last_idx, rc = _prepare_slice("hzd", chain, ns.from_stage, ns.until)
+    if rc:
+        return rc
+    return _run_chain("hzd", chain[:last_idx + 1], ctx, full_chain=chain)
 
 
 # ---------------------------------------------------------------------------
@@ -389,6 +452,18 @@ def _fw_render_argv(ctx: dict) -> list:
 
 
 def _run_fw(cfg: dict, extra_argv: list) -> int:
+    # The chain is executed in two `_run_chain` calls (split around the BYO
+    # --gamescript gate below), but it is one declared pipeline -- pass the
+    # full, ordered stage list as `full_chain` to both calls so marker
+    # invalidation (issue #37) sees stages on the far side of the gate too.
+    full_chain = [
+        Stage("extract", STAGES["fw"]["extract"][0], _fw_extract_argv),
+        Stage("asr", STAGES["fw"]["asr"][0], _fw_asr_argv, gpu=True),
+        Stage("subtitle-bind", STAGES["fw"]["subtitle-bind"][0], _fw_subtitle_bind_argv),
+        Stage("match", STAGES["fw"]["match"][0], _fw_match_argv),
+        Stage("full-reel", STAGES["fw"]["full-reel"][0], _fw_full_reel_argv),
+        Stage("render", STAGES["fw"]["render"][0], _fw_render_argv),
+    ]
     ap = argparse.ArgumentParser(
         prog="deciwaves fw run",
         description="Run the FW pipeline end-to-end: extract -> asr -> subtitle-bind, "
@@ -399,6 +474,7 @@ def _run_fw(cfg: dict, extra_argv: list) -> int:
                                           "(BYO, optional -- required only to run "
                                           "match/full-reel/render; default: from "
                                           "`deciwaves setup --fw-gamescript`)")
+    _add_slice_flags(ap, full_chain)
     ns = _parse_or_exit(ap, extra_argv)
     if isinstance(ns, int):
         return ns
@@ -413,23 +489,21 @@ def _run_fw(cfg: dict, extra_argv: list) -> int:
     gamescript = ns.gamescript or cfg.get("fw_gamescript", "")
 
     ctx = {"package": package, "gamescript": gamescript}
-    # The chain is executed in two `_run_chain` calls (split around the BYO
-    # --gamescript gate below), but it is one declared pipeline -- pass the
-    # full, ordered stage list as `full_chain` to both calls so marker
-    # invalidation (issue #37) sees stages on the far side of the gate too.
-    full_chain = [
-        Stage("extract", STAGES["fw"]["extract"][0], _fw_extract_argv),
-        Stage("asr", STAGES["fw"]["asr"][0], _fw_asr_argv, gpu=True),
-        Stage("subtitle-bind", STAGES["fw"]["subtitle-bind"][0], _fw_subtitle_bind_argv),
-        Stage("match", STAGES["fw"]["match"][0], _fw_match_argv),
-        Stage("full-reel", STAGES["fw"]["full-reel"][0], _fw_full_reel_argv),
-        Stage("render", STAGES["fw"]["render"][0], _fw_render_argv),
-    ]
-    chunk1, chunk2 = full_chain[:3], full_chain[3:]
+    last_idx, rc = _prepare_slice("fw", full_chain, ns.from_stage, ns.until)
+    if rc:
+        return rc
+    chunk1 = full_chain[:min(last_idx + 1, 3)]
+    chunk2 = full_chain[3:last_idx + 1]
 
     rc = _run_chain("fw", chunk1, ctx, full_chain=full_chain)
     if rc:
         return rc
+    if not chunk2:
+        # --until stops inside (or exactly at the end of) the pre-gamescript
+        # chunk: the run ended because the user said stop, so the BYO stop
+        # message -- which explains how to CONTINUE past subtitle-bind --
+        # would misreport why the run ended. Skip the gate entirely.
+        return 0
 
     gamescript = ctx["gamescript"]
     if not gamescript:
@@ -447,7 +521,7 @@ def _run_fw(cfg: dict, extra_argv: list) -> int:
               f"(check --gamescript, or re-run `deciwaves setup --fw-gamescript <path>`)")
         return 1
 
-    return _run_chain("fw", chunk2, ctx, full_chain=full_chain)
+    return _run_chain("fw", chunk2, ctx, full_chain=full_chain)  # already --until-sliced
 
 
 # ---------------------------------------------------------------------------

@@ -225,6 +225,14 @@ bind reuse the clips it already transcribed. A marker also doesn't know if the f
 produce it have since changed - re-running `hzd run` with a different `--sample-cap` after
 `bind` already has a marker is a no-op until you delete `out/hzd/.done-bind` yourself.
 
+Partial runs. `run --until <stage>` stops the chain after that stage (markers skip and
+invalidate as usual), and the GPU-extra check only applies to stages actually in the slice -
+so `hzd run --until wem-metadata` or `fw run --until extract` runs the cheap pre-GPU stages
+on a machine without `deciwaves[asr]`. `run --from <stage>` is the delete-the-marker flow
+above as a flag: it removes that stage's marker and runs, so it and everything after it
+re-execute while earlier stages stay skipped. `run --help` for each game lists its stage
+names.
+
 Bring-your-own inputs. The optional DS transcript, the required FW `types.json`, and the
 optional FW gamescript are all documented in [docs/BYO.md](docs/BYO.md), including the exact
 format each parser expects.
