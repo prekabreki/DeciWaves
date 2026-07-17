@@ -112,26 +112,31 @@ def test_fw_render_main_missing_wavs_exits_nonzero_with_message(tmp_path, capsys
     out = capsys.readouterr().out
     assert "ERROR" in out
     assert str(tmp_path / "render-errors.log") in out
-    assert "--audio-root" in out or "audio" in out.lower()
+    assert "--audio-root" in out          # the actionable hint itself, not an echoed path
+    assert "deciwaves fw extract" in out  # a RUNNABLE command (issue #23 convention)
     assert not list((tmp_path / "reels").glob("*.mp3"))  # nothing was written
 
 
-def test_fw_render_main_empty_spine_exits_nonzero(tmp_path, capsys):
-    """A manifest whose rows are all filtered out (here: every row an unbound
-    tier) assembles zero reels -- that must be loud (exit non-zero, naming the
-    out dir and the tier filter), not a silent 0-file 'success'. Unlike DS's
-    empty-playlist rc-0 (a deliberate nothing-to-do), an empty FW spine means
-    the upstream manifest has nothing shippable -- the GUI (spec 8.2) trusts
-    the exit code instead of re-checking the output dir."""
+def test_fw_render_main_empty_spine_is_a_noop_success(tmp_path, capsys):
+    """A selection that legitimately matches nothing (here: every row an
+    unbound tier) is a NO-OP, not a failure -- DS's empty-playlist precedent
+    (review of #64: `--tiers D`, endorsed by the flag's help, never matches
+    the standard full-reel manifest since DLC ships via a separate manifest;
+    failing would make a deliberate no-op indistinguishable from a broken
+    pipeline). Still loud: the notice names the manifest and the filter, and
+    it must fire BEFORE measure/assemble side effects (no errors.log
+    truncation, no cache writes)."""
     manifest = tmp_path / "full-reel-manifest.csv"
     _write_manifest(manifest, [_row("c0", 1, "Q1", tier="3")])
 
     rc = render.main(_render_argv(tmp_path, manifest))
 
-    assert rc != 0
+    assert rc == 0
     out = capsys.readouterr().out
-    assert "0 reel" in out
+    assert "nothing to render" in out
     assert "--tiers" in out
+    assert not (tmp_path / "render-errors.log").exists()  # measure never ran
+    assert not (tmp_path / "cache").exists()              # assemble never ran
 
 
 def test_fw_render_main_surfaces_partial_measure_failures(tmp_path, monkeypatch, capsys):
@@ -156,4 +161,6 @@ def test_fw_render_main_surfaces_partial_measure_failures(tmp_path, monkeypatch,
 
     assert rc == 0
     out = capsys.readouterr().out
-    assert "1" in out and "failed" in out.lower()
+    # the exact surfaced line, not a substring the always-printed header
+    # already satisfies (review of #64: `"1" in out` was vacuously true)
+    assert "measure: 1 clip(s) failed" in out

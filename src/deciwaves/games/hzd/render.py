@@ -226,6 +226,17 @@ def main(argv=None):
     spine = build_spine(_load_csv(a.manifest), catalog, clip_index, episode_map=episode_map)
     kind = "main-quest spine" if a.spine_only else "full story reel"
     print(f"{kind}: {len(spine)} lines across {len({s.episode for s in spine})} scenes")
+    if not spine:
+        # An empty spine is a NO-OP, not a failure -- DS's empty-playlist
+        # precedent (review of #64: `--spine-only` against a bind that so far
+        # bound only side/DLC scenes legitimately yields zero main-quest rows;
+        # failing would give that deliberate narrowing the same rc as a broken
+        # decode toolchain). Checked here, before the pack is even opened.
+        what = ("bound main-quest rows (--spine-only)" if a.spine_only
+                else "bound story rows")
+        print(f"render: nothing to render: {a.manifest} has no {what} -- "
+              f"no reels written to {a.out_dir}.")
+        return 0
 
     os.makedirs(a.out_dir, exist_ok=True)
     os.makedirs(a.cache, exist_ok=True)
@@ -239,7 +250,8 @@ def main(argv=None):
     # Empty-render guard (issue #64), same contract as engine/render.py's DS
     # guard: a spine where NOTHING decoded is a failure, not a zero-clip
     # "success" -- exit code is what `hzd run` (and the GUI) trusts.
-    if not decoded and spine:
+    # (spine is known non-empty here -- the no-op case returned 0 above.)
+    if not decoded:
         print(f"render: ERROR - none of the {len(spine)} spine clips could be "
               f"decoded ({skipped} failed -- see {a.errors} for the per-clip "
               f"reasons). Try `deciwaves doctor` to check the decode tools "
@@ -254,12 +266,10 @@ def main(argv=None):
         spine, ep_secs, decoded, out_dir=a.out_dir, cache_dir=a.cache, stem=stem,
         columns=columns, budget=budget_seconds(), gap_key=lambda s: s.scene)
     if n_files == 0:
-        # Unlike DS's deliberate empty-playlist rc-0 (nothing to do), an empty
-        # HZD spine means the manifest has no bound story rows at all -- an
-        # upstream problem worth failing loudly on (issue #64).
-        print(f"render: ERROR - 0 reel files written to {a.out_dir}: the spine "
-              f"was empty ({len(spine)} lines from {a.manifest}) -- nothing to "
-              f"assemble. Did bind produce any bound main-quest rows?")
+        # Belt-and-braces (issue #64): work existed (non-empty spine) yet
+        # assembly produced no files -- never report that as success.
+        print(f"render: ERROR - 0 reel files written to {a.out_dir} from "
+              f"{len(spine)} spine lines -- see {a.errors}.")
         return 1
     return 0
 

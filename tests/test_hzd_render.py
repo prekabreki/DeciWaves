@@ -293,16 +293,21 @@ def test_hzd_render_main_zero_decode_exits_nonzero(tmp_path, monkeypatch, capsys
     assert str(tmp_path / "render-errors.log") in out
 
 
-def test_hzd_render_main_empty_spine_exits_nonzero(tmp_path, monkeypatch, capsys):
-    """An empty spine (e.g. a manifest with no bound main-quest rows) assembles
-    zero reels -- that must be loud, not a 0-file rc-0 'success' the GUI
-    (spec 8.2) would have to double-check by listing the output dir."""
+def test_hzd_render_main_empty_spine_is_a_noop_success(tmp_path, monkeypatch, capsys):
+    """An empty spine is a NO-OP, not a failure -- DS's empty-playlist
+    precedent (review of #64: `--spine-only` against a bind that so far bound
+    only side/DLC scenes legitimately yields zero main-quest rows; failing
+    would give a deliberate narrowing the same rc as a broken decoder). Still
+    loud, with mode-appropriate wording: default full-reel mode is about
+    bound STORY rows, not just main-quest ones."""
     argv = _main_fixture(tmp_path, [])  # headers-only manifest -> empty spine
     monkeypatch.setattr(render, "HzdPackage", _MainFakePackage())
     monkeypatch.setattr(render, "decode_spine_clips", lambda *a, **k: ({}, {}, 0))
 
     rc = render.main(argv)
 
-    assert rc != 0
+    assert rc == 0
     out = capsys.readouterr().out
-    assert "0 reel" in out
+    assert "nothing to render" in out
+    assert "story rows" in out          # default mode names story rows...
+    assert "main-quest" not in out      # ...not the --spine-only subset

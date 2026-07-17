@@ -138,9 +138,22 @@ def main(argv=None):
     a = ap.parse_args(argv)
 
     tiers = {t.strip() for t in a.tiers.split(",") if t.strip()}
-    spine = build_spine(_load_csv(a.manifest), bound_tiers=tiers)
+    manifest_rows = _load_csv(a.manifest)
+    spine = build_spine(manifest_rows, bound_tiers=tiers)
     print(f"FW reel ({a.stem}): {len(spine)} lines across "
           f"{len({s.episode for s in spine})} episodes")
+    if not spine:
+        # A selection that matches nothing is a NO-OP, not a failure -- DS's
+        # empty-playlist precedent (review of #64: `--tiers D` is endorsed by
+        # the flag's help yet never matches the standard full-reel manifest,
+        # DLC ships via games/fw/dlc.py's own manifest; failing would make a
+        # deliberate no-op indistinguishable from a broken pipeline). Checked
+        # HERE, before measure/assemble side effects (errors.log truncation,
+        # cache writes). Loud, and it names the filter.
+        print(f"render: nothing to render: none of the {len(manifest_rows)} "
+              f"rows in {a.manifest} match --tiers {a.tiers} -- no reels "
+              f"written to {a.out_dir}.")
+        return 0
 
     os.makedirs(a.out_dir, exist_ok=True)
 
@@ -159,12 +172,13 @@ def main(argv=None):
     # Empty-render guard (issue #64), same contract as engine/render.py's DS
     # guard: a spine where NOTHING could be measured (typically: the manifest's
     # wav paths don't exist on disk) is a failure, not a zero-clip "success".
-    if not durations and spine:
+    # (spine is known non-empty here -- the no-op case returned 0 above.)
+    if not durations:
         print(f"render: ERROR - none of the {len(spine)} manifest clips could "
               f"be measured ({n_failed} failed -- see {a.errors}). Are the "
               f"manifest's wav paths present under --audio-root "
-              f"({a.audio_root})? Run `fw extract` first if this workspace has "
-              f"no decoded audio yet.")
+              f"({a.audio_root})? Run `deciwaves fw extract` first if this "
+              f"workspace has no decoded audio yet.")
         return 1
 
     columns = ReelColumns(
@@ -176,12 +190,10 @@ def main(argv=None):
         concat_fn=_concat_uniform if a.uniform_mono else None,
         silence_fn=mono_silence_wav if a.uniform_mono else None)
     if n_files == 0:
-        # Unlike DS's deliberate empty-playlist rc-0 (nothing to do), an empty
-        # FW spine means the manifest had no shippable rows at all -- an
-        # upstream problem worth failing loudly on (issue #64).
-        print(f"render: ERROR - 0 reel files written to {a.out_dir}: the spine "
-              f"was empty ({len(spine)} lines from {a.manifest} after the tier "
-              f"filter --tiers {a.tiers}).")
+        # Belt-and-braces (issue #64): work existed (non-empty spine) yet
+        # assembly produced no files -- never report that as success.
+        print(f"render: ERROR - 0 reel files written to {a.out_dir} from "
+              f"{len(spine)} spine lines -- see {a.errors}.")
         return 1
     return 0
 
