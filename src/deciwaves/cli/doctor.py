@@ -1,34 +1,37 @@
 """``deciwaves doctor`` -- preflight: are the decode tools, game installs, and
 optional GPU extras where the pipeline expects them?
 
-Each check is a small pure function returning ``(ok: bool, message: str)`` so
-they're independently testable (monkeypatch ``shutil.which`` / env vars / a
-tmp config, no subprocess needed). ``run_doctor`` wires them together and
-prints a report.
+Each check is a small pure function returning a :class:`Check` -- a structured
+record (``name`` / ``status`` / ``message`` / ``fix``) that both renders the
+human ``[ok]``/``[--]`` report line AND serializes to JSON, so callers never
+substring-parse the text. ``run_doctor`` wires them together and prints either
+the text report (default) or ``--json`` (issue #65: the GUI's Doctor panel,
+docs/deciwaves-gui-spec.md §3, renders the checks as a status list without
+parsing text).
 
 Exit-code contract: 0 only when every *required* check passes. Missing tools
-or a missing Oodle DLL are required -> they fail the exit code. An
-unconfigured game (the user simply doesn't own it) reports ``[--] not
-configured`` but its ``ok`` is True -- it must never fail the run. The ASR
-extra and CUDA checks are purely informational and always report ``ok=True``
-regardless of what they find.
+or a missing Oodle DLL are required -> they fail the exit code (``Availability
+.BROKEN``). An unconfigured game (the user simply doesn't own it) reports
+``NOT_CONFIGURED`` -- its ``ok`` is True, it must never fail the run. The ASR
+extra and CUDA checks are purely informational (``OK`` when present,
+``UNAVAILABLE`` when absent) and always report ``ok=True`` regardless.
 
-The three game-install checks (``check_ds_install`` / ``check_hzd_package`` /
-``check_fw_package``) return a :class:`CheckResult` instead of a bare tuple:
-alongside the human-readable ``message``, it carries a structured
-:class:`Availability` (``OK`` / ``NOT_CONFIGURED`` / ``BROKEN``) so a caller
-that needs to distinguish "not configured" from "configured and valid" --
-guided.py's game-availability menu, specifically -- can branch on that status
-directly instead of substring-matching the message text for "not configured"
-(issue #32: that substring match broke the moment a message legitimately
-mentioned those words for an unrelated reason). ``CheckResult`` still unpacks
-as a plain ``(ok, message)`` 2-tuple -- ``run_doctor``'s own loop below, and
-every other existing check function, keep the bare-tuple shape unchanged.
+Each check returns a :class:`Check`. Alongside the human-readable text it
+carries a structured :class:`Availability` (``OK`` / ``NOT_CONFIGURED`` /
+``BROKEN`` / ``UNAVAILABLE``) so a caller that needs to distinguish "not
+configured" from "configured and valid" -- guided.py's game-availability menu,
+specifically -- branches on ``.status`` directly instead of substring-matching
+the message text for "not configured" (issue #32: that substring match broke
+the moment a message legitimately mentioned those words for an unrelated
+reason). ``Check`` still unpacks as a plain ``(ok, message)`` 2-tuple -- so
+``run_doctor``'s own loop below, and every existing ``ok, msg = check_x(...)``
+call site/test, keep the bare-tuple shape unchanged.
 """
 from __future__ import annotations
 
 import argparse
 import enum
+import json
 import shutil
 from pathlib import Path
 from typing import NamedTuple
@@ -39,35 +42,60 @@ from deciwaves.games.hzd import profile as hzd_profile
 
 
 class Availability(enum.Enum):
-    """Tri-state install/config status for a game-availability check."""
+    """Install/config status for a check.
+
+    ``OK`` (present/valid) and ``NOT_CONFIGURED`` (neutral, not owned/set) and
+    ``UNAVAILABLE`` (an informational extra that isn't installed) are all
+    exit-ok; only ``BROKEN`` (configured-but-invalid, or a required thing
+    missing) fails the exit code.
+    """
     OK = "ok"
     NOT_CONFIGURED = "not_configured"
     BROKEN = "broken"
+    UNAVAILABLE = "unavailable"
 
 
-class CheckResult(NamedTuple):
-    """A game-availability check's outcome. Unpacks as ``(ok, message)`` --
-    see ``__iter__`` -- so it drops into `run_doctor`'s existing
-    ``for passed, msg in checks`` loop, and every existing
-    ``ok, msg = check_x(...)`` call site/test, unchanged. ``status`` is the
-    structured signal callers that need more than pass/fail (guided.py)
-    should read instead of the message text.
+class Check(NamedTuple):
+    """One doctor check's outcome, both human- and machine-readable.
 
-    Positional indexing (``result[0]``) is kept consistent with iteration/
-    unpacking via the ``__getitem__`` override below: without it, indexing
-    would silently fall back to ``NamedTuple``'s inherited ``tuple.__getitem__``
-    -- which reads the raw underlying fields (``status``, ``message``), NOT
-    ``(ok, message)`` -- so ``result[0]`` would hand back the ``Availability``
-    enum instead of the boolean ``ok`` that iteration/unpacking gives. That
-    mismatch (only ``__iter__`` had been overridden, not ``__getitem__``) is
-    exactly the footgun this closes.
+    ``detail`` is the clean human sentence (no ``[ok]``/``[--]`` prefix, no
+    inline ``Fix:``); ``fix`` is the actionable hint or ``""``. The rendered
+    report line (``.message``) is reconstructed from those plus ``status`` so it
+    stays byte-identical to the old hand-written strings, while JSON serializes
+    the structured fields (``.as_json``).
+
+    Unpacks as ``(ok, message)`` -- see ``__iter__`` -- so it drops into
+    ``run_doctor``'s ``for passed, msg in checks`` loop and every existing
+    ``ok, msg = check_x(...)`` call site/test unchanged. Positional indexing
+    (``result[0]``) is kept consistent with iteration/unpacking via the
+    ``__getitem__`` override: without it, indexing would fall back to
+    ``NamedTuple``'s inherited ``tuple.__getitem__`` -- which reads the raw
+    underlying fields (``name``, ``status``, ...) NOT ``(ok, line)`` -- so
+    ``result[0]`` would hand back the ``name`` string instead of the boolean
+    ``ok`` that iteration/unpacking gives. That mismatch is the footgun this
+    closes (issue #51 item 10).
     """
+    name: str
     status: Availability
-    message: str
+    detail: str
+    fix: str = ""
 
     @property
     def ok(self) -> bool:
         return self.status is not Availability.BROKEN
+
+    @property
+    def message(self) -> str:
+        """The rendered ``[ok]``/``[--]`` report line -- what the text report
+        prints and what unpacking/indexing yields, byte-identical to the old
+        hand-written strings."""
+        prefix = "[ok]" if self.status is Availability.OK else "[--]"
+        tail = f" Fix: {self.fix}" if self.fix else ""
+        return f"{prefix} {self.detail}{tail}"
+
+    def as_json(self) -> dict:
+        return {"name": self.name, "ok": self.ok, "status": self.status.value,
+                "message": self.detail, "fix": self.fix}
 
     def __iter__(self):
         yield self.ok
@@ -75,6 +103,12 @@ class CheckResult(NamedTuple):
 
     def __getitem__(self, index):
         return (self.ok, self.message)[index]
+
+
+# Back-compat alias: the three game checks were documented as returning a
+# ``CheckResult``; they now return the unified ``Check`` (construction signature
+# changed -- nothing outside this module constructs one).
+CheckResult = Check
 
 
 # --- tool resolution ---------------------------------------------------
@@ -85,7 +119,7 @@ class CheckResult(NamedTuple):
 # then a copy in the configured tools_dir, then bare name on PATH.
 
 
-def check_tool(display: str, exe: str, env_var: str | None, tools_dir: str) -> tuple[bool, str]:
+def check_tool(display: str, exe: str, env_var: str | None, tools_dir: str) -> Check:
     """Resolve *exe* the same way the pipeline will: env var -> tools_dir -> PATH.
 
     The actual env var -> tools_dir -> PATH order is delegated to
@@ -94,8 +128,7 @@ def check_tool(display: str, exe: str, env_var: str | None, tools_dir: str) -> t
     reimplementing it here (issue #51 item 1: this used to be a second,
     independent copy of that order). This function's own job is the
     doctor-specific part on top: validating that a SET env var actually
-    resolves to something usable, and turning the result into a
-    human-readable report line.
+    resolves to something usable, and turning the result into a report line.
 
     An env var that's set but resolves to nothing usable is reported as a
     failure, not silently accepted: ``engine/tool_paths.py``'s own ``resolve()``
@@ -110,72 +143,74 @@ def check_tool(display: str, exe: str, env_var: str | None, tools_dir: str) -> t
     if found.source == "env":
         p = found.path
         if not Path(p).is_file() and not shutil.which(p):
-            return False, (f"[--] {display}: env {env_var} is set to {p}, but that "
-                            f"file doesn't exist (and it isn't on PATH). Fix: unset "
-                            f"{env_var} or point it at the real executable.")
-        return True, f"[ok] {display}: {p} (env {env_var})"
+            return Check(display, Availability.BROKEN,
+                         f"{display}: env {env_var} is set to {p}, but that file "
+                         f"doesn't exist (and it isn't on PATH).",
+                         f"unset {env_var} or point it at the real executable.")
+        return Check(display, Availability.OK, f"{display}: {p} (env {env_var})")
     if found.source == "tools_dir":
-        return True, f"[ok] {display}: {found.path} (tools_dir)"
+        return Check(display, Availability.OK, f"{display}: {found.path} (tools_dir)")
     if found.source == "PATH":
-        return True, f"[ok] {display}: {found.path} (PATH)"
-    return False, (f"[--] {display}: not found. "
-                    f"Fix: run `deciwaves setup` to fetch it (or put it on PATH).")
+        return Check(display, Availability.OK, f"{display}: {found.path} (PATH)")
+    return Check(display, Availability.BROKEN, f"{display}: not found.",
+                 "run `deciwaves setup` to fetch it (or put it on PATH).")
 
 
 # --- Oodle DLL -----------------------------------------------------------
 
-def check_oodle(oodle_dll: str, ds_install: str = "") -> tuple[bool, str]:
+def check_oodle(oodle_dll: str, ds_install: str = "") -> Check:
     if not ds_install:
-        return True, "[--] Oodle DLL: not needed (DS not configured)"
+        return Check("oodle", Availability.NOT_CONFIGURED,
+                     "Oodle DLL: not needed (DS not configured)")
     if oodle_dll and Path(oodle_dll).is_file():
-        return True, f"[ok] Oodle DLL: {oodle_dll}"
-    return False, ("[--] Oodle DLL: not found. "
-                    "Fix: run `deciwaves setup --ds-install <game root>` "
-                    "(oo2core_7_win64.dll ships next to the DS:DC exe).")
+        return Check("oodle", Availability.OK, f"Oodle DLL: {oodle_dll}")
+    return Check("oodle", Availability.BROKEN, "Oodle DLL: not found.",
+                 "run `deciwaves setup --ds-install <game root>` "
+                 "(oo2core_7_win64.dll ships next to the DS:DC exe).")
 
 
 # --- game installs: unconfigured never fails the exit code ----------------
 
-def check_ds_install(ds_install: str) -> CheckResult:
+def check_ds_install(ds_install: str) -> Check:
     if not ds_install:
-        return CheckResult(Availability.NOT_CONFIGURED,
-                            "[--] DS install: not configured (fine if you don't own it)")
+        return Check("ds_install", Availability.NOT_CONFIGURED,
+                     "DS install: not configured (fine if you don't own it)")
     if Path(ds_install, "data").is_dir():
-        return CheckResult(Availability.OK, f"[ok] DS install: {ds_install}")
-    return CheckResult(Availability.BROKEN,
-                        f"[--] DS install: {ds_install!r} has no data/ dir. "
-                        f"Fix: run `deciwaves setup --ds-install <game root>`.")
+        return Check("ds_install", Availability.OK, f"DS install: {ds_install}")
+    return Check("ds_install", Availability.BROKEN,
+                 f"DS install: {ds_install!r} has no data/ dir.",
+                 "run `deciwaves setup --ds-install <game root>`.")
 
 
-def check_hzd_package(hzd_package: str) -> CheckResult:
+def check_hzd_package(hzd_package: str) -> Check:
     """The "does this look like a real HZDR package dir" predicate itself is
     ``games.hzd.profile.is_valid_hzd_package_dir`` -- shared with ``cli.setup``'s
     ``_hzd_package_warning`` and ``games.hzd.profile.hzd_package_error``
     (issue #51 item 2); this function's own report wording stays as-is."""
     if not hzd_package:
-        return CheckResult(Availability.NOT_CONFIGURED,
-                            "[--] HZD package: not configured (fine if you don't own it)")
+        return Check("hzd_package", Availability.NOT_CONFIGURED,
+                     "HZD package: not configured (fine if you don't own it)")
     if hzd_profile.is_valid_hzd_package_dir(hzd_package):
-        return CheckResult(Availability.OK, f"[ok] HZD package: {hzd_package}")
-    return CheckResult(Availability.BROKEN,
-                        f"[--] HZD package: {hzd_package!r} has no PackFileLocators.bin. "
-                        f"This must be the ...\\LocalCacheDX12\\package directory (the one "
-                        f"containing PackFileLocators.bin), not the game install root. "
-                        f"Fix: run `deciwaves setup --hzd-package <...\\LocalCacheDX12\\package>`.")
+        return Check("hzd_package", Availability.OK, f"HZD package: {hzd_package}")
+    return Check("hzd_package", Availability.BROKEN,
+                 f"HZD package: {hzd_package!r} has no PackFileLocators.bin. "
+                 f"This must be the ...\\LocalCacheDX12\\package directory (the one "
+                 f"containing PackFileLocators.bin), not the game install root.",
+                 "run `deciwaves setup --hzd-package <...\\LocalCacheDX12\\package>`.")
 
 
-def check_fw_package(fw_package: str) -> CheckResult:
+def check_fw_package(fw_package: str) -> Check:
     if not fw_package:
-        return CheckResult(Availability.NOT_CONFIGURED,
-                            "[--] FW package: not configured (fine if you don't own it)")
+        return Check("fw_package", Availability.NOT_CONFIGURED,
+                     "FW package: not configured (fine if you don't own it)")
     if Path(fw_package, "streaming_graph.core").is_file():
-        return CheckResult(Availability.OK, f"[ok] FW package: {fw_package}")
-    return CheckResult(Availability.BROKEN,
-                        f"[--] FW package: {fw_package!r} has no streaming_graph.core. "
-                        f"Fix: run `deciwaves setup --fw-package <...\\LocalCacheWinGame\\package>`.")
+        return Check("fw_package", Availability.OK, f"FW package: {fw_package}")
+    return Check("fw_package", Availability.BROKEN,
+                 f"FW package: {fw_package!r} has no streaming_graph.core.",
+                 "run `deciwaves setup --fw-package <...\\LocalCacheWinGame\\package>`.")
 
 
-def check_fw_gamescript(fw_gamescript: str) -> tuple[bool, str]:
+def check_fw_gamescript(fw_gamescript: str) -> Check:
     """Unlike check_fw_package, "not configured" here is a normal, fully-supported
     state -- the FW gamescript is BYO and optional even when FW itself is owned (it
     only gates match/full-reel/render's speaker + story-order matching; without it
@@ -184,53 +219,56 @@ def check_fw_gamescript(fw_gamescript: str) -> tuple[bool, str]:
     "configured but broken" failure as the other game checks -- it was explicitly
     pointed at a path, just earlier."""
     if not fw_gamescript:
-        return True, ("[--] FW gamescript: not configured (optional, BYO -- only needed for "
-                       "speaker + story-order matching; see docs/BYO.md)")
+        return Check("fw_gamescript", Availability.NOT_CONFIGURED,
+                     "FW gamescript: not configured (optional, BYO -- only needed for "
+                     "speaker + story-order matching; see docs/BYO.md)")
     if Path(fw_gamescript).is_file():
-        return True, f"[ok] FW gamescript: {fw_gamescript}"
-    return False, (f"[--] FW gamescript: {fw_gamescript!r} not found. "
-                    f"Fix: run `deciwaves setup --fw-gamescript <path>` with the correct path, "
-                    f"or pass --gamescript explicitly to `deciwaves fw run`.")
+        return Check("fw_gamescript", Availability.OK, f"FW gamescript: {fw_gamescript}")
+    return Check("fw_gamescript", Availability.BROKEN,
+                 f"FW gamescript: {fw_gamescript!r} not found.",
+                 "run `deciwaves setup --fw-gamescript <path>` with the correct path, "
+                 "or pass --gamescript explicitly to `deciwaves fw run`.")
 
 
 # --- optional GPU extras: informational, never fail the exit code --------
 
-def check_asr_extra() -> tuple[bool, str]:
+def check_asr_extra() -> Check:
     try:
         import whisperx  # noqa: F401
-        return True, "[ok] ASR extra (whisperx): installed"
+        return Check("asr_extra", Availability.OK, "ASR extra (whisperx): installed")
     except ImportError:
-        return True, ("[--] ASR extra (whisperx): not installed (only needed for GPU "
-                       "stages: ds trim, hzd bind, fw asr). Fix: pip install deciwaves[asr]")
+        return Check("asr_extra", Availability.UNAVAILABLE,
+                     "ASR extra (whisperx): not installed (only needed for GPU "
+                     "stages: ds trim, hzd bind, fw asr).",
+                     "pip install deciwaves[asr]")
 
 
-def check_cuda() -> tuple[bool, str]:
+def check_cuda() -> Check:
     try:
         import torch
         if torch.cuda.is_available():
-            return True, f"[ok] CUDA: available ({torch.cuda.get_device_name(0)})"
-        return True, "[--] CUDA: torch installed but no GPU visible (informational)"
+            return Check("cuda", Availability.OK,
+                         f"CUDA: available ({torch.cuda.get_device_name(0)})")
+        return Check("cuda", Availability.UNAVAILABLE,
+                     "CUDA: torch installed but no GPU visible (informational)")
     except ImportError:
-        return True, "[--] CUDA: torch not installed (informational; see ASR extra)"
+        return Check("cuda", Availability.UNAVAILABLE,
+                     "CUDA: torch not installed (informational; see ASR extra)")
     except Exception as exc:  # torch can fail to import for env reasons (locked DLLs,
         # broken install); doctor's contract is to report, never traceback.
         reason = str(exc).splitlines()[0][:80]
-        return True, f"[--] CUDA: torch import failed ({reason}) (informational)"
+        return Check("cuda", Availability.UNAVAILABLE,
+                     f"CUDA: torch import failed ({reason}) (informational)")
 
 
-def check_config_file() -> tuple[bool, str]:
-    return True, f"[ok] config file: {config.path()}"
+def check_config_file() -> Check:
+    return Check("config_file", Availability.OK, f"config file: {config.path()}")
 
 
-def run_doctor(argv=None) -> int:
-    ap = argparse.ArgumentParser(prog="deciwaves doctor",
-                                  description="Preflight: tools, installs, and optional extras.")
-    ap.parse_args(argv or [])
-
+def _all_checks() -> list[Check]:
     cfg = config.load()
     tools_dir = cfg.get("tools_dir", "")
-
-    checks = [
+    return [
         *[check_tool(t.display, t.exe, t.env_var, tools_dir) for t in config.TOOLS],
         check_oodle(cfg.get("oodle_dll", ""), cfg.get("ds_install", "")),
         check_ds_install(cfg.get("ds_install", "")),
@@ -242,11 +280,23 @@ def run_doctor(argv=None) -> int:
         check_config_file(),
     ]
 
-    ok = True
-    for passed, msg in checks:
-        print(msg)
-        if not passed:
-            ok = False
+
+def run_doctor(argv=None) -> int:
+    ap = argparse.ArgumentParser(prog="deciwaves doctor",
+                                 description="Preflight: tools, installs, and optional extras.")
+    ap.add_argument("--json", action="store_true",
+                    help="emit machine-readable JSON (one object per check) instead of "
+                         "the text report; exit code is unchanged")
+    a = ap.parse_args(argv or [])
+
+    checks = _all_checks()
+    ok = all(c.ok for c in checks)
+
+    if a.json:
+        print(json.dumps({"ok": ok, "checks": [c.as_json() for c in checks]}, indent=2))
+    else:
+        for c in checks:
+            print(c.message)
     return 0 if ok else 1
 
 

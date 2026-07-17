@@ -392,3 +392,88 @@ def test_run_doctor_config_roundtrips_through_env_override(tmp_path, monkeypatch
     # Sanity: config.load() picks up DECIWAVES_CONFIG_DIR the same way doctor uses it.
     _write_config(tmp_path, monkeypatch, tools_dir="X")
     assert config.load()["tools_dir"] == "X"
+
+
+# --- doctor --json (issue #65): machine-readable checks for the GUI Doctor
+# panel (docs/deciwaves-gui-spec.md §3), so it never has to substring-parse the
+# [ok]/[--] text lines -- the exact brittleness CheckResult was introduced to
+# kill (#32), now closed for every check.
+
+def _healthy_config(tmp_path, monkeypatch):
+    """A config where DS+HZD+FW are all configured and valid, tools on PATH."""
+    monkeypatch.setattr(doctor.shutil, "which", lambda name: str(tmp_path / name))
+    for var in ("DECIWAVES_VGMSTREAM", "DECIWAVES_VGAUDIO"):
+        monkeypatch.delenv(var, raising=False)
+    ds = tmp_path / "ds"
+    (ds / "data").mkdir(parents=True)
+    oodle = ds / "oo2core_7_win64.dll"
+    oodle.write_bytes(b"x")
+    hzd = tmp_path / "hzd"; hzd.mkdir()
+    (hzd / "PackFileLocators.bin").write_bytes(b"x")
+    fw = tmp_path / "fw"; fw.mkdir()
+    (fw / "streaming_graph.core").write_bytes(b"x")
+    _write_config(tmp_path, monkeypatch, tools_dir=str(tmp_path),
+                  ds_install=str(ds), oodle_dll=str(oodle),
+                  hzd_package=str(hzd), fw_package=str(fw))
+
+
+def test_doctor_json_emits_structured_object_per_check(tmp_path, monkeypatch, capsys):
+    import json
+    _healthy_config(tmp_path, monkeypatch)
+    rc = doctor.run_doctor(["--json"])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert rc == 0
+    assert payload["ok"] is True
+    checks = {c["name"]: c for c in payload["checks"]}
+    # every check carries the five structured fields, no [ok]/[--] prefix in message
+    for c in payload["checks"]:
+        assert set(c) == {"name", "ok", "status", "message", "fix"}
+        assert not c["message"].startswith("[ok]")
+        assert not c["message"].startswith("[--]")
+    # named checks cover tools, oodle, per-game installs, gamescript, asr, cuda
+    for name in ("vgmstream-cli", "ffmpeg", "oodle", "ds_install", "hzd_package",
+                 "fw_package", "fw_gamescript", "asr_extra", "cuda", "config_file"):
+        assert name in checks, f"missing check {name!r} in {sorted(checks)}"
+    assert checks["ds_install"]["status"] == "ok"
+    assert checks["ds_install"]["ok"] is True
+
+
+def test_doctor_json_reports_not_configured_and_broken_status(tmp_path, monkeypatch, capsys):
+    import json
+    # tools missing -> broken+fail; HZD/FW unconfigured -> not_configured, exit-ok
+    monkeypatch.setattr(doctor.shutil, "which", lambda name: None)
+    for var in ("DECIWAVES_VGMSTREAM", "DECIWAVES_VGAUDIO"):
+        monkeypatch.delenv(var, raising=False)
+    empty = tmp_path / "empty"; empty.mkdir()
+    _write_config(tmp_path, monkeypatch, tools_dir=str(empty))
+    rc = doctor.run_doctor(["--json"])
+    payload = json.loads(capsys.readouterr().out)
+    checks = {c["name"]: c for c in payload["checks"]}
+
+    assert rc == 1 and payload["ok"] is False
+    assert checks["vgmstream-cli"]["status"] == "broken"
+    assert checks["vgmstream-cli"]["ok"] is False
+    assert checks["vgmstream-cli"]["fix"]                    # a fix hint is present
+    assert checks["hzd_package"]["status"] == "not_configured"
+    assert checks["hzd_package"]["ok"] is True               # unowned never fails
+
+
+def test_doctor_json_does_not_print_text_lines(tmp_path, monkeypatch, capsys):
+    import json
+    _healthy_config(tmp_path, monkeypatch)
+    doctor.run_doctor(["--json"])
+    out = capsys.readouterr().out
+    # pure JSON: parses whole, and none of the text-mode [ok]/[--] lines leak
+    json.loads(out)
+    assert "[ok]" not in out and "[--]" not in out
+
+
+def test_doctor_text_output_unchanged_without_json_flag(tmp_path, monkeypatch, capsys):
+    # The default (no --json) path stays byte-for-byte the [ok]/[--] report.
+    _healthy_config(tmp_path, monkeypatch)
+    rc = doctor.run_doctor([])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "[ok]" in out
+    assert out.startswith("[ok]") or out.startswith("[--]")
