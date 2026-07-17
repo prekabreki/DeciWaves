@@ -7,6 +7,7 @@ import sys
 import tempfile
 import wave
 from deciwaves.engine import asr
+from deciwaves.engine.coverage import default_coverage_path, write_stage_coverage
 from deciwaves.engine.pack.hzd_package import HzdPackage
 from deciwaves.games.hzd import match
 from deciwaves.games.hzd.atrac9 import Atrac9Error, decode_wem_to_wav
@@ -108,6 +109,12 @@ def main(argv=None):
     ap.add_argument("--all-buckets", action="store_true",
                     help="transcribe every ambiguous bucket, not just story-relevant "
                          "ones (default skips pure ambient/bark collision buckets)")
+    ap.add_argument("--coverage-out", default=default_coverage_path("hzd"),
+                    help="per-game coverage summary JSON this stage merges its "
+                         "bind section into (issue #63): the cap used, ambiguous "
+                         "buckets skipped by it, tier tally, bound totals -- the "
+                         "numbers the stdout summary prints, persisted so a capped "
+                         "rip is distinguishable from a complete one on disk")
     a = ap.parse_args(argv)
 
     cat = load_catalog_dict(a.catalog)
@@ -277,6 +284,21 @@ def main(argv=None):
     tc = Counter(r["tier"] for r in rows)
     print(f"rows={len(rows)} bound={len(bound)} "
           f"tierS={tc['S']} tier1={tc['1']} tier2={tc['2']} tierE={tc['E']} tier3={tc['3']}")
+    # Persist the run's coverage facts (issue #63): before this, the cap-skip
+    # count above and this tier tally were stdout-only, so a --sample-cap'd
+    # rip looked complete on disk (cap-skipped buckets are simply absent from
+    # the manifest, indistinguishable from never having existed).
+    write_stage_coverage(a.coverage_out, "bind", {
+        "sample_cap": a.sample_cap,
+        "buckets_relevant": len(relevant),
+        "buckets_attempted": n_bucket_consumed,
+        "buckets_skipped": n_bucket_skipped,
+        "clips_transcribed": n_transcribed,
+        "clips_reused": n_skipped,
+        "clips_failed": n_failed,
+        "rows": len(rows), "bound": len(bound),
+        "tiers": {t: tc[t] for t in ("S", "1", "2", "E", "3")},
+    })
     return 0
 
 

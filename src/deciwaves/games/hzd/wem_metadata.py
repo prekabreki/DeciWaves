@@ -36,6 +36,7 @@ import os
 from deciwaves.engine.catalog_io import (
     read_core_paths_sidecar, read_core_paths_sidecar_header, write_core_paths_sidecar,
 )
+from deciwaves.engine.coverage import default_coverage_path, write_stage_coverage
 from deciwaves.games.hzd.profile import build_profile, cores_sidecar_header
 from deciwaves.games.hzd.inventory import harvest_sentence_cores
 from deciwaves.games.hzd.catalog import select_sentence_cores
@@ -90,6 +91,10 @@ def main(argv=None):
                          "reused here to skip re-harvesting. If absent, falls back to "
                          "rescanning the pack (--sample-cap applies to that fallback only)")
     ap.add_argument("--errors", default="out/hzd/wem-metadata-errors.log")
+    ap.add_argument("--coverage-out", default=default_coverage_path("hzd"),
+                    help="per-game coverage summary JSON this stage merges its "
+                         "story-coverage section into (issue #63) -- the same "
+                         "numbers as the stdout report, persisted")
     ap.add_argument("--sample-cap", type=int, default=0,
                     help="0 = scan the whole pack; >0 caps records scanned during a "
                          "rescan (the missing-sidecar fallback, or a stale-sidecar "
@@ -169,7 +174,13 @@ def main(argv=None):
 
     print(f"wem-metadata: {len(paths)} cores ({cores_failed} failed), "
           f"{lines_written} lines -> {a.out}")
-    print(coverage_report(a.out, a.catalog))
+    report = coverage_report(a.out, a.catalog)
+    print(report)
+    # Persist what the two lines above print (issue #63): coverage numbers
+    # were stdout-only, so a partial scan looked complete on disk.
+    write_stage_coverage(a.coverage_out, "wem-metadata", {
+        "cores": len(paths), "cores_failed": cores_failed,
+        "lines_written": lines_written, **report})
     return 0
 
 
