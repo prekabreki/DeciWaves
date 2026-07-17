@@ -12,6 +12,15 @@ from deciwaves.games.hzd import asr_bind
 from deciwaves.games.hzd.atrac9 import Atrac9Error
 
 
+@pytest.fixture(autouse=True)
+def _isolate_cwd(tmp_path, monkeypatch):
+    """main()'s --coverage-out default (issue #63) is workspace(cwd)-relative,
+    and unlike --out/--errors the pre-existing tests don't override it -- without
+    this chdir, any main() call here writes out/hzd/coverage.json into the REPO's
+    working directory instead of the test's tmp dir."""
+    monkeypatch.chdir(tmp_path)
+
+
 def _write_csv(path, rows, fieldnames):
     with open(path, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames)
@@ -615,3 +624,52 @@ def test_asr_bind_main_missing_package_fails_actionably(tmp_path, monkeypatch, c
     assert "--hzd-package" in captured.out
     assert "PackFileLocators.bin" in captured.out
     assert captured.err == ""  # no traceback
+
+
+# ---------------------------------------------------------------------------
+# coverage artifact (issue #63): the cap-skip count must land ON DISK, not
+# just stdout -- a capped rip used to be indistinguishable from a complete one.
+# ---------------------------------------------------------------------------
+
+def test_coverage_artifact_records_cap_skip_on_disk(tmp_path, monkeypatch):
+    """THE acceptance test for #63: after a capped bind, a JSON artifact records
+    how many ambiguous buckets were left untranscribed (plus the cap used), so
+    the GUI coverage bar reads it without scraping stdout."""
+    import json
+    catalog, wem_meta, clip_index = _write_multi_bucket_fixture(tmp_path, n_buckets=5)
+    dsar = FakeDsar()
+    _patch_asr_stack(monkeypatch, dsar)
+    cov = tmp_path / "coverage.json"
+
+    rc = asr_bind.main(_argv(tmp_path, catalog, wem_meta, clip_index,
+                             sample_cap=2, coverage_out=cov))
+
+    assert rc == 0
+    bind = json.loads(cov.read_text(encoding="utf-8"))["bind"]
+    assert bind["sample_cap"] == 2
+    assert bind["buckets_relevant"] == 5
+    assert bind["buckets_attempted"] == 2
+    assert bind["buckets_skipped"] == 3
+    assert bind["clips_transcribed"] == 2
+    assert bind["clips_reused"] == 0
+    assert bind["clips_failed"] == 0
+
+
+def test_coverage_artifact_records_tier_tally_and_totals(tmp_path, monkeypatch):
+    """An uncapped bind still writes its section: tier tally + row/bound totals
+    (the numbers the final stdout summary prints, persisted)."""
+    import json
+    catalog, wem_meta, clip_index = _write_fixture(tmp_path, n_clips=3)
+    dsar = FakeDsar()
+    _patch_asr_stack(monkeypatch, dsar)
+    cov = tmp_path / "coverage.json"
+
+    rc = asr_bind.main(_argv(tmp_path, catalog, wem_meta, clip_index, coverage_out=cov))
+
+    assert rc == 0
+    bind = json.loads(cov.read_text(encoding="utf-8"))["bind"]
+    assert bind["buckets_skipped"] == 0
+    assert bind["sample_cap"] == 300  # the stage default, recorded as used
+    assert set(bind["tiers"]) == {"S", "1", "2", "E", "3"}
+    assert bind["rows"] == sum(bind["tiers"].values())
+    assert bind["clips_failed"] == 0

@@ -106,6 +106,9 @@ rather than running for hours over the full library; pass `--sample-cap 0` to `h
 real install the capped default still bound 54,564 of 54,566 rows (99.996%), because
 structural binding had already covered almost everything -- the cap costs little in practice,
 and whenever it does leave buckets untranscribed, bind's own output states exactly how many.
+Those numbers also land on disk: `wem-metadata` and `bind` each merge a summary section
+(story-line coverage; cap used, buckets skipped, tier tally) into `out/hzd/coverage.json`,
+so a capped rip is distinguishable from a complete one without re-reading the run's stdout.
 Note: if `bind` already completed in a workspace, changing `--sample-cap` on a later `hzd run`
 has no effect until you delete `out/hzd/.done-bind` and re-run it -- the done-marker doesn't
 know its own flags changed. bind also checkpoints as it goes (see Resume, below), so an

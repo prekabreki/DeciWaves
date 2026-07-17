@@ -5,6 +5,7 @@ family that once silently lost ~1,109 story lines (sentence_fw.py's `ff 0f` mark
 history)."""
 import csv
 
+import pytest
 
 from deciwaves.games.hzd import wem_metadata
 from deciwaves.engine.catalog_io import (
@@ -12,6 +13,15 @@ from deciwaves.engine.catalog_io import (
 )
 from deciwaves.games.hzd.profile import cores_sidecar_header
 from deciwaves.games.hzd.sentence_fw import LineMedia
+
+
+@pytest.fixture(autouse=True)
+def _isolate_cwd(tmp_path, monkeypatch):
+    """main()'s --coverage-out default (issue #63) is workspace(cwd)-relative,
+    and unlike --out/--errors the pre-existing tests don't override it -- without
+    this chdir, any main() call here writes out/hzd/coverage.json into the REPO's
+    working directory instead of the test's tmp dir."""
+    monkeypatch.chdir(tmp_path)
 
 
 class _FakeReader:
@@ -382,3 +392,35 @@ def test_wem_metadata_main_missing_package_fails_actionably(tmp_path, capsys):
     assert "--hzd-package" in captured.out
     assert "PackFileLocators.bin" in captured.out
     assert captured.err == ""  # no traceback
+
+
+# ---------------------------------------------------------------------------
+# (d) coverage artifact (issue #63): the story-coverage report this stage used
+# to print-and-discard must also land on disk for the GUI coverage bar.
+# ---------------------------------------------------------------------------
+
+def test_writes_coverage_artifact_with_story_coverage_and_cores_failed(tmp_path, monkeypatch):
+    import json
+    cores_sidecar = tmp_path / "catalog-cores.txt"
+    good = "localized/sentences/mq/scene/sentences"
+    broken = "localized/sentences/mq/broken/sentences"
+    write_core_paths_sidecar(str(cores_sidecar), [good, broken])
+
+    reader = _FakeReader({good: b"CORE_BYTES"}, fail_paths=[broken])
+    _patch_profile(monkeypatch, reader)
+    _forbid_rescan(monkeypatch)
+    monkeypatch.setattr(
+        wem_metadata, "parse_sentence_media",
+        lambda core_bytes, on_line_error=None, core_path=None: [LineMedia("L1", 0, 100, 530)])
+
+    catalog = tmp_path / "catalog.csv"
+    _write_minimal_catalog(catalog, ["L1", "L2"])  # 2 story lines, media for L1 only
+    cov = tmp_path / "coverage.json"
+
+    rc = wem_metadata.main(_argv(tmp_path, cores_sidecar, catalog=catalog,
+                                 extra=("--coverage-out", str(cov))))
+
+    assert rc == 0
+    section = json.loads(cov.read_text(encoding="utf-8"))["wem-metadata"]
+    assert section == {"cores": 2, "cores_failed": 1, "lines_written": 1,
+                       "story_lines": 2, "with_ab": 1, "coverage_pct": 50.0}
