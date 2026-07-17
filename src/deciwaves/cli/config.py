@@ -75,6 +75,13 @@ def load() -> dict:
         return {}
     return cfg
 
+# Flags whose value is a STAGE NAME, never a path (run.py's --until/--from,
+# issue #62): a cwd file/dir that happens to share a stage's name (`extract`,
+# `render`, `catalog`, ...) must not get absolutized into an argparse-choices
+# rejection -- or worse, an exists-in-both-trees exit-2 refusal.
+_NON_PATH_VALUE_FLAGS = frozenset({"--until", "--from"})
+
+
 def absolutize_existing_paths(argv: list, workspace=None) -> list:
     """Resolve any argv token that refers to an EXISTING file/dir relative to
     the CURRENT (pre-chdir) cwd to its absolute form -- but only when a
@@ -131,12 +138,18 @@ def absolutize_existing_paths(argv: list, workspace=None) -> list:
         return list(argv)
 
     out = []
+    value_is_stage_name = False
     for tok in argv:
-        if tok.startswith("--") and "=" in tok:
+        if value_is_stage_name:
+            value_is_stage_name = False
+        elif tok.startswith("--") and "=" in tok:
             flag, _, value = tok.partition("=")
-            resolved = _resolve_against_workspace(value, workspace_path)
-            if resolved is not None:
-                tok = f"{flag}={resolved}"
+            if flag not in _NON_PATH_VALUE_FLAGS:
+                resolved = _resolve_against_workspace(value, workspace_path)
+                if resolved is not None:
+                    tok = f"{flag}={resolved}"
+        elif tok in _NON_PATH_VALUE_FLAGS:
+            value_is_stage_name = True
         elif tok and not tok.startswith("-") and not os.path.isabs(tok) and os.path.exists(tok):
             resolved = _resolve_against_workspace(tok, workspace_path)
             if resolved is not None:

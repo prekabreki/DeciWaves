@@ -734,7 +734,11 @@ def test_fw_byo_stop_without_gamescript(tmp_path, monkeypatch, capsys):
 def test_fw_gamescript_path_missing_exits_nonzero_and_names_path(tmp_path, monkeypatch, capsys):
     """An explicitly-given --gamescript path that doesn't exist must be reported and
     fail the run -- not silently treated like no --gamescript at all (#38). Otherwise
-    anything scripted on the exit code believes match/full-reel/render actually ran."""
+    anything scripted on the exit code believes match/full-reel/render actually ran.
+
+    Since #62 the check is UPFRONT (zero stages run), same reasoning as the
+    upfront GPU gate (#33): the run is known-doomed before extract's (or the
+    GPU asr pass's) hours are spent, so fail before them, not after."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
     mods = _mods("fw")
@@ -745,9 +749,7 @@ def test_fw_gamescript_path_missing_exits_nonzero_and_names_path(tmp_path, monke
     rc = run_mod.run_game("fw", {"fw_package": "PKG"}, ["--gamescript", bad_path])
     assert rc != 0
 
-    called = [m for m, _ in calls]
-    assert called == [mods["extract"], mods["asr"], mods["subtitle-bind"]]
-    assert mods["match"] not in called
+    assert [m for m, _ in calls] == []  # known-doomed run: nothing executes
 
     out = capsys.readouterr().out
     assert bad_path in out
@@ -881,9 +883,9 @@ def test_fw_configured_gamescript_missing_exits_nonzero_and_names_path(tmp_path,
     rc = run_mod.run_game("fw", cfg, [])
     assert rc != 0
 
-    called = [m for m, _ in calls]
-    assert called == [mods["extract"], mods["asr"], mods["subtitle-bind"]]
-    assert mods["match"] not in called
+    # Since #62 the check is upfront (see the explicit-flag variant above):
+    # a run that will cross the gamescript gate fails before any stage runs.
+    assert [m for m, _ in calls] == []
 
     out = capsys.readouterr().out
     assert missing in out
@@ -1224,9 +1226,12 @@ def test_hzd_from_after_until_is_usage_error_and_deletes_nothing(tmp_path, monke
 
     assert calls == []
     assert os.path.isfile(_marker("hzd", "render"))  # nothing deleted
-    out = capsys.readouterr().out
-    assert "--from render" in out
-    assert "--until catalog" in out
+    # stderr, not stdout: every other exit-2 usage error from these parsers
+    # (unknown flag, invalid choice) goes to stderr via argparse -- this one
+    # must land on the same stream so wrappers see one error channel.
+    err = capsys.readouterr().err
+    assert "--from render" in err
+    assert "--until catalog" in err
 
 
 def test_hzd_until_unknown_stage_is_usage_error(tmp_path, monkeypatch, capsys):
@@ -1262,6 +1267,93 @@ def test_hzd_run_help_documents_until_and_from(tmp_path, monkeypatch, capsys):
     assert "--until" in out
     assert "--from" in out
     assert "wem-metadata" in out
+
+
+def test_fw_until_match_without_gamescript_fails_upfront(tmp_path, monkeypatch, capsys):
+    """--until naming a post-gamescript-gate stage (match/full-reel/render) with
+    no gamescript at all: the run provably cannot execute the requested stage,
+    so it must fail (rc 1) UPFRONT -- zero stages run, unlike the plain-run BYO
+    soft stop (rc 0), which only applies when the user didn't explicitly ask
+    for a post-gate stage. The error must show a re-run command that carries
+    the slice flag (a plain re-run would run MORE than the user asked for)."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    mods = _mods("fw")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _fw_outputs(mods)))
+
+    rc = run_mod.run_game("fw", {"fw_package": "PKG"}, ["--until", "match"])
+    assert rc == 1
+
+    assert [m for m, _ in calls] == []
+    out = capsys.readouterr().out
+    assert "--gamescript" in out
+    assert "--until match" in out
+
+
+def test_fw_from_match_without_gamescript_fails_upfront_and_keeps_marker(tmp_path, monkeypatch, capsys):
+    """--from naming a post-gate stage with no gamescript: same upfront failure,
+    and crucially the stage's done-marker must NOT have been deleted -- a run
+    that can't do what was asked must not destroy the stage's done state on
+    its way out."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    _seed_markers("fw", ["extract", "asr", "subtitle-bind", "match", "full-reel", "render"])
+    mods = _mods("fw")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _fw_outputs(mods)))
+
+    rc = run_mod.run_game("fw", {"fw_package": "PKG"}, ["--from", "match"])
+    assert rc == 1
+
+    assert [m for m, _ in calls] == []
+    assert os.path.isfile(_marker("fw", "match"))  # not deleted
+    assert "--gamescript" in capsys.readouterr().out
+
+
+def test_fw_until_subtitle_bind_ignores_broken_configured_gamescript(tmp_path, monkeypatch):
+    """DECISION (review of #62): a slice ending at/before subtitle-bind never
+    consumes the gamescript, so a configured-but-now-missing fw_gamescript
+    must NOT fail it -- the GUI Scan button (`--until subtitle-bind` at most)
+    would otherwise break over a config problem irrelevant to scanning.
+    Config health is `doctor`'s job (check_fw_gamescript already reports the
+    broken path with a fix hint); any run that actually CROSSES the gate
+    still fails upfront on it (tests above)."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    mods = _mods("fw")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _fw_outputs(mods)))
+
+    cfg = {"fw_package": "PKG", "fw_gamescript": str(tmp_path / "gone.md")}
+    rc = run_mod.run_game("fw", cfg, ["--until", "subtitle-bind"])
+    assert rc == 0
+
+    assert [m for m, _ in calls] == [mods["extract"], mods["asr"], mods["subtitle-bind"]]
+
+
+def test_hzd_from_equals_until_reruns_exactly_one_stage(tmp_path, monkeypatch):
+    """--from X --until X is the GUI's "re-run just this stage": valid (not a
+    usage error -- guards the > vs >= boundary in the from-after-until check),
+    re-executes exactly that stage, and still cascade-invalidates the later
+    markers outside the slice (they're stale even though they don't re-run
+    now)."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    _seed_markers("hzd", ["catalog", "clip-index", "wem-metadata", "bind", "render"])
+    mods = _mods("hzd")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _hzd_outputs(mods)))
+
+    rc = run_mod.run_game("hzd", {"hzd_package": "PKG"},
+                          ["--from", "clip-index", "--until", "clip-index"])
+    assert rc == 0
+
+    assert [m for m, _ in calls] == [mods["clip-index"]]
+    assert os.path.isfile(_marker("hzd", "catalog"))     # earlier: untouched
+    assert os.path.isfile(_marker("hzd", "clip-index"))  # re-ran, re-marked
+    for stage in ("wem-metadata", "bind", "render"):
+        assert not os.path.exists(_marker("hzd", stage))  # stale -> invalidated
 
 
 def test_hzd_from_bind_without_whisperx_gate_fires_after_marker_delete(tmp_path, monkeypatch, capsys):
