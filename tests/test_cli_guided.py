@@ -45,8 +45,8 @@ def test_detect_games_reads_structured_status_not_message_substring(monkeypatch)
 
     monkeypatch.setattr(
         guided.doctor, "check_ds_install",
-        lambda ds: CheckResult(Availability.OK,
-                                "[ok] DS install: C:\\Games\\DS (extra: HD texture pack not configured)"),
+        lambda ds: CheckResult("ds_install", Availability.OK,
+                                "DS install: C:\\Games\\DS (extra: HD texture pack not configured)"),
     )
     found = guided._detect_games({"ds_install": "C:\\Games\\DS"})
     assert found["ds"] is True  # OK status, even though the message contains "not configured"
@@ -60,7 +60,8 @@ def test_detect_games_not_configured_status_is_never_found_regardless_of_wording
 
     monkeypatch.setattr(
         guided.doctor, "check_hzd_package",
-        lambda pkg: CheckResult(Availability.NOT_CONFIGURED, "[--] HZD package: nothing set up yet, all fine"),
+        lambda pkg: CheckResult("hzd_package", Availability.NOT_CONFIGURED,
+                                "HZD package: nothing set up yet, all fine"),
     )
     found = guided._detect_games({"hzd_package": ""})
     assert found["hzd"] is False
