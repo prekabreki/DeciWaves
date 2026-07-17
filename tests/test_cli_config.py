@@ -104,6 +104,35 @@ def test_absolutize_existing_paths_equals_form_leaves_nonexistent_and_absolute_a
     assert config.absolutize_existing_paths(argv, workspace=str(workspace)) == argv  # already-abs + typo untouched
 
 
+def test_absolutize_existing_paths_skips_until_and_from_stage_names(tmp_path, monkeypatch):
+    """--until/--from take STAGE NAMES, never paths (run.py, issue #62): a cwd
+    file/dir that happens to share a stage's name (`extract`, `render`, ...)
+    must not get absolutized into an argparse-choices rejection. Path-taking
+    flags in the same argv keep being rewritten."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "extract").mkdir()          # dir named like an fw stage
+    (tmp_path / "render").write_text("x", encoding="utf-8")  # file named like a stage
+    existing = tmp_path / "real.md"
+    existing.write_text("x", encoding="utf-8")
+    workspace = tmp_path / "ws"
+
+    argv = ["--until", "extract", "--from", "render", "--gamescript", "real.md"]
+    out = config.absolutize_existing_paths(argv, workspace=str(workspace))
+
+    assert out == ["--until", "extract", "--from", "render", "--gamescript", str(existing)]
+
+
+def test_absolutize_existing_paths_skips_until_equals_form_too(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "extract").mkdir()
+    workspace = tmp_path / "ws"
+
+    out = config.absolutize_existing_paths(["--until=extract", "--from=extract"],
+                                           workspace=str(workspace))
+
+    assert out == ["--until=extract", "--from=extract"]
+
+
 def test_absolutize_existing_paths_prints_notice_when_rewriting(tmp_path, monkeypatch, capsys):
     """Whenever a token is rewritten (bare or '=' form) a one-line notice must be
     printed, so the invocation-dir -> absolute redirect is never silent."""
