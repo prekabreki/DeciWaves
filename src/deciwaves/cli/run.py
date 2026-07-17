@@ -37,6 +37,7 @@ from typing import Callable
 
 from deciwaves import data
 from deciwaves.cli.main import STAGES, _import_stage  # noqa: F401 -- re-exported for monkeypatching
+from deciwaves.engine.coverage import clear_stage_coverage, default_coverage_path
 from deciwaves.games.hzd import asr_bind
 
 
@@ -74,11 +75,18 @@ def _remove_marker(game: str, stage_name: str) -> None:
     """Delete a stage's done-marker, tolerating absence (never ran, or already
     invalidated). The single home of the delete-a-marker idiom, shared by
     cascade invalidation and --from -- marker semantics are load-bearing
-    (issues #15/#6/#37), so there is exactly one implementation to get right."""
+    (issues #15/#6/#37), so there is exactly one implementation to get right.
+
+    A deleted marker means "not done" -- the stage's persisted coverage
+    section (engine/coverage.py, issue #63) must stop asserting the old
+    completeness too, or the GUI coverage bar would keep reporting a bind the
+    pipeline itself just declared stale (issue #81). No-op for stages/games
+    that never wrote a section."""
     try:
         os.remove(_done_marker(game, stage_name))
     except FileNotFoundError:
         pass
+    clear_stage_coverage(default_coverage_path(game), stage_name)
 
 
 def _invalidate_downstream_markers(game: str, full_chain: list[Stage], stage_name: str) -> None:

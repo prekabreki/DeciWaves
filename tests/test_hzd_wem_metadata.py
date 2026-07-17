@@ -15,15 +15,6 @@ from deciwaves.games.hzd.profile import cores_sidecar_header
 from deciwaves.games.hzd.sentence_fw import LineMedia
 
 
-@pytest.fixture(autouse=True)
-def _isolate_cwd(tmp_path, monkeypatch):
-    """main()'s --coverage-out default (issue #63) is workspace(cwd)-relative,
-    and unlike --out/--errors the pre-existing tests don't override it -- without
-    this chdir, any main() call here writes out/hzd/coverage.json into the REPO's
-    working directory instead of the test's tmp dir."""
-    monkeypatch.chdir(tmp_path)
-
-
 class _FakeReader:
     """Stand-in for HzdPackage.read_core: returns fixed per-path bytes, or raises for
     paths listed in fail_paths (simulating a corrupt/unreadable core)."""
@@ -422,5 +413,39 @@ def test_writes_coverage_artifact_with_story_coverage_and_cores_failed(tmp_path,
 
     assert rc == 0
     section = json.loads(cov.read_text(encoding="utf-8"))["wem-metadata"]
+    # sample_cap recorded (issue #81): a capped rescan must be distinguishable
+    # on disk from a complete scan, exactly like bind's section already is.
     assert section == {"cores": 2, "cores_failed": 1, "lines_written": 1,
+                       "sample_cap": 0,
                        "story_lines": 2, "with_ab": 1, "coverage_pct": 50.0}
+
+
+def test_failed_run_clears_stale_own_coverage_section(tmp_path, monkeypatch):
+    """The stage rewrites its output CSV early and persists coverage only at
+    the very end -- a failure in between (here: the catalog needed by
+    coverage_report is gone) must not leave the PREVIOUS run's section
+    describing a file whose content just changed (issue #81). Section absent =
+    coverage unknown, exactly like a deleted done-marker; sibling sections
+    stay untouched."""
+    import json
+    from deciwaves.engine.coverage import write_stage_coverage
+    cores_sidecar = tmp_path / "catalog-cores.txt"
+    write_core_paths_sidecar(str(cores_sidecar), ["localized/sentences/mq/scene/sentences"])
+    reader = _FakeReader({"localized/sentences/mq/scene/sentences": b"CORE_BYTES"})
+    _patch_profile(monkeypatch, reader)
+    _forbid_rescan(monkeypatch)
+    monkeypatch.setattr(
+        wem_metadata, "parse_sentence_media",
+        lambda core_bytes, on_line_error=None, core_path=None: [LineMedia("L1", 0, 100, 530)])
+    cov = tmp_path / "coverage.json"
+    write_stage_coverage(str(cov), "wem-metadata", {"coverage_pct": 100.0})
+    write_stage_coverage(str(cov), "bind", {"bound": 54564})
+
+    missing_catalog = tmp_path / "gone-catalog.csv"  # never created
+    with pytest.raises(FileNotFoundError):
+        wem_metadata.main(_argv(tmp_path, cores_sidecar, catalog=missing_catalog,
+                                extra=("--coverage-out", str(cov))))
+
+    data = json.loads(cov.read_text(encoding="utf-8"))
+    assert "wem-metadata" not in data        # stale claim dropped before the rewrite
+    assert data["bind"] == {"bound": 54564}  # sibling untouched

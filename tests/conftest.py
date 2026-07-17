@@ -37,6 +37,20 @@ def _ds_mode():
     reader.set_globals(_decima_version="DSPC")
 
 
+@pytest.fixture(autouse=True)
+def _isolate_cwd(tmp_path, monkeypatch):
+    """Every test runs with cwd in its own tmp dir (issue #81).
+
+    Several stage defaults are workspace(cwd)-relative (out/<game>/...,
+    --coverage-out among them); a main() invocation in a test that doesn't
+    override every last one silently writes into the REPO's working directory
+    -- exactly how out/hzd/coverage.json leaked during #63's development. One
+    suite-wide chdir makes that class of leak impossible instead of relying on
+    each test file remembering a per-file fixture. Fixture paths in this file
+    are absolute (resolved at import), so they are unaffected."""
+    monkeypatch.chdir(tmp_path)
+
+
 # Core fixtures live under out/ (gitignored, derived from the install). Skip
 # rather than error when absent -- regenerate on the install machine with
 # `./.venv/Scripts/python.exe tools/regenerate-fixtures.py`.

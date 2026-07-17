@@ -12,15 +12,6 @@ from deciwaves.games.hzd import asr_bind
 from deciwaves.games.hzd.atrac9 import Atrac9Error
 
 
-@pytest.fixture(autouse=True)
-def _isolate_cwd(tmp_path, monkeypatch):
-    """main()'s --coverage-out default (issue #63) is workspace(cwd)-relative,
-    and unlike --out/--errors the pre-existing tests don't override it -- without
-    this chdir, any main() call here writes out/hzd/coverage.json into the REPO's
-    working directory instead of the test's tmp dir."""
-    monkeypatch.chdir(tmp_path)
-
-
 def _write_csv(path, rows, fieldnames):
     with open(path, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames)
@@ -652,6 +643,35 @@ def test_coverage_artifact_records_cap_skip_on_disk(tmp_path, monkeypatch):
     assert bind["buckets_skipped"] == 3
     assert bind["clips_transcribed"] == 2
     assert bind["clips_reused"] == 0
+    assert bind["clips_failed"] == 0
+
+
+def test_coverage_records_untranscribed_shortfall_in_pure_reuse_mode(tmp_path):
+    """Pure-reuse mode (--transcripts without --package) leaves clips absent
+    from the sidecar untranscribed BY DESIGN -- but silently: not a failure,
+    not a cap skip. The coverage section must record that shortfall (issue
+    #81), or a partial reuse run is indistinguishable on disk from a complete
+    one -- the exact blindness #63 exists to eliminate."""
+    import json
+    catalog, wem_meta, clip_index = _write_fixture(tmp_path, n_clips=3)
+    # sidecar holds only clip 0; clips 1 and 2 are wanted but never transcribed
+    sidecar = tmp_path / "prior-transcripts.csv"
+    sidecar.write_text("clip_row,transcript\n0,hello there\n", encoding="utf-8")
+    cov = tmp_path / "coverage.json"
+
+    rc = asr_bind.main(["--transcripts", str(sidecar),
+                        "--clip-index", str(clip_index),
+                        "--wem-metadata", str(wem_meta),
+                        "--catalog", str(catalog),
+                        "--out", str(tmp_path / "asr-manifest.csv"),
+                        "--errors", str(tmp_path / "asr-errors.log"),
+                        "--transcripts-out", str(tmp_path / "asr-transcripts.csv"),
+                        "--coverage-out", str(cov)])
+
+    assert rc == 0
+    bind = json.loads(cov.read_text(encoding="utf-8"))["bind"]
+    assert bind["clips_reused"] == 1
+    assert bind["clips_untranscribed"] == 2
     assert bind["clips_failed"] == 0
 
 

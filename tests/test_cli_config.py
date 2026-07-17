@@ -310,6 +310,24 @@ def test_load_returns_empty_dict_and_warns_on_truncated_file(tmp_path, monkeypat
     assert capsys.readouterr().out.strip() != ""
 
 
+def test_load_returns_empty_dict_and_warns_on_non_utf8_file(tmp_path, monkeypatch, capsys):
+    """Byte-level corruption (torn write; a tool re-saving as UTF-16 on this
+    Windows-only project) raises UnicodeDecodeError -- a ValueError the old
+    `except (json.JSONDecodeError, OSError)` did NOT cover, so load() crashed
+    instead of warning and starting fresh (issue #81, shared with
+    engine/coverage.py's artifact loader)."""
+    cfg_dir = tmp_path / "cfg"
+    cfg_dir.mkdir(parents=True)
+    (cfg_dir / "config.json").write_bytes(b"\xff\xfe not utf-8 \xff")
+    monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(cfg_dir))
+
+    result = config.load()
+
+    assert result == {}
+    out = capsys.readouterr().out.lower()
+    assert "warn" in out or "corrupt" in out or "invalid" in out
+
+
 @pytest.mark.parametrize("payload", ["null", "[1, 2]", '"a string"', "42"])
 def test_load_returns_empty_dict_and_warns_on_non_object_json(
         tmp_path, monkeypatch, capsys, payload):
