@@ -139,6 +139,38 @@ def test_fw_render_main_empty_spine_is_a_noop_success(tmp_path, capsys):
     assert not (tmp_path / "cache").exists()              # assemble never ran
 
 
+def test_fw_render_main_empty_spine_drops_stale_errors_log(tmp_path, capsys):
+    """A no-op must not leave a PRIOR run's render-errors.log on disk to be
+    misread as this run's failures (review of #64): measure -- the only writer,
+    which rewrites the log from scratch each run -- never runs on the no-op, so
+    the no-op itself must drop a stale log to keep that contract."""
+    manifest = tmp_path / "full-reel-manifest.csv"
+    _write_manifest(manifest, [_row("c0", 1, "Q1", tier="3")])  # all unbound -> empty spine
+    stale = tmp_path / "render-errors.log"
+    stale.write_text("c9\tprior-run failure\n", encoding="utf-8")
+
+    rc = render.main(_render_argv(tmp_path, manifest))
+
+    assert rc == 0
+    assert not stale.exists()   # gone, not silently attributed to this no-op
+
+
+def test_fw_render_main_empty_manifest_blames_rows_not_tiers(tmp_path, capsys):
+    """A header-only manifest (upstream bound nothing) is a no-op, but its
+    message must name the real cause -- zero rows -- not the --tiers filter,
+    which a user could never fix by editing (review of #64)."""
+    manifest = tmp_path / "full-reel-manifest.csv"
+    _write_manifest(manifest, [])   # header only, 0 data rows
+
+    rc = render.main(_render_argv(tmp_path, manifest))
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "nothing to render" in out
+    assert "no rows" in out
+    assert "--tiers" not in out    # don't misdirect to a filter that can't help
+
+
 def test_fw_render_main_surfaces_partial_measure_failures(tmp_path, monkeypatch, capsys):
     """A PARTIAL measure failure stays fail-soft (render proceeds), but the
     count must be surfaced like DS/HZD do -- FW used to discard n_failed

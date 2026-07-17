@@ -277,6 +277,13 @@ class _MainFakePackage:
         return object()
 
 
+def _no_pack_open(*args, **kwargs):
+    """HzdPackage stand-in that fails the test if the empty-spine no-op wrongly
+    opens the pack -- the no-op must return before HzdPackage(a.package) so the
+    guard stays free of side effects (review of #64)."""
+    raise AssertionError("HzdPackage opened on an empty-spine no-op")
+
+
 def test_hzd_render_main_zero_decode_exits_nonzero(tmp_path, monkeypatch, capsys):
     """THE acceptance test for #64 (hzd side): a non-empty spine where no clip
     decodes must exit non-zero with a legible message naming the errors log --
@@ -299,10 +306,12 @@ def test_hzd_render_main_empty_spine_is_a_noop_success(tmp_path, monkeypatch, ca
     only side/DLC scenes legitimately yields zero main-quest rows; failing
     would give a deliberate narrowing the same rc as a broken decoder). Still
     loud, with mode-appropriate wording: default full-reel mode is about
-    bound STORY rows, not just main-quest ones."""
+    bound STORY rows, not just main-quest ones. The no-op must fire BEFORE the
+    pack is opened and before any dir/errors side effect -- pinned here (as the
+    FW twin does) so a refactor that moved the guard below HzdPackage() or
+    os.makedirs can't regress silently."""
     argv = _main_fixture(tmp_path, [])  # headers-only manifest -> empty spine
-    monkeypatch.setattr(render, "HzdPackage", _MainFakePackage())
-    monkeypatch.setattr(render, "decode_spine_clips", lambda *a, **k: ({}, {}, 0))
+    monkeypatch.setattr(render, "HzdPackage", _no_pack_open)  # opening it fails the test
 
     rc = render.main(argv)
 
@@ -311,3 +320,36 @@ def test_hzd_render_main_empty_spine_is_a_noop_success(tmp_path, monkeypatch, ca
     assert "nothing to render" in out
     assert "story rows" in out          # default mode names story rows...
     assert "main-quest" not in out      # ...not the --spine-only subset
+    assert not (tmp_path / "audio").exists()              # out-dir never created
+    assert not (tmp_path / "cache").exists()              # assemble never ran
+    assert not (tmp_path / "render-errors.log").exists()  # decode never ran
+
+
+def test_hzd_render_main_empty_spine_only_names_main_quest_rows(tmp_path, monkeypatch, capsys):
+    """The empty-spine wording is mode-dependent; --spine-only must name the
+    main-quest subset (review of #64) -- the branch the default-mode test above
+    can't reach, so without this a wording/predicate regression ships green."""
+    argv = _main_fixture(tmp_path, []) + ["--spine-only"]
+    monkeypatch.setattr(render, "HzdPackage", _no_pack_open)
+
+    rc = render.main(argv)
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "nothing to render" in out
+    assert "main-quest rows (--spine-only)" in out
+
+
+def test_hzd_render_main_empty_spine_drops_stale_errors_log(tmp_path, monkeypatch, capsys):
+    """Same rewritten-each-run contract as FW: the no-op drops a prior run's
+    render-errors.log so it isn't misread as this run's failures (review of
+    #64) -- decode, its only writer, never runs on the no-op."""
+    argv = _main_fixture(tmp_path, [])  # headers-only manifest -> empty spine
+    stale = tmp_path / "render-errors.log"
+    stale.write_text("MQ99\t9\tprior-run failure\n", encoding="utf-8")
+    monkeypatch.setattr(render, "HzdPackage", _no_pack_open)
+
+    rc = render.main(argv)
+
+    assert rc == 0
+    assert not stale.exists()   # gone, not silently attributed to this no-op

@@ -148,11 +148,21 @@ def main(argv=None):
         # the flag's help yet never matches the standard full-reel manifest,
         # DLC ships via games/fw/dlc.py's own manifest; failing would make a
         # deliberate no-op indistinguishable from a broken pipeline). Checked
-        # HERE, before measure/assemble side effects (errors.log truncation,
-        # cache writes). Loud, and it names the filter.
-        print(f"render: nothing to render: none of the {len(manifest_rows)} "
-              f"rows in {a.manifest} match --tiers {a.tiers} -- no reels "
-              f"written to {a.out_dir}.")
+        # HERE, before measure/assemble side effects (cache writes, pack read).
+        # Drop a stale render-errors.log from a PRIOR run: measure (its only
+        # writer, which rewrites it each run) never runs on a no-op, so a
+        # leftover log would otherwise be misread as this run's failures.
+        try:
+            os.remove(a.errors)
+        except OSError:
+            pass
+        if not manifest_rows:
+            print(f"render: nothing to render: {a.manifest} has no rows -- "
+                  f"no reels written to {a.out_dir}.")
+        else:
+            print(f"render: nothing to render: none of the {len(manifest_rows)} "
+                  f"rows in {a.manifest} match --tiers {a.tiers} -- no reels "
+                  f"written to {a.out_dir}.")
         return 0
 
     os.makedirs(a.out_dir, exist_ok=True)
@@ -175,7 +185,7 @@ def main(argv=None):
     # (spine is known non-empty here -- the no-op case returned 0 above.)
     if not durations:
         print(f"render: ERROR - none of the {len(spine)} manifest clips could "
-              f"be measured ({n_failed} failed -- see {a.errors}). Are the "
+              f"be measured (see {a.errors}). Are the "
               f"manifest's wav paths present under --audio-root "
               f"({a.audio_root})? Run `deciwaves fw extract` first if this "
               f"workspace has no decoded audio yet.")
@@ -190,8 +200,10 @@ def main(argv=None):
         concat_fn=_concat_uniform if a.uniform_mono else None,
         silence_fn=mono_silence_wav if a.uniform_mono else None)
     if n_files == 0:
-        # Belt-and-braces (issue #64): work existed (non-empty spine) yet
-        # assembly produced no files -- never report that as success.
+        # Defensive backstop (issue #64): with the `not durations` guard above,
+        # a non-empty durations always packs >=1 reel, so this is unreachable
+        # today -- kept as a cheap honest-exit-code guard in case assemble_reels'
+        # contract ever changes, since `run`/the GUI trust this stage's rc.
         print(f"render: ERROR - 0 reel files written to {a.out_dir} from "
               f"{len(spine)} spine lines -- see {a.errors}.")
         return 1

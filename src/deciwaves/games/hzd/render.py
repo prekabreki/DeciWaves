@@ -231,7 +231,14 @@ def main(argv=None):
         # precedent (review of #64: `--spine-only` against a bind that so far
         # bound only side/DLC scenes legitimately yields zero main-quest rows;
         # failing would give that deliberate narrowing the same rc as a broken
-        # decode toolchain). Checked here, before the pack is even opened.
+        # decode toolchain). Checked here, before the pack is opened.
+        # Drop a stale render-errors.log from a PRIOR run: decode (its only
+        # writer, which rewrites it each run) never runs on a no-op, so a
+        # leftover log would otherwise be misread as this run's failures.
+        try:
+            os.remove(a.errors)
+        except OSError:
+            pass
         what = ("bound main-quest rows (--spine-only)" if a.spine_only
                 else "bound story rows")
         print(f"render: nothing to render: {a.manifest} has no {what} -- "
@@ -253,7 +260,7 @@ def main(argv=None):
     # (spine is known non-empty here -- the no-op case returned 0 above.)
     if not decoded:
         print(f"render: ERROR - none of the {len(spine)} spine clips could be "
-              f"decoded ({skipped} failed -- see {a.errors} for the per-clip "
+              f"decoded (see {a.errors} for the per-clip "
               f"reasons). Try `deciwaves doctor` to check the decode tools "
               f"(VGAudioCli, ffmpeg).")
         return 1
@@ -266,8 +273,10 @@ def main(argv=None):
         spine, ep_secs, decoded, out_dir=a.out_dir, cache_dir=a.cache, stem=stem,
         columns=columns, budget=budget_seconds(), gap_key=lambda s: s.scene)
     if n_files == 0:
-        # Belt-and-braces (issue #64): work existed (non-empty spine) yet
-        # assembly produced no files -- never report that as success.
+        # Defensive backstop (issue #64): with the `not decoded` guard above,
+        # a non-empty decoded always packs >=1 reel, so this is unreachable
+        # today -- kept as a cheap honest-exit-code guard in case assemble_reels'
+        # contract ever changes, since `run`/the GUI trust this stage's rc.
         print(f"render: ERROR - 0 reel files written to {a.out_dir} from "
               f"{len(spine)} spine lines -- see {a.errors}.")
         return 1
