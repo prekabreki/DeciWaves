@@ -236,14 +236,31 @@ def main(argv=None):
     decoded, ep_secs, skipped = decode_spine_clips(spine, dsar, a.cache, a.errors, jobs=a.jobs)
     if skipped:
         print(f"decode: {skipped} clips skipped (see {a.errors})")
+    # Empty-render guard (issue #64), same contract as engine/render.py's DS
+    # guard: a spine where NOTHING decoded is a failure, not a zero-clip
+    # "success" -- exit code is what `hzd run` (and the GUI) trusts.
+    if not decoded and spine:
+        print(f"render: ERROR - none of the {len(spine)} spine clips could be "
+              f"decoded ({skipped} failed -- see {a.errors} for the per-clip "
+              f"reasons). Try `deciwaves doctor` to check the decode tools "
+              f"(VGAudioCli, ffmpeg).")
+        return 1
 
     stem = "hzd_mainquest" if a.spine_only else "hzd_story_reel"
     columns = ReelColumns(
         header=["timestamp", "scene", "speaker", "subtitle", "line_id"],
         row_of=lambda s, t: [format_ts(t), s.scene, s.speaker, s.subtitle, s.line_id])
-    assemble_reels(
+    n_files = assemble_reels(
         spine, ep_secs, decoded, out_dir=a.out_dir, cache_dir=a.cache, stem=stem,
         columns=columns, budget=budget_seconds(), gap_key=lambda s: s.scene)
+    if n_files == 0:
+        # Unlike DS's deliberate empty-playlist rc-0 (nothing to do), an empty
+        # HZD spine means the manifest has no bound story rows at all -- an
+        # upstream problem worth failing loudly on (issue #64).
+        print(f"render: ERROR - 0 reel files written to {a.out_dir}: the spine "
+              f"was empty ({len(spine)} lines from {a.manifest}) -- nothing to "
+              f"assemble. Did bind produce any bound main-quest rows?")
+        return 1
     return 0
 
 

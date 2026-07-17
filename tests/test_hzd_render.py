@@ -1,3 +1,4 @@
+import csv
 import wave
 
 from deciwaves.games.hzd import render
@@ -227,3 +228,81 @@ def test_render_main_missing_package_fails_actionably(tmp_path, monkeypatch, cap
     assert "--hzd-package" in captured.out
     assert "PackFileLocators.bin" in captured.out
     assert captured.err == ""  # no traceback
+
+
+# ---------------------------------------------------------------------------
+# main(): empty-render guard (issue #64). HZD render used to print a skip
+# count and exit 0 even when NOTHING decoded and zero reels were written --
+# only DS render had the loud zero-output guard.
+# ---------------------------------------------------------------------------
+
+def _write_dict_csv(path, rows, fieldnames):
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=fieldnames)
+        w.writeheader()
+        for r in rows:
+            w.writerow(r)
+
+
+def _main_fixture(tmp_path, manifest_rows):
+    """CSV inputs for render.main() plus a dir that passes hzd_package_error;
+    HzdPackage itself gets monkeypatched (the pack is never really read)."""
+    _write_dict_csv(tmp_path / "catalog.csv",
+                    [{"line_id": "MQ04_a", "category": "mission", "subtitle_en": "Four",
+                      "speaker_name": "aloy", "scene": "mq04_mothersheart", "line_index": "0"}],
+                    ["line_id", "category", "subtitle_en", "speaker_name", "scene", "line_index"])
+    _write_dict_csv(tmp_path / "manifest.csv", manifest_rows, ["clip_row", "line_id", "tier"])
+    _write_dict_csv(tmp_path / "clip-index.csv",
+                    [{"clip_row": "10", "offset": "100", "a_bytes": "50"}],
+                    ["clip_row", "offset", "a_bytes"])
+    pkg = tmp_path / "pkg"
+    pkg.mkdir(exist_ok=True)
+    (pkg / "PackFileLocators.bin").write_bytes(b"x")
+    return ["--package", str(pkg),
+            "--manifest", str(tmp_path / "manifest.csv"),
+            "--catalog", str(tmp_path / "catalog.csv"),
+            "--clip-index", str(tmp_path / "clip-index.csv"),
+            "--out-dir", str(tmp_path / "audio"),
+            "--cache", str(tmp_path / "cache"),
+            "--errors", str(tmp_path / "render-errors.log")]
+
+
+class _MainFakePackage:
+    """Callable stand-in for HzdPackage: HzdPackage(path) returns self."""
+
+    def __call__(self, path):
+        return self
+
+    def dsar_for(self, archive):
+        return object()
+
+
+def test_hzd_render_main_zero_decode_exits_nonzero(tmp_path, monkeypatch, capsys):
+    """THE acceptance test for #64 (hzd side): a non-empty spine where no clip
+    decodes must exit non-zero with a legible message naming the errors log --
+    not exit 0 having written zero reels."""
+    argv = _main_fixture(tmp_path, [{"clip_row": "10", "line_id": "MQ04_a", "tier": "S"}])
+    monkeypatch.setattr(render, "HzdPackage", _MainFakePackage())
+    monkeypatch.setattr(render, "decode_spine_clips", lambda *a, **k: ({}, {}, 1))
+
+    rc = render.main(argv)
+
+    assert rc != 0
+    out = capsys.readouterr().out
+    assert "ERROR" in out
+    assert str(tmp_path / "render-errors.log") in out
+
+
+def test_hzd_render_main_empty_spine_exits_nonzero(tmp_path, monkeypatch, capsys):
+    """An empty spine (e.g. a manifest with no bound main-quest rows) assembles
+    zero reels -- that must be loud, not a 0-file rc-0 'success' the GUI
+    (spec 8.2) would have to double-check by listing the output dir."""
+    argv = _main_fixture(tmp_path, [])  # headers-only manifest -> empty spine
+    monkeypatch.setattr(render, "HzdPackage", _MainFakePackage())
+    monkeypatch.setattr(render, "decode_spine_clips", lambda *a, **k: ({}, {}, 0))
+
+    rc = render.main(argv)
+
+    assert rc != 0
+    out = capsys.readouterr().out
+    assert "0 reel" in out

@@ -151,20 +151,38 @@ def main(argv=None):
             dur = w.getnframes() / float(w.getframerate())
         return wav, dur
 
-    # n_failed intentionally unused: FW logs measure failures to a.errors but has
-    # never surfaced a summary count for them (unlike DS/HZD's fail-soft reporting).
-    durations, ep_secs, _n_failed = accumulate_episode_seconds(
+    durations, ep_secs, n_failed = accumulate_episode_seconds(
         spine, dur_of, gap_key=lambda s: s.quest, err_key=lambda s: s.wav,
         errors_path=a.errors, catch=(OSError, wave.Error))
+    if n_failed:
+        print(f"measure: {n_failed} clip(s) failed (see {a.errors})")
+    # Empty-render guard (issue #64), same contract as engine/render.py's DS
+    # guard: a spine where NOTHING could be measured (typically: the manifest's
+    # wav paths don't exist on disk) is a failure, not a zero-clip "success".
+    if not durations and spine:
+        print(f"render: ERROR - none of the {len(spine)} manifest clips could "
+              f"be measured ({n_failed} failed -- see {a.errors}). Are the "
+              f"manifest's wav paths present under --audio-root "
+              f"({a.audio_root})? Run `fw extract` first if this workspace has "
+              f"no decoded audio yet.")
+        return 1
 
     columns = ReelColumns(
         header=["timestamp", "quest", "speaker", "subtitle", "line_id"],
         row_of=lambda s, t: [format_ts(t), s.quest, s.speaker, s.subtitle, s.line_id])
-    assemble_reels(
+    n_files = assemble_reels(
         spine, ep_secs, durations, out_dir=a.out_dir, cache_dir=a.cache, stem=a.stem,
         columns=columns, budget=budget_seconds(), gap_key=lambda s: s.quest,
         concat_fn=_concat_uniform if a.uniform_mono else None,
         silence_fn=mono_silence_wav if a.uniform_mono else None)
+    if n_files == 0:
+        # Unlike DS's deliberate empty-playlist rc-0 (nothing to do), an empty
+        # FW spine means the manifest had no shippable rows at all -- an
+        # upstream problem worth failing loudly on (issue #64).
+        print(f"render: ERROR - 0 reel files written to {a.out_dir}: the spine "
+              f"was empty ({len(spine)} lines from {a.manifest} after the tier "
+              f"filter --tiers {a.tiers}).")
+        return 1
     return 0
 
 
