@@ -52,6 +52,8 @@ class MainWindow(QMainWindow):
         self.runner.finished.connect(self._on_job_finished)
 
         self.bar.game_changed.connect(lambda _g: self._refresh_status())
+        # re-grade the Doctor panel's promoted GPU items for the selected game (spec §3)
+        self.bar.game_changed.connect(self.pipeline.setup_doctor.set_game)
         self.bar.select_game("ds")   # DS is the built-first vertical slice
         self._refresh_status()
 

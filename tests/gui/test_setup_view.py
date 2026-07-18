@@ -1,0 +1,135 @@
+"""Setup screen + Doctor panel widgets (#68, spec §3). The parsing/severity rules are
+covered Qt-free elsewhere; here we cover the widgets: rows render, severities re-grade on
+game change, the buttons carry the right flags, spinners track running, and the real CLI
+flows through end-to-end. Skips without [gui]."""
+import sys
+
+import pytest
+
+pytest.importorskip("PySide6")
+from deciwaves.gui.doctor_model import SEV_ERROR, SEV_NEUTRAL, SEV_OK, SEV_WARN  # noqa: E402
+from deciwaves.gui.views.setup import DoctorPanel, SetupScreen  # noqa: E402
+
+SLOW = "import time\nfor i in range(200):\n print(i, flush=True); time.sleep(0.02)"
+
+# a stand-in for `deciwaves ... setup` that prints a realistic summary + a WARNING
+_FAKE_SETUP = (
+    "print('DeciWaves setup summary:')\n"
+    "print(f\"  {'tool':<10} {'status':<32} path\")\n"
+    "print(f\"  {'ffmpeg':<10} {'fetched':<32} C:/x/ffmpeg.exe\")\n"
+    "print('WARNING: oo2core_7_win64.dll not found under \\'C:/DS\\'.')\n"
+)
+
+_DOCTOR_PAYLOAD = {
+    "ok": False,
+    "checks": [
+        {"name": "ds_install", "ok": False, "status": "broken",
+         "message": "DS install: bad", "fix": "run deciwaves setup --ds-install <root>"},
+        {"name": "hzd_package", "ok": True, "status": "not_configured",
+         "message": "HZD package: not configured", "fix": ""},
+        {"name": "asr_extra", "ok": True, "status": "unavailable",
+         "message": "ASR extra: not installed", "fix": "pip install deciwaves[asr]"},
+        {"name": "cuda", "ok": True, "status": "ok", "message": "CUDA: available", "fix": ""},
+    ],
+}
+
+
+# --- DoctorPanel -----------------------------------------------------------
+
+def test_doctor_panel_renders_a_row_per_check_with_severities(qtbot):
+    p = DoctorPanel()
+    qtbot.addWidget(p)
+    p.set_game("hzd")
+    p.render_payload(_DOCTOR_PAYLOAD)
+    assert len(p.items()) == 4
+    assert p.severity_of("ds_install") == SEV_ERROR
+    assert p.severity_of("hzd_package") == SEV_NEUTRAL
+    assert p.severity_of("asr_extra") == SEV_WARN       # promoted for HZD (spec §3)
+    assert p.severity_of("cuda") == SEV_OK
+
+
+def test_doctor_panel_shows_fix_hints_verbatim(qtbot):
+    p = DoctorPanel()
+    qtbot.addWidget(p)
+    p.render_payload(_DOCTOR_PAYLOAD)
+    assert "run deciwaves setup --ds-install <root>" in p.rendered_text()
+
+
+def test_doctor_panel_regrades_on_game_change_without_a_new_run(qtbot):
+    p = DoctorPanel()
+    qtbot.addWidget(p)
+    p.set_game("ds")
+    p.render_payload(_DOCTOR_PAYLOAD)
+    assert p.severity_of("asr_extra") == SEV_NEUTRAL    # DS: informational only
+    p.set_game("fw")
+    assert p.severity_of("asr_extra") == SEV_WARN       # re-graded, no subprocess
+
+
+def test_doctor_panel_recheck_runs_the_real_cli(qtbot):
+    p = DoctorPanel()
+    qtbot.addWidget(p)
+    with qtbot.waitSignal(p.refreshed, timeout=30000):
+        assert p.recheck() is True
+    assert len(p.items()) > 0            # real `doctor --json` emitted its checks
+
+
+def test_doctor_recheck_button_triggers_a_run(qtbot):
+    # clicking exercises the real signal wiring: QAbstractButton.clicked emits a bool,
+    # and the slot must tolerate it (or refreshed never fires and this times out).
+    p = DoctorPanel(base=[sys.executable, "-c", "print('{\"ok\": true, \"checks\": []}')"])
+    qtbot.addWidget(p)
+    with qtbot.waitSignal(p.refreshed, timeout=8000):
+        p._recheck_btn.click()
+
+
+def test_doctor_panel_parses_json_after_a_stdout_preamble(qtbot):
+    # config-corruption warnings (config.load prints to stdout) and GPU import banners
+    # can precede the JSON on stdout -- the panel must still find the checks, not blank out.
+    p = DoctorPanel()
+    qtbot.addWidget(p)
+    preamble = "warning: config file C:/x/config.json is corrupted; ignoring it\n"
+    payload = ('{"ok": true, "checks": '
+               '[{"name": "ffmpeg", "ok": true, "status": "ok", "message": "m", "fix": ""}]}')
+    p._on_finished(0, preamble + payload)
+    assert [i.name for i in p.items()] == ["ffmpeg"]
+
+
+def test_doctor_panel_survives_unparseable_and_non_object_output(qtbot):
+    p = DoctorPanel()
+    qtbot.addWidget(p)
+    p._on_finished(0, "totally not json")
+    assert len(p.items()) == 1 and p.items()[0].status == "broken"
+    p._on_finished(0, "[1, 2, 3]")   # valid JSON, wrong shape (not an object)
+    assert len(p.items()) == 1 and p.items()[0].status == "broken"
+
+
+# --- SetupScreen -----------------------------------------------------------
+
+def test_setup_screen_parses_summary_and_warnings_on_finish(qtbot):
+    s = SetupScreen(base=[sys.executable, "-c", _FAKE_SETUP])
+    qtbot.addWidget(s)
+    with qtbot.waitSignal(s.finished, timeout=8000):
+        assert s.run() is True
+    assert "ffmpeg" in {r.label for r in s.rows()}
+    assert any("oo2core" in w for w in s.warnings())
+
+
+def test_redownload_button_forces_and_recheck_button_skips_downloads(qtbot, monkeypatch):
+    s = SetupScreen(base=["py", "-c", "pass"])
+    qtbot.addWidget(s)
+    captured = []
+    monkeypatch.setattr(s._runner, "start", lambda argv, cwd=None: captured.append(argv) or False)
+    s._redownload_btn.click()
+    s._recheck_btn.click()
+    assert "--force" in captured[0]
+    assert "--skip-downloads" in captured[1]
+
+
+def test_setup_screen_is_busy_while_running_then_clears(qtbot):
+    s = SetupScreen(base=[sys.executable, "-c", SLOW])
+    qtbot.addWidget(s)
+    assert s.run() is True
+    assert s.is_busy is True                 # indeterminate spinners on (spec §3)
+    with qtbot.waitSignal(s.finished, timeout=8000):
+        s.cancel()
+    assert s.is_busy is False
