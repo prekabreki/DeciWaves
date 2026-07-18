@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from PySide6.QtCore import QObject, QProcess, QTimer, Signal
 
+from deciwaves.gui.proc_env import utf8_environment
+
 _KILL_GRACE_MS = 2000  # after terminate(), force-kill if still alive (Windows consoles
 # ignore the WM_CLOSE that terminate() sends, so the kill is what actually stops them)
 
@@ -34,10 +36,12 @@ class JobRunner(QObject):
             return False
         p = QProcess(self)
         p.setProcessChannelMode(QProcess.MergedChannels)  # stderr -> stdout, one stream
+        p.setProcessEnvironment(utf8_environment())  # UTF-8 + unbuffered child (#118)
         if cwd:
             p.setWorkingDirectory(cwd)
         p.readyReadStandardOutput.connect(self._drain)
         p.finished.connect(self._on_finished)
+        p.errorOccurred.connect(self._on_error)
         self._proc = p
         p.start(argv[0], argv[1:])
         self.started.emit()
@@ -64,3 +68,13 @@ class JobRunner(QObject):
         self._drain()          # flush any trailing output before signaling done
         self._proc = None
         self.finished.emit(int(code))
+
+    def _on_error(self, error) -> None:
+        # QProcess::FailedToStart fires ONLY errorOccurred, never finished() -- so without
+        # this the chip would stay "running" forever, the poll timer would loop, and the
+        # controls would never re-enable (#117). Surface it as finished(-1) so the UI
+        # recovers. Guarded on `_proc is not None`: _on_finished nulls it first, so a
+        # non-start error that also fires finished() can't emit finished twice.
+        if error == QProcess.FailedToStart and self._proc is not None:
+            self._proc = None
+            self.finished.emit(-1)

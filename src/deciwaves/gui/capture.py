@@ -7,19 +7,11 @@ summary, ``doctor --json``'s JSON), so this adds accumulation. Same one-at-a-tim
 terminate-then-kill semantics -- both are read-only/idempotent CLI reads, safe to cancel."""
 from __future__ import annotations
 
-from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, QTimer, Signal
+from PySide6.QtCore import QObject, QProcess, QTimer, Signal
+
+from deciwaves.gui.proc_env import utf8_environment
 
 _KILL_GRACE_MS = 2000  # terminate() then force-kill; Windows consoles ignore WM_CLOSE
-
-
-def _utf8_environment() -> QProcessEnvironment:
-    # Force UTF-8 in the child so we can decode its stdout as UTF-8 exactly -- a Python
-    # child writing to a pipe on Windows otherwise uses the ANSI code page (mojibake in a
-    # displayed non-ASCII path). Also side-steps issue #59's console em-dash mojibake.
-    env = QProcessEnvironment.systemEnvironment()
-    env.insert("PYTHONUTF8", "1")
-    env.insert("PYTHONIOENCODING", "utf-8")
-    return env
 
 
 class CaptureRunner(QObject):
@@ -47,7 +39,7 @@ class CaptureRunner(QObject):
         p = QProcess(self)
         p.setProcessChannelMode(
             QProcess.MergedChannels if self._merge_stderr else QProcess.SeparateChannels)
-        p.setProcessEnvironment(_utf8_environment())
+        p.setProcessEnvironment(utf8_environment())
         if cwd:
             p.setWorkingDirectory(cwd)
         p.readyReadStandardOutput.connect(self._drain)
