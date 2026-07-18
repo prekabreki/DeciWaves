@@ -13,9 +13,14 @@ authors = [{ name = "prekabreki", email = "prekabreki@users.noreply.github.com" 
 dependencies = ["lz4>=4.0", "numpy>=1.24", "rapidfuzz>=3.0"]
 
 [project.optional-dependencies]
-test = ["pytest", "pytest-qt>=4.4"]
+test = ["pytest"]
 asr = ["whisperx>=3.1,<4"]
 gui = ["PySide6>=6.7"]
+# GUI dev/test env = the runtime extra plus pytest-qt. Kept OUT of `test` on purpose:
+# pytest-qt hard-errors at startup (pytest.UsageError) when no Qt binding is installed,
+# so a base `.[test]` install (no PySide6) must not carry it, or the "without the extra"
+# CI run couldn't even start pytest. Self-references deciwaves[gui] to pull PySide6.
+gui-test = ["deciwaves[gui]", "pytest-qt>=4.4"]
 
 [project.scripts]
 deciwaves = "deciwaves.cli.main:main"

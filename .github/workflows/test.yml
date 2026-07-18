@@ -18,4 +18,11 @@ jobs:
           ffmpeg-version: "8.1.2"
       - run: pip install -e ".[test]" ruff==0.15.21 pytest==9.1.1
       - run: ruff check src tests tools
+      # Without the [gui] extra: the GUI Qt tests skip cleanly (importorskip PySide6),
+      # and no Qt binding / pytest-qt is present -- proves the base install stays green.
       - run: python -m pytest -q
+      # With the [gui] extra (+ pytest-qt): the GUI tests now execute, headless.
+      - run: pip install -e ".[gui-test]"
+      - run: python -m pytest -q
+        env:
+          QT_QPA_PLATFORM: offscreen
