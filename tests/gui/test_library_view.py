@@ -165,3 +165,75 @@ def test_preview_requested_emitted(qtbot, tmp_path):
     with qtbot.waitSignal(v.preview_requested) as blocker:
         v._on_cell_clicked(idx)
     assert blocker.args == ["a"]
+
+
+def test_preview_column_availability_hzd_prebind_dimmed(qtbot, tmp_path):
+    """HZD catalog-only (pre-bind): ▷ shows pending -- dimmed foreground + an
+    'available after bind' tooltip (spec §6.2/§6.5) -- and clicking it is a no-op."""
+    ws = str(tmp_path)
+    _write_csv(os.path.join(ws, "out", "hzd", "catalog.csv"), DS_CAT,
+               [_cat_row(line_id="h1", wem_path_en="")])
+    v = LibraryView()
+    qtbot.addWidget(v)
+    v.refresh("hzd", ws)
+    idx = v._model.index(0, v._model.COL_PREVIEW)
+    assert v._model.data(idx, Qt.DisplayRole) == "▷"
+    assert v._model.data(idx, Qt.ForegroundRole) is not None  # dimmed = unavailable
+    assert v._model.data(idx, Qt.ToolTipRole) == "Preview available after bind"
+    # clicking an unavailable ▷ never emits (playback is #71)
+    v.preview_requested.connect(lambda _lid: pytest.fail("unavailable ▷ must not emit"))
+    v._on_cell_clicked(idx)
+
+
+def test_preview_column_availability_ds_and_fw_available(qtbot, tmp_path):
+    """DS is always available; FW is available once a row has a WAV path -- available ▷ has
+    no dim color and no tooltip."""
+    ws = str(tmp_path)
+    _write_ds_catalog(ws, [_cat_row(line_id="a")])
+    v = LibraryView()
+    qtbot.addWidget(v)
+    v.refresh("ds", ws)
+    idx = v._model.index(0, v._model.COL_PREVIEW)
+    assert v._model.data(idx, Qt.ForegroundRole) is None
+    assert v._model.data(idx, Qt.ToolTipRole) is None
+
+    _write_wav(os.path.join(ws, "out", "fw", "audio", "f1.wav"), seconds=1.0)
+    _write_csv(os.path.join(ws, "out", "fw", "full-reel-manifest.csv"), FW_FULL,
+               [{"line_id": "f1", "wav": "audio/f1.wav", "speaker": "Varl", "subtitle": "Hello",
+                 "gamescript_index": "1", "quest": "MQ", "tier": "S", "score": "9",
+                 "transcript": "x"}])
+    v.refresh("fw", ws)
+    idx = v._model.index(0, v._model.COL_PREVIEW)
+    assert v._model.data(idx, Qt.ForegroundRole) is None
+    assert v._model.data(idx, Qt.ToolTipRole) is None
+
+
+def test_filter_state_resets_on_game_change_but_persists_same_game(qtbot, tmp_path):
+    """Switching games drops the prior game's stray search/sort/toggles (spec §6 -- the list
+    is per-game); a same-game refresh (job-finished) preserves all filter/sort state."""
+    ws = str(tmp_path)
+    _write_ds_catalog(ws, [_cat_row(line_id="a", speaker_name="Zed", subtitle_en="hello there")])
+    _write_csv(os.path.join(ws, "out", "hzd", "catalog.csv"), DS_CAT,
+               [_cat_row(line_id="h", subtitle_en="world")])
+    v = LibraryView()
+    qtbot.addWidget(v)
+    v.refresh("ds", ws)
+    v._search.setText("hello")
+    v._hide_dupes.setChecked(True)
+    v._hide_nosub.setChecked(True)
+    v._on_header_clicked(v._model.COL_SPEAKER)
+    assert v._sort_key == "speaker"
+
+    # DS -> HZD: filters/sort reset to defaults
+    v.refresh("hzd", ws)
+    assert v._search.text() == ""
+    assert v._hide_dupes.isChecked() is False
+    assert v._hide_nosub.isChecked() is False
+    assert v._sort_key is None and v._sort_desc is False
+
+    # same-game refresh (e.g. job-finished): filter state preserved
+    v._search.setText("world")
+    v._hide_dupes.setChecked(True)
+    v.refresh("hzd", ws)
+    assert v._search.text() == "world"
+    assert v._hide_dupes.isChecked() is True

@@ -7,6 +7,7 @@ here ▷ only reflects availability and emits an (as-yet unconnected) ``preview_
 from __future__ import annotations
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -24,6 +25,7 @@ from PySide6.QtWidgets import (
 
 from deciwaves.gui.library_model import (
     LineRow,
+    availability_by_id,
     check_all,
     check_none,
     distinct_speakers,
@@ -31,13 +33,17 @@ from deciwaves.gui.library_model import (
     is_bind_done,
     load_lines,
     load_selection,
-    preview_available,
+    preview_unavailable_tooltip,
     save_selection,
     sort_rows,
     uncheck_barks,
     uncheck_shorter_than,
     visible_rows,
 )
+
+# Gray foreground for a pending/unavailable ▷ (spec §6.2/§6.5). A value type -- safe to build
+# at import time without a running QApplication.
+_PREVIEW_PENDING_FG = QColor(0x88, 0x88, 0x88)
 
 
 class _TableModel(QAbstractTableModel):
@@ -105,6 +111,14 @@ class _TableModel(QAbstractTableModel):
                 return row.speaker or ""
             if col == self.COL_SUB:
                 return row.subtitle or ""
+        # ▷ availability (O(1) from the per-refresh lookup -- no per-row syscall on paint):
+        # an unavailable preview is dimmed and carries a "why" tooltip (spec §6.2/§6.5).
+        if col == self.COL_PREVIEW and role in (Qt.ForegroundRole, Qt.ToolTipRole):
+            if self._view._available.get(row.line_id, False):
+                return None
+            if role == Qt.ForegroundRole:
+                return _PREVIEW_PENDING_FG
+            return self._view._unavailable_tooltip
         return None
 
     def setData(self, index, value, role=Qt.EditRole) -> bool:
@@ -132,13 +146,15 @@ class LibraryView(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._game = "ds"
+        self._game: str | None = None  # no game loaded yet -> first refresh is a game change
         self._workspace = "."
         self._rows: list[LineRow] = []
         self._visible: list[LineRow] = []
         self._unchecked: set[str] = set()
         self._undo: list[set[str]] = []
         self._bind_done = False
+        self._available: dict[str, bool] = {}      # line_id -> ▷ available (per-refresh)
+        self._unavailable_tooltip = ""
         self._sort_key: str | None = None
         self._sort_desc = False
 
@@ -214,20 +230,35 @@ class LibraryView(QWidget):
     # --- data lifecycle ----------------------------------------------------
 
     def refresh(self, game: str, workspace: str) -> None:
-        """Reload the game's lines + persisted selection and rebuild the table."""
+        """Reload the game's lines + persisted selection and rebuild the table.
+
+        A **game change** drops the prior game's stray filter/sort state (search, sort
+        key/dir, both hide toggles, speaker) -- the list is per-game. A **same-game** refresh
+        (e.g. a job finished for the current game) preserves all filter/sort state so an
+        in-progress curation survives a background reload."""
+        game_changed = game != self._game
         self._game = game
         self._workspace = workspace
         self._rows = load_lines(workspace, game)
         self._unchecked = load_selection(workspace, game)
         self._bind_done = is_bind_done(workspace, game)
+        self._available = availability_by_id(self._rows, game, bind_done=self._bind_done)
+        self._unavailable_tooltip = preview_unavailable_tooltip(game, bind_done=self._bind_done)
         self._undo.clear()
 
+        if game_changed:
+            self._reset_filter_state()
+
+        # Speaker list is game-specific, so it is always rebuilt; a same-game refresh restores
+        # the prior selection if it still exists, a game change resets to "all".
+        prev_speaker = self._speaker.currentText()
         self._speaker.blockSignals(True)
         self._speaker.clear()
         self._speaker.addItem("all")
         for sp in distinct_speakers(self._rows):
             self._speaker.addItem(sp)
-        self._speaker.setCurrentIndex(0)
+        restore = self._speaker.findText(prev_speaker) if not game_changed else -1
+        self._speaker.setCurrentIndex(restore if restore >= 0 else 0)
         self._speaker.blockSignals(False)
 
         has_len = has_known_lengths(self._rows)
@@ -235,6 +266,19 @@ class LibraryView(QWidget):
         self._uncheck_short_btn.setEnabled(has_len)
 
         self._apply_filters()
+
+    def _reset_filter_state(self) -> None:
+        """Clear search text, sort key/dir, and both hide toggles to defaults (called on a
+        game change only). Signals are blocked so the single ``_apply_filters`` at the end of
+        ``refresh`` does the one rebuild."""
+        self._sort_key, self._sort_desc = None, False
+        for w in (self._search, self._hide_dupes, self._hide_nosub):
+            w.blockSignals(True)
+        self._search.clear()
+        self._hide_dupes.setChecked(False)
+        self._hide_nosub.setChecked(False)
+        for w in (self._search, self._hide_dupes, self._hide_nosub):
+            w.blockSignals(False)
 
     def _apply_filters(self) -> None:
         self._visible = sort_rows(
@@ -302,7 +346,7 @@ class LibraryView(QWidget):
         if index.column() != _TableModel.COL_PREVIEW:
             return
         row = self._model.row_at(index.row())
-        if preview_available(row, self._game, bind_done=self._bind_done):
+        if self._available.get(row.line_id, False):  # unavailable ▷ is a no-op
             self.preview_requested.emit(row.line_id)
 
     # --- status + test accessors -------------------------------------------

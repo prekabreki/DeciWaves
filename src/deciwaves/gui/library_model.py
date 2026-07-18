@@ -16,10 +16,12 @@ are verified against the stage code:
   by ``clip_row``; joined and divided by the 48 kHz voice rate for a proxy duration (exact
   only at decode, spec §6.2). Pre-bind (catalog only) there is no ``clip_row`` to join ->
   ``length_s`` None.
-- **FW** under ``out/fw/``: story ``full-reel-manifest.csv`` (``games/fw/manifest.py``
-  ``MANIFEST_COLS``) else ``clip-index.csv`` (``games/fw/extract.py`` ``MANIFEST_COLS``).
-  Both carry a ``wav`` path relative to ``out/fw/``; length is probed from that WAV's header
-  when the file exists (post-extract).
+- **FW** under ``out/fw/``: story ``full-reel-manifest.csv`` else ``subtitle-manifest-full.csv``
+  (both ``games/fw/manifest.py`` ``MANIFEST_COLS`` -- the latter is what a user with
+  ``types.json`` but no BYO gamescript gets from ``subtitle-bind``, carrying subtitles +
+  speaker) else ``clip-index.csv`` (``games/fw/extract.py`` ``MANIFEST_COLS``, ids + wav only).
+  Every source carries a ``wav`` path relative to ``out/fw/``; length is probed from that
+  WAV's header when the file exists (post-extract).
 """
 from __future__ import annotations
 
@@ -62,9 +64,14 @@ class LineRow:
 # --- artifact reading ------------------------------------------------------
 
 def _read_csv(path: str) -> list[dict]:
-    """``csv.DictReader`` rows for *path*, or ``[]`` if the file is absent/unreadable."""
+    """``csv.DictReader`` rows for *path*, or ``[]`` if the file is absent/unreadable.
+
+    Opened as ``utf-8-sig`` so a UTF-8 BOM is consumed rather than fused onto the first
+    header (``\\ufeffline_id``), which would silently parse every ``line_id`` as ``""``
+    and key the whole selection under one blank id (the repo's recurring BOM-mojibake
+    theme -- issues #59/#84). ``utf-8-sig`` reads both BOM and no-BOM files."""
     try:
-        with open(path, "r", newline="", encoding="utf-8") as f:
+        with open(path, "r", newline="", encoding="utf-8-sig") as f:
             return list(csv.DictReader(f))
     except (OSError, ValueError):
         return []
@@ -161,18 +168,15 @@ def _hzd_b_samples_by_clip_row(clip_index_path: str) -> dict[str, int]:
 
 def _load_fw(workspace: str) -> list[LineRow]:
     root = _out_dir(workspace, "fw")
-    full = os.path.join(root, "full-reel-manifest.csv")
-    if os.path.isfile(full):
-        out = []
-        for i, r in enumerate(_read_csv(full)):
-            sub = r.get("subtitle")
-            audio = _fw_audio_path(root, r.get("wav"))
-            out.append(LineRow(
-                line_id=r.get("line_id", ""), speaker=r.get("speaker") or None,
-                subtitle=sub, scene=r.get("quest") or None, tier=r.get("tier") or None,
-                audio_path=audio, length_s=wav_duration_seconds(audio),
-                has_subtitle=_has_subtitle(sub), order_index=i))
-        return out
+    # Both manifests share fw/manifest.py MANIFEST_COLS, so one parse path serves both.
+    # full-reel wins (gamescript-anchored story order); else subtitle-manifest-full, which a
+    # user with types.json but no BYO gamescript still gets from subtitle-bind and which
+    # carries subtitles + speaker (spec §6.1). Only if neither exists do we fall back to the
+    # subtitle-less clip-index.
+    for name in ("full-reel-manifest.csv", "subtitle-manifest-full.csv"):
+        path = os.path.join(root, name)
+        if os.path.isfile(path):
+            return _load_fw_manifest(root, path)
     # clip-index: ids + wav paths only, no subtitle/speaker yet (pre subtitle-bind).
     out = []
     for i, r in enumerate(_read_csv(os.path.join(root, "clip-index.csv"))):
@@ -180,6 +184,21 @@ def _load_fw(workspace: str) -> list[LineRow]:
         out.append(LineRow(
             line_id=r.get("line_id", ""), audio_path=audio,
             length_s=wav_duration_seconds(audio), has_subtitle=False, order_index=i))
+    return out
+
+
+def _load_fw_manifest(root: str, path: str) -> list[LineRow]:
+    """Parse a FW labeled manifest (``full-reel-manifest.csv`` or
+    ``subtitle-manifest-full.csv`` -- identical ``fw/manifest.py MANIFEST_COLS`` schema)."""
+    out = []
+    for i, r in enumerate(_read_csv(path)):
+        sub = r.get("subtitle")
+        audio = _fw_audio_path(root, r.get("wav"))
+        out.append(LineRow(
+            line_id=r.get("line_id", ""), speaker=r.get("speaker") or None,
+            subtitle=sub, scene=r.get("quest") or None, tier=r.get("tier") or None,
+            audio_path=audio, length_s=wav_duration_seconds(audio),
+            has_subtitle=_has_subtitle(sub), order_index=i))
     return out
 
 
@@ -388,12 +407,31 @@ def is_bind_done(workspace: str, game: str) -> bool:
 
 
 def preview_available(row: LineRow, game: str, *, bind_done: bool) -> bool:
-    """Whether the ▷ preview is playable now (spec §6.5): FW when its WAV exists, DS always
-    (on-demand decode), HZD only once bind has produced clips."""
+    """Whether the ▷ preview is playable now (spec §6.5), computed **without a per-row
+    filesystem syscall** so it is safe to call on the paint path across tens of thousands of
+    rows: DS always (on-demand decode); HZD only once ``bind`` has produced clips (a single
+    per-refresh bool); FW iff the row carries a WAV path -- extract writes the WAVs to disk
+    right after extract (spec §6.2), so a non-empty ``audio_path`` means playable, no ``stat``."""
     if game == "fw":
-        return bool(row.audio_path) and os.path.isfile(row.audio_path)
+        return bool(row.audio_path)
     if game == "ds":
         return True
     if game == "hzd":
         return bind_done
     return False
+
+
+def availability_by_id(rows: list[LineRow], game: str, *, bind_done: bool) -> dict[str, bool]:
+    """``line_id -> preview-available`` lookup, computed once per refresh (O(n), no per-row
+    syscall) so the table model can read ▷ availability O(1) on paint (spec §6.2/§6.5)."""
+    return {r.line_id: preview_available(r, game, bind_done=bind_done) for r in rows}
+
+
+def preview_unavailable_tooltip(game: str, *, bind_done: bool) -> str:
+    """Tooltip for an unavailable ▷ (spec §6.5): HZD pre-bind is 'available after bind'; FW
+    without a WAV has no audio; anything else is a generic pending message."""
+    if game == "hzd" and not bind_done:
+        return "Preview available after bind"
+    if game == "fw":
+        return "No audio for this line"
+    return "Preview unavailable"

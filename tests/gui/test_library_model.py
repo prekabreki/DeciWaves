@@ -12,6 +12,7 @@ from conftest import catalog_row
 
 from deciwaves.gui.library_model import (
     LineRow,
+    availability_by_id,
     check_all,
     check_none,
     distinct_speakers,
@@ -153,12 +154,68 @@ def test_fw_under_game_dir_full_reel_preferred_and_wav_length(tmp_path):
     assert abs(rows[0].length_s - 2.0) < 0.05
 
 
+def test_fw_subtitle_manifest_used_when_no_full_reel(tmp_path):
+    """A FW user with types.json but NO BYO gamescript runs extract->asr->subtitle-bind and
+    gets ONLY subtitle-manifest-full.csv (full-reel is gamescript-gated). The Library must use
+    it -- it carries subtitles + speaker (same MANIFEST_COLS schema) -- not the subtitle-less
+    clip-index.csv (spec §6.1: subtitle-manifest-full -> full-reel)."""
+    ws = str(tmp_path)
+    wav_rel = "audio/f1.wav"
+    _write_wav(os.path.join(ws, "out", "fw", wav_rel), seconds=2.0)
+    # clip-index also present (subtitle-manifest-full must win over it)
+    _write_csv(os.path.join(ws, "out", "fw", "clip-index.csv"), FW_CLIPIDX,
+               [{"line_id": "f1", "group_id": "0", "lssr_index": "0", "file_index": "0",
+                 "offset": "0", "clip_bytes": "10", "wav": wav_rel}])
+    _write_csv(os.path.join(ws, "out", "fw", "subtitle-manifest-full.csv"), FW_FULL,
+               [{"line_id": "f1", "wav": wav_rel, "speaker": "Varl", "subtitle": "Hello Aloy",
+                 "gamescript_index": "1", "quest": "MQ", "tier": "S", "score": "9",
+                 "transcript": "x"}])
+    rows = load_lines(ws, "fw")
+    assert [r.line_id for r in rows] == ["f1"]
+    assert rows[0].speaker == "Varl" and rows[0].subtitle == "Hello Aloy"
+    assert rows[0].has_subtitle is True and rows[0].tier == "S"
+    assert abs(rows[0].length_s - 2.0) < 0.05
+
+
+def test_fw_full_reel_wins_over_subtitle_manifest(tmp_path):
+    """When both exist, the gamescript-anchored full-reel manifest is the richer story-order
+    source, so it wins over subtitle-manifest-full (spec §6.1 precedence)."""
+    ws = str(tmp_path)
+    wav_rel = "audio/f1.wav"
+    _write_wav(os.path.join(ws, "out", "fw", wav_rel), seconds=2.0)
+    _write_csv(os.path.join(ws, "out", "fw", "subtitle-manifest-full.csv"), FW_FULL,
+               [{"line_id": "f1", "wav": wav_rel, "speaker": "FromSubtitle", "subtitle": "sub",
+                 "gamescript_index": "1", "quest": "MQ", "tier": "S", "score": "9",
+                 "transcript": "x"}])
+    _write_csv(os.path.join(ws, "out", "fw", "full-reel-manifest.csv"), FW_FULL,
+               [{"line_id": "f1", "wav": wav_rel, "speaker": "FromFullReel", "subtitle": "full",
+                 "gamescript_index": "1", "quest": "MQ", "tier": "S", "score": "9",
+                 "transcript": "x"}])
+    rows = load_lines(ws, "fw")
+    assert rows[0].speaker == "FromFullReel" and rows[0].subtitle == "full"
+
+
 def test_fw_length_none_when_wav_absent(tmp_path):
     ws = str(tmp_path)
     _write_csv(os.path.join(ws, "out", "fw", "clip-index.csv"), FW_CLIPIDX,
                [{"line_id": "f9", "group_id": "0", "lssr_index": "0", "file_index": "0",
                  "offset": "0", "clip_bytes": "10", "wav": "audio/f9.wav"}])
     assert load_lines(ws, "fw")[0].length_s is None
+
+
+def test_load_tolerates_utf8_bom(tmp_path):
+    """A UTF-8 BOM must not corrupt the first header: without utf-8-sig the first column
+    becomes '\\ufeffline_id', so every line_id parses as '' (issues #59/#84 BOM theme)."""
+    ws = str(tmp_path)
+    path = os.path.join(ws, "out", "catalog.csv")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", newline="", encoding="utf-8-sig") as f:  # BOM-prefixed
+        w = csv.DictWriter(f, fieldnames=DS_CAT)
+        w.writeheader()
+        w.writerow(catalog_row(line_id="c1", subtitle_en="hi", speaker_name="Sam"))
+    rows = load_lines(ws, "ds")
+    assert [r.line_id for r in rows] == ["c1"]
+    assert rows[0].subtitle == "hi" and rows[0].speaker == "Sam"
 
 
 # --- WAV-header duration reader --------------------------------------------
@@ -356,14 +413,27 @@ def test_uncheck_barks_ds_empty_subtitle():
 
 # --- preview availability --------------------------------------------------
 
-def test_preview_available_per_game(tmp_path):
-    ws = str(tmp_path)
+def test_preview_available_per_game():
+    """Cheap availability (spec §6.2/§6.5): no per-row filesystem syscall on the paint path.
+    DS always; HZD only once bind is done; FW iff the row has a WAV path (extract wrote the
+    WAVs -- we do NOT stat each of 40k rows on scroll)."""
     assert preview_available(LineRow(line_id="a"), "ds", bind_done=False) is True
     assert preview_available(LineRow(line_id="a"), "hzd", bind_done=False) is False
     assert preview_available(LineRow(line_id="a"), "hzd", bind_done=True) is True
 
-    wav = os.path.join(ws, "out", "fw", "audio", "f1.wav")
-    _write_wav(wav, seconds=1.0)
-    assert preview_available(LineRow(line_id="f1", audio_path=wav), "fw", bind_done=True) is True
-    assert preview_available(LineRow(line_id="f2", audio_path=os.path.join(ws, "nope.wav")),
-                             "fw", bind_done=True) is False
+    # FW: non-empty audio_path -> available (no os.path.exists); empty/None -> not
+    assert preview_available(LineRow(line_id="f1", audio_path="out/fw/audio/f1.wav"),
+                             "fw", bind_done=True) is True
+    assert preview_available(LineRow(line_id="f2", audio_path=None), "fw", bind_done=True) is False
+    assert preview_available(LineRow(line_id="f3", audio_path=""), "fw", bind_done=True) is False
+
+
+def test_availability_by_id_lookup_is_cheap_and_per_row():
+    rows = [LineRow(line_id="a", audio_path="x.wav"), LineRow(line_id="b", audio_path=None)]
+    # FW: per-row on audio_path
+    assert availability_by_id(rows, "fw", bind_done=True) == {"a": True, "b": False}
+    # HZD: single bind bool for every row, regardless of audio_path
+    assert availability_by_id(rows, "hzd", bind_done=False) == {"a": False, "b": False}
+    assert availability_by_id(rows, "hzd", bind_done=True) == {"a": True, "b": True}
+    # DS: always available
+    assert availability_by_id(rows, "ds", bind_done=False) == {"a": True, "b": True}
