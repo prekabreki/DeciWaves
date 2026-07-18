@@ -316,11 +316,7 @@ def _run_ds(cfg: dict, extra_argv: list) -> int:
     # ds/cutscene_tracks.csv (see _ds_order_argv) instead of regenerating it against
     # the user's install. `deciwaves ds cutscenes` remains available standalone for
     # anyone who wants to regenerate it (e.g. against a patched install).
-    chain = [
-        Stage("catalog", STAGES["ds"]["catalog"][0], _ds_catalog_argv),
-        Stage("order", STAGES["ds"]["order"][0], _ds_order_argv),
-        Stage("render", STAGES["ds"]["render"][0], _ds_render_argv),
-    ]
+    chain = run_chain("ds")
     ap = argparse.ArgumentParser(
         prog="deciwaves ds run",
         description="Run the DS pipeline end-to-end: catalog -> order -> render.",
@@ -379,13 +375,7 @@ def _hzd_bind_argv(ctx: dict) -> list:
 
 
 def _run_hzd(cfg: dict, extra_argv: list) -> int:
-    chain = [
-        Stage("catalog", STAGES["hzd"]["catalog"][0], _hzd_package_argv),
-        Stage("clip-index", STAGES["hzd"]["clip-index"][0], _hzd_package_argv),
-        Stage("wem-metadata", STAGES["hzd"]["wem-metadata"][0], _hzd_package_argv),
-        Stage("bind", STAGES["hzd"]["bind"][0], _hzd_bind_argv, gpu=True),
-        Stage("render", STAGES["hzd"]["render"][0], _hzd_package_argv),
-    ]
+    chain = run_chain("hzd")
     ap = argparse.ArgumentParser(
         prog="deciwaves hzd run",
         description="Run the HZD pipeline end-to-end: catalog -> clip-index -> "
@@ -519,14 +509,7 @@ def _run_fw(cfg: dict, extra_argv: list) -> int:
     # --gamescript gate below), but it is one declared pipeline -- pass the
     # full, ordered stage list as `full_chain` to both calls so marker
     # invalidation (issue #37) sees stages on the far side of the gate too.
-    full_chain = [
-        Stage("extract", STAGES["fw"]["extract"][0], _fw_extract_argv),
-        Stage("asr", STAGES["fw"]["asr"][0], _fw_asr_argv, gpu=True),
-        Stage("subtitle-bind", STAGES["fw"]["subtitle-bind"][0], _fw_subtitle_bind_argv),
-        Stage("match", STAGES["fw"]["match"][0], _fw_match_argv),
-        Stage("full-reel", STAGES["fw"]["full-reel"][0], _fw_full_reel_argv),
-        Stage("render", STAGES["fw"]["render"][0], _fw_render_argv),
-    ]
+    full_chain = run_chain("fw")
     ap = argparse.ArgumentParser(
         prog="deciwaves fw run",
         description="Run the FW pipeline end-to-end: extract -> asr -> subtitle-bind, "
@@ -608,6 +591,38 @@ def _run_fw(cfg: dict, extra_argv: list) -> int:
 
 
 # ---------------------------------------------------------------------------
+
+
+def run_chain(game: str) -> list[Stage]:
+    """The ordered stage chain ``deciwaves <game> run`` executes.
+
+    Single source of truth: the per-game runners below build their chain from
+    this, and the GUI stage strip (issue #69) reads it, so the strip can never
+    drift from the tokens ``--until``/``--from`` accept or the marker suffixes
+    (`out/<game>/.done-<name>`). Raises ``KeyError`` for an unknown game."""
+    return {
+        "ds": [
+            Stage("catalog", STAGES["ds"]["catalog"][0], _ds_catalog_argv),
+            Stage("order", STAGES["ds"]["order"][0], _ds_order_argv),
+            Stage("render", STAGES["ds"]["render"][0], _ds_render_argv),
+        ],
+        "hzd": [
+            Stage("catalog", STAGES["hzd"]["catalog"][0], _hzd_package_argv),
+            Stage("clip-index", STAGES["hzd"]["clip-index"][0], _hzd_package_argv),
+            Stage("wem-metadata", STAGES["hzd"]["wem-metadata"][0], _hzd_package_argv),
+            Stage("bind", STAGES["hzd"]["bind"][0], _hzd_bind_argv, gpu=True),
+            Stage("render", STAGES["hzd"]["render"][0], _hzd_package_argv),
+        ],
+        "fw": [
+            Stage("extract", STAGES["fw"]["extract"][0], _fw_extract_argv),
+            Stage("asr", STAGES["fw"]["asr"][0], _fw_asr_argv, gpu=True),
+            Stage("subtitle-bind", STAGES["fw"]["subtitle-bind"][0], _fw_subtitle_bind_argv),
+            Stage("match", STAGES["fw"]["match"][0], _fw_match_argv),
+            Stage("full-reel", STAGES["fw"]["full-reel"][0], _fw_full_reel_argv),
+            Stage("render", STAGES["fw"]["render"][0], _fw_render_argv),
+        ],
+    }[game]
+
 
 _RUNNERS = {"ds": _run_ds, "hzd": _run_hzd, "fw": _run_fw}
 
