@@ -3,6 +3,12 @@ import shutil
 from pathlib import Path
 import pytest
 
+# GUI tests (issue #67) run headless: force offscreen Qt before any QApplication is
+# built. Set here in the single root conftest -- a second tests/gui/conftest.py would
+# collide on the module name `conftest` that the base tests import fixtures from
+# (`from conftest import HZD_PACKAGE`), pytest's prepend import mode. Inert for non-Qt tests.
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
 REPO = Path(__file__).resolve().parents[1]
 
 FIXTURE_PR201 = REPO / "out" / "lines_pr201.core"

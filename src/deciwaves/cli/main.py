@@ -81,6 +81,12 @@ def _stage_list_epilog(game: str) -> str:
     lines.append(f"  {'run':<{width}}  chain {game}'s stages end-to-end (see `deciwaves {game} run --help`)")
     return "stages:\n" + "\n".join(lines)
 
+def _gui_is_available() -> bool:
+    """Thin indirection over gui.is_available() so dispatch is patchable in tests
+    without a real PySide6 install (issue #67)."""
+    from deciwaves import gui
+    return gui.is_available()
+
 def _apply_config_env():
     cfg = config.load()
     if cfg.get("tools_dir") and os.path.isdir(cfg["tools_dir"]):
@@ -112,7 +118,7 @@ def main(argv=None) -> int:
         "unaffected by --workspace either way."
     ))
     sub = ap.add_subparsers(dest="cmd", required=False)
-    for name in ("setup", "doctor"):
+    for name in ("setup", "doctor", "gui"):
         sub.add_parser(name, add_help=False)
     game_parsers = {}
     for game, stages in STAGES.items():
@@ -152,6 +158,12 @@ def main(argv=None) -> int:
     # PATH) from saved config; engine.tool_paths.resolve() reads them when the
     # decoder subprocess is actually spawned, not at stage-module import time.
     if args.cmd is None:
+        # Bare `deciwaves`: the GUI is the primary interface (issue #67), so launch it
+        # when the [gui] extra is importable; otherwise fall back to today's guided
+        # prompt with a one-line install hint.
+        if _gui_is_available():
+            from deciwaves import gui
+            return gui.launch(rest)
         # Resolve to an absolute path before handing it to guided mode as its
         # workspace-prompt default -- whether it came from an explicit
         # --workspace or is just the "." argparse default, the prompt should
@@ -160,11 +172,19 @@ def main(argv=None) -> int:
         # to silently ignore --workspace entirely here, always defaulting the
         # prompt to Path.cwd() instead).
         from deciwaves.cli.guided import run_guided
+        from deciwaves import gui
+        print(f"(tip: install the desktop GUI -- {gui.INSTALL_HINT})")
         return run_guided(cfg, workspace=str(Path(args.workspace).resolve()))
     if args.cmd == "setup":
         from deciwaves.cli.setup import run_setup; return _dispatch(run_setup, rest)
     if args.cmd == "doctor":
         from deciwaves.cli.doctor import run_doctor; return _dispatch(run_doctor, rest)
+    if args.cmd == "gui":
+        from deciwaves import gui
+        if not _gui_is_available():
+            print(f"The DeciWaves GUI needs the [gui] extra. Install it with:\n    {gui.INSTALL_HINT}")
+            return 1
+        return gui.launch(rest)
 
     # args.stage is the REMAINDER list captured above: the stage name plus that
     # stage's own argv. REMAINDER doesn't support argparse `choices` validation
