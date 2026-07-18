@@ -171,6 +171,62 @@ def test_fw_render_main_empty_manifest_blames_rows_not_tiers(tmp_path, capsys):
     assert "--tiers" not in out    # don't misdirect to a filter that can't help
 
 
+# ---------------------------------------------------------------------------
+# main(): malformed / BOM'd manifest header (issue #84). A full-reel manifest
+# re-saved by PowerShell 5.1's `Set-Content -Encoding utf8` gets a UTF-8 BOM
+# fused into the first header ("\ufeffline_id"), and a hand-edited/wrong CSV can
+# drop a required column -- both used to crash build_spine with a raw
+# `KeyError: 'line_id'` traceback instead of an actionable error.
+# ---------------------------------------------------------------------------
+
+def _write_manifest_encoded(path, rows, encoding):
+    cols = ["line_id", "gamescript_index", "quest", "tier", "speaker", "subtitle", "wav"]
+    with open(path, "w", newline="", encoding=encoding) as f:
+        w = csv.DictWriter(f, fieldnames=cols)
+        w.writeheader()
+        for r in rows:
+            w.writerow(r)
+
+
+def test_fw_render_load_csv_strips_utf8_bom_header(tmp_path):
+    """A manifest saved with a UTF-8 BOM (PowerShell 5.1 `Set-Content -Encoding
+    utf8`) must load with a clean "line_id" header, not "\ufeffline_id" -- else
+    build_spine dies with a raw `KeyError: 'line_id'` (issue #84). The BOM is a
+    benign encoding artifact, so the manifest just renders; no error is raised."""
+    manifest = tmp_path / "full-reel-manifest.csv"
+    _write_manifest_encoded(manifest, [_row("c0", 1, "Q1")], encoding="utf-8-sig")
+
+    rows = render._load_csv(str(manifest))
+
+    assert list(rows[0]) == ["line_id", "gamescript_index", "quest", "tier",
+                             "speaker", "subtitle", "wav"]   # not "\ufeffline_id"
+    assert [s.line_id for s in render.build_spine(rows)] == ["c0"]  # no KeyError
+
+
+def test_fw_render_main_missing_required_column_errors_cleanly(tmp_path, capsys):
+    """A manifest missing a required column (a garbled header, or the wrong CSV
+    entirely) must fail with a clean, actionable error naming the manifest and
+    the missing column -- not a raw KeyError traceback from build_spine
+    (issue #84, #7/#23 message convention)."""
+    manifest = tmp_path / "full-reel-manifest.csv"
+    with open(manifest, "w", newline="", encoding="utf-8") as f:
+        # 'line_id' dropped entirely
+        w = csv.DictWriter(f, fieldnames=["gamescript_index", "quest", "tier",
+                                          "speaker", "subtitle", "wav"])
+        w.writeheader()
+        w.writerow({"gamescript_index": "1", "quest": "Q1", "tier": "1",
+                    "speaker": "Aloy", "subtitle": "x", "wav": "audio/c0.wav"})
+
+    rc = render.main(_render_argv(tmp_path, manifest))
+
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "ERROR" in out
+    assert "line_id" in out          # names the missing column
+    assert str(manifest) in out      # names the offending file
+    assert "deciwaves fw full-reel" in out   # a RUNNABLE command (issue #23)
+
+
 def test_fw_render_main_surfaces_partial_measure_failures(tmp_path, monkeypatch, capsys):
     """A PARTIAL measure failure stays fail-soft (render proceeds), but the
     count must be surfaced like DS/HZD do -- FW used to discard n_failed

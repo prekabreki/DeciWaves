@@ -116,9 +116,33 @@ def build_spine(manifest_rows, bound_tiers=BOUND_TIERS) -> list[RenderItem]:
     return spine
 
 
+# Columns build_spine reads. A manifest missing any of them -- a garbled
+# header, or the wrong CSV entirely -- would otherwise crash build_spine with a
+# raw `KeyError`; validate up front for a clean, actionable error (issue #84,
+# mirroring the #7/#23 message convention).
+REQUIRED_COLS = ("line_id", "gamescript_index", "quest", "tier",
+                 "speaker", "subtitle", "wav")
+
+
+class ManifestError(Exception):
+    """A manifest that can't be rendered (missing/garbled required columns)."""
+
+
 def _load_csv(path):
-    with open(path, newline="", encoding="utf-8") as f:
-        return list(csv.DictReader(f))
+    # utf-8-sig transparently strips a UTF-8 BOM -- PowerShell 5.1's
+    # `Set-Content -Encoding utf8` writes one, which would otherwise fuse into
+    # the first header (a "\ufeffline_id" key) and KeyError in build_spine
+    # (issue #84). BOM-less (plain-utf8) manifests are a subset, unaffected.
+    with open(path, newline="", encoding="utf-8-sig") as f:
+        reader = csv.DictReader(f)
+        fields = reader.fieldnames or []
+        missing = [c for c in REQUIRED_COLS if c not in fields]
+        if missing:
+            raise ManifestError(
+                f"manifest {path} is missing required column(s) "
+                f"{', '.join(missing)} (header has: {', '.join(fields) or 'nothing'}). "
+                f"Expected a full-reel manifest -- run `deciwaves fw full-reel`.")
+        return list(reader)
 
 
 def main(argv=None):
@@ -138,7 +162,11 @@ def main(argv=None):
     a = ap.parse_args(argv)
 
     tiers = {t.strip() for t in a.tiers.split(",") if t.strip()}
-    manifest_rows = _load_csv(a.manifest)
+    try:
+        manifest_rows = _load_csv(a.manifest)
+    except ManifestError as e:
+        print(f"render: ERROR - {e}")
+        return 1
     spine = build_spine(manifest_rows, bound_tiers=tiers)
     print(f"FW reel ({a.stem}): {len(spine)} lines across "
           f"{len({s.episode for s in spine})} episodes")
