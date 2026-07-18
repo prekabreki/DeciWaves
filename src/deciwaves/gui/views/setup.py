@@ -34,7 +34,12 @@ from deciwaves.gui.doctor_model import (
     parse_doctor_payload,
     severity,
 )
-from deciwaves.gui.setup_model import build_setup_argv, parse_setup_summary, parse_setup_warnings
+from deciwaves.gui.setup_model import (
+    build_setup_argv,
+    parse_setup_summary,
+    parse_setup_warnings,
+    tool_severity,
+)
 
 # severity -> (glyph, colour). Matches the global bar's green/red (global_bar.py).
 _SEV_STYLE = {
@@ -65,6 +70,7 @@ class DoctorPanel(QWidget):
         self._game = "ds"
         self._items: list[DoctorItem] = []
         self._payload: dict | None = None
+        self._auto_checked = False
 
         # doctor --json must be parsed from clean stdout (merge_stderr=False)
         self._runner = CaptureRunner(self, merge_stderr=False)
@@ -92,6 +98,22 @@ class DoctorPanel(QWidget):
     def recheck(self) -> bool:
         """Run ``deciwaves doctor --json``. Returns False if a run is already in flight."""
         return self._runner.start([*self._base, "doctor", "--json"])
+
+    def auto_check(self) -> bool:
+        """Run doctor once, the first time the panel becomes visible (#107). Returns True
+        iff this call started the run; later show/hide cycles are no-ops so the panel never
+        re-spawns doctor behind the user's back."""
+        if self._auto_checked:
+            return False
+        self._auto_checked = True
+        return self.recheck()
+
+    def showEvent(self, event) -> None:
+        # On launch a healthy install must show its statuses immediately, not blank "-"
+        # placeholders that read as broken (#107). Deferred to first-show (not __init__) so
+        # widget tests that never show the panel don't spawn a doctor subprocess.
+        super().showEvent(event)
+        self.auto_check()
 
     def render_payload(self, payload: dict) -> None:
         self._payload = payload
@@ -225,6 +247,25 @@ class SetupScreen(QWidget):
     def warnings(self) -> list[str]:
         return list(self._warnings)
 
+    def regrade_against_doctor(self, doctor_items) -> None:
+        """Re-grade the tool rows against doctor's verdict so Setup can't show a red FAILED
+        for a tool Doctor reports present + valid (#110). A tool that failed to re-fetch but
+        is still installed reads as "using existing copy", amber, not a hard error -- the two
+        panels stop contradicting each other. A genuinely missing tool stays a red failure."""
+        by_label = {r.label: r for r in self._rows}
+        for tool in _SETUP_TOOLS:
+            row = by_label.get(tool)
+            if row is None:
+                continue
+            sev = tool_severity(row, doctor_items)
+            status = self._tool_status[tool]
+            # Always (re)set the text, not just on the WARN branch: a later re-check can move
+            # a row WARN -> ERROR, and leaving the softened text would show "using existing
+            # copy" under a red row for a tool that's now gone (#110 review).
+            softened = sev == SEV_WARN and row.failed
+            status.setText("using existing copy (couldn't refresh)" if softened else row.detail)
+            status.setStyleSheet(f"color: {_SEV_STYLE[sev][1]};")
+
     def _on_finished(self, code: int, text: str) -> None:
         self._busy = False
         self._rows = parse_setup_summary(text)
@@ -240,7 +281,9 @@ class SetupScreen(QWidget):
                 status.setStyleSheet("")
                 continue
             status.setText(row.detail)
-            sev = SEV_ERROR if row.failed else (SEV_OK if row.ok else SEV_NEUTRAL)
+            # Same row-only severity rule as tool_severity (doctor not consulted yet); reuse
+            # it so the pre-doctor paint and the post-doctor regrade can't drift (#110 review).
+            sev = tool_severity(row, [])
             status.setStyleSheet(f"color: {_SEV_STYLE[sev][1]};")
         path_rows = [r for r in self._rows if r.label not in _SETUP_TOOLS]
         self._paths_label.setText("\n".join(f"{r.label}: {r.detail}" for r in path_rows))
@@ -257,6 +300,10 @@ class SetupDoctorView(QFrame):
         self.doctor = DoctorPanel(base)
         # first-run flow: a finished setup re-checks doctor toward a green panel (spec §3)
         self.setup.finished.connect(lambda _code: self.doctor.recheck())
+        # ...and every doctor result re-grades the setup rows, so Setup can't show a tool as
+        # FAILED (red) while Doctor shows it ok (green) at the same time (#110).
+        self.doctor.refreshed.connect(
+            lambda: self.setup.regrade_against_doctor(self.doctor.items()))
 
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignTop)

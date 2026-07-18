@@ -7,10 +7,19 @@ of silently drifting -- the same anti-drift discipline as `parsed_stage_args` in
 import os
 
 from deciwaves.cli import setup as cli_setup
+from deciwaves.gui.doctor_model import (
+    SEV_ERROR,
+    SEV_NEUTRAL,
+    SEV_OK,
+    SEV_WARN,
+    DoctorItem,
+)
 from deciwaves.gui.setup_model import (
+    SetupRow,
     build_setup_argv,
     parse_setup_summary,
     parse_setup_warnings,
+    tool_severity,
 )
 
 BASE = ["py", "-m", "deciwaves.cli.main"]
@@ -140,3 +149,58 @@ def test_extracts_oodle_and_hzd_warnings_verbatim(capsys):
 
 def test_no_warnings_when_none_emitted():
     assert parse_setup_warnings("DeciWaves setup summary:\n  ffmpeg  ok  x\n") == []
+
+
+# --- tool_severity: reconcile a setup row against doctor's verdict (#110) ---
+
+def _doctor(name, status="ok", ok=True):
+    return DoctorItem(name=name, ok=ok, status=status, message="", fix="")
+
+
+def test_tool_severity_fetched_row_is_ok():
+    row = SetupRow("ffmpeg", "fetched C:/x/ffmpeg.exe", ok=True, failed=False)
+    assert tool_severity(row, []) == SEV_OK
+
+
+def test_failed_tool_confirmed_present_by_doctor_is_warning_not_error():
+    # #110: setup couldn't (over)write ffmpeg, but doctor confirms it's present + valid,
+    # so the Setup row must NOT read as a hard red FAILED that contradicts Doctor's green.
+    row = SetupRow("ffmpeg", "FAILED: ffmpeg ([Errno 13] denied)", ok=False, failed=True)
+    assert tool_severity(row, [_doctor("ffmpeg")]) == SEV_WARN
+
+
+def test_failed_tool_absent_from_doctor_stays_error():
+    row = SetupRow("ffmpeg", "FAILED: ffmpeg (timed out)", ok=False, failed=True)
+    assert tool_severity(row, []) == SEV_ERROR
+
+
+def test_reconciliation_maps_setup_label_to_doctor_display_name():
+    # setup's "vgmstream" row is doctor's "vgmstream-cli" check (config.TOOLS key<->display).
+    row = SetupRow("vgmstream", "FAILED: vgmstream (denied)", ok=False, failed=True)
+    assert tool_severity(row, [_doctor("vgmstream-cli")]) == SEV_WARN
+
+
+def test_failed_tool_with_doctor_status_not_ok_stays_error():
+    # doctor's `ok` is True even for not_configured/unavailable optional checks; only a
+    # genuine status=="ok" (present + valid) may soften a setup failure.
+    row = SetupRow("ffmpeg", "FAILED", ok=False, failed=True)
+    assert tool_severity(row, [_doctor("ffmpeg", status="not_configured")]) == SEV_ERROR
+
+
+def test_neutral_tool_row_stays_neutral():
+    row = SetupRow("ffmpeg", "-- (not set)", ok=False, failed=False)
+    assert tool_severity(row, []) == SEV_NEUTRAL
+
+
+def test_fetched_tool_doctor_reports_broken_is_error_not_ok():
+    # reverse contradiction (#110 review): setup fetched ok, but doctor says the binary is
+    # broken (AV quarantine / wrong arch) -- follow doctor, don't show Setup green while
+    # Doctor shows the same tool red.
+    row = SetupRow("ffmpeg", "fetched C:/x/ffmpeg.exe", ok=True, failed=False)
+    assert tool_severity(row, [_doctor("ffmpeg", status="broken")]) == SEV_ERROR
+
+
+def test_fetched_tool_stays_ok_when_doctor_is_silent_or_confirms():
+    row = SetupRow("ffmpeg", "fetched C:/x/ffmpeg.exe", ok=True, failed=False)
+    assert tool_severity(row, []) == SEV_OK                      # doctor has no opinion
+    assert tool_severity(row, [_doctor("ffmpeg")]) == SEV_OK     # doctor confirms present
