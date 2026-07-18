@@ -107,6 +107,41 @@ def test_write_stage_coverage_never_raises_on_unwritable_path(tmp_path, capsys):
     assert "iamadir" in out
 
 
+def test_write_stage_coverage_never_raises_on_unserializable_stat(tmp_path, capsys):
+    """The never-raise boundary must also survive a non-JSON-serializable stat
+    (a set, Path, datetime, numpy scalar, circular ref) -- json.dumps raises
+    TypeError/ValueError, not OSError, and that must NOT escape to fail a stage
+    whose real work already succeeded (issue #87 finding 3). No current caller
+    passes such a value, so this pins the contract, not a live crash."""
+    path = str(tmp_path / "coverage.json")
+
+    coverage.write_stage_coverage(path, "bind", {"weird": {1, 2, 3}})  # a set: not JSON
+
+    out = capsys.readouterr().out
+    assert "warning" in out.lower()
+    assert "coverage.json" in out
+    # the bad section was dropped, not half-written; the file is either absent or valid JSON
+    if os.path.exists(path):
+        json.loads(open(path, encoding="utf-8").read())
+
+
+def test_clear_stage_coverage_on_corrupt_file_does_not_claim_rebuild(tmp_path, capsys):
+    """Clearing a section from a CORRUPT file never rewrites it (clear returns
+    once the section is absent from the empty load), so the warning must not
+    claim it rebuilt the file -- that lie recurred on every invalidation while
+    the bytes stayed corrupt (issue #87 finding 6)."""
+    path = str(tmp_path / "coverage.json")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("{not json")
+
+    coverage.clear_stage_coverage(path, "bind")   # no-op on the (unparseable) file
+
+    out = capsys.readouterr().out
+    assert "coverage.json" in out                 # still warns it's unreadable
+    assert "rebuil" not in out.lower()            # ...but doesn't claim to have rebuilt it
+    assert open(path, encoding="utf-8").read() == "{not json"  # bytes untouched
+
+
 def test_clear_stage_coverage_removes_section_keeps_others(tmp_path):
     """Mirror of the done-marker contract (#81): marker absent = not done,
     section absent = coverage unknown. Clearing one stage's section must not

@@ -5,8 +5,6 @@ family that once silently lost ~1,109 story lines (sentence_fw.py's `ff 0f` mark
 history)."""
 import csv
 
-import pytest
-
 from deciwaves.games.hzd import wem_metadata
 from deciwaves.engine.catalog_io import (
     write_core_paths_sidecar, read_core_paths_sidecar, read_core_paths_sidecar_header,
@@ -420,13 +418,15 @@ def test_writes_coverage_artifact_with_story_coverage_and_cores_failed(tmp_path,
                        "story_lines": 2, "with_ab": 1, "coverage_pct": 50.0}
 
 
-def test_failed_run_clears_stale_own_coverage_section(tmp_path, monkeypatch):
-    """The stage rewrites its output CSV early and persists coverage only at
-    the very end -- a failure in between (here: the catalog needed by
-    coverage_report is gone) must not leave the PREVIOUS run's section
-    describing a file whose content just changed (issue #81). Section absent =
-    coverage unknown, exactly like a deleted done-marker; sibling sections
-    stay untouched."""
+def test_coverage_report_failure_is_warn_and_continue_not_a_crash(tmp_path, monkeypatch, capsys):
+    """The metadata CSV is the stage's real product, built WITHOUT the catalog.
+    coverage_report opens --catalog, which a missing or UTF-16-resaved file
+    makes raise AFTER the CSV is written -- and that must NOT abort the stage
+    (issue #87 finding 1): under `hzd run` the crash discards a completed stage
+    (its marker never written). Instead: warn, exit 0, and leave the coverage
+    section absent (= coverage unknown) since it couldn't be computed. The
+    section was cleared on entry (finding 2), so the PRIOR run's stale claim is
+    gone; sibling sections stay untouched."""
     import json
     from deciwaves.engine.coverage import write_stage_coverage
     cores_sidecar = tmp_path / "catalog-cores.txt"
@@ -440,12 +440,91 @@ def test_failed_run_clears_stale_own_coverage_section(tmp_path, monkeypatch):
     cov = tmp_path / "coverage.json"
     write_stage_coverage(str(cov), "wem-metadata", {"coverage_pct": 100.0})
     write_stage_coverage(str(cov), "bind", {"bound": 54564})
+    out = tmp_path / "wem-metadata.csv"
+    missing_catalog = tmp_path / "gone-catalog.csv"  # never created -> coverage_report raises
 
-    missing_catalog = tmp_path / "gone-catalog.csv"  # never created
-    with pytest.raises(FileNotFoundError):
-        wem_metadata.main(_argv(tmp_path, cores_sidecar, catalog=missing_catalog,
-                                extra=("--coverage-out", str(cov))))
+    rc = wem_metadata.main(_argv(tmp_path, cores_sidecar, catalog=missing_catalog,
+                                 out=out, extra=("--coverage-out", str(cov))))
 
+    assert rc == 0                              # real work (the CSV) succeeded
+    rows = list(csv.DictReader(open(out, encoding="utf-8")))
+    assert [r["line_id"] for r in rows] == ["L1"]   # the real product is on disk
+    assert "warning" in capsys.readouterr().out.lower()
     data = json.loads(cov.read_text(encoding="utf-8"))
-    assert "wem-metadata" not in data        # stale claim dropped before the rewrite
+    assert "wem-metadata" not in data        # stale claim dropped, none rewritten
     assert data["bind"] == {"bound": 54564}  # sibling untouched
+
+
+def test_stale_coverage_cleared_when_package_preflight_fails(tmp_path):
+    """clear_stage_coverage runs on ENTRY now -- before the --package preflight
+    -- so a forced re-run (marker deleted) that fails the preflight leaves
+    'coverage unknown', not the prior run's stale claim (issue #87 finding 2:
+    the clear used to sit AFTER the preflight's early return). Siblings kept."""
+    import json
+    cov = tmp_path / "coverage.json"
+    cov.write_text(json.dumps({"wem-metadata": {"story_lines": 99}, "bind": {"x": 1}}),
+                   encoding="utf-8")
+    bad_pkg = tmp_path / "not-a-package"    # nonexistent -> hzd_package_error returns an error
+
+    rc = wem_metadata.main([
+        "--package", str(bad_pkg),
+        "--out", str(tmp_path / "wem-metadata.csv"),
+        "--catalog", str(tmp_path / "catalog.csv"),
+        "--cores", str(tmp_path / "cores.txt"),
+        "--errors", str(tmp_path / "errors.log"),
+        "--coverage-out", str(cov)])
+
+    assert rc == 1                               # preflight failed
+    data = json.loads(cov.read_text(encoding="utf-8"))
+    assert "wem-metadata" not in data            # its stale section dropped on entry
+    assert data == {"bind": {"x": 1}}            # sibling untouched
+
+
+def test_sample_cap_recorded_zero_when_sidecar_trusted(tmp_path, monkeypatch):
+    """A trusted --cores sidecar makes --sample-cap a no-op (no rescan happens),
+    so the persisted sample_cap must be 0 -- a complete scan must not be recorded
+    identically to a capped one (issue #87 finding 5)."""
+    import json
+    cores_sidecar = tmp_path / "catalog-cores.txt"
+    write_core_paths_sidecar(str(cores_sidecar), ["localized/sentences/mq/scene/sentences"])
+    reader = _FakeReader({"localized/sentences/mq/scene/sentences": b"CORE_BYTES"})
+    _patch_profile(monkeypatch, reader)
+    _forbid_rescan(monkeypatch)   # proves the cap governed nothing this run
+    monkeypatch.setattr(
+        wem_metadata, "parse_sentence_media",
+        lambda core_bytes, on_line_error=None, core_path=None: [LineMedia("L1", 0, 100, 530)])
+    catalog = tmp_path / "catalog.csv"
+    _write_minimal_catalog(catalog, ["L1"])
+    cov = tmp_path / "coverage.json"
+
+    rc = wem_metadata.main(_argv(tmp_path, cores_sidecar, catalog=catalog,
+                                 extra=("--sample-cap", "500", "--coverage-out", str(cov))))
+
+    assert rc == 0
+    section = json.loads(cov.read_text(encoding="utf-8"))["wem-metadata"]
+    assert section["sample_cap"] == 0     # cap never took effect (sidecar trusted)
+
+
+def test_sample_cap_recorded_when_rescan_is_capped(tmp_path, monkeypatch):
+    """The inverse of the above: when the sidecar is absent and the pack IS
+    rescanned, the cap that governed that rescan is recorded (the honest
+    capped-scan signal -- issue #87 finding 5)."""
+    import json
+    reader = _FakeReader({"localized/sentences/mq/scene/sentences": b"CORE_BYTES"})
+    _patch_profile(monkeypatch, reader)
+    monkeypatch.setattr(wem_metadata, "harvest_sentence_cores",
+                        lambda fw, sample_cap=None: ["localized/sentences/mq/scene/sentences"])
+    monkeypatch.setattr(
+        wem_metadata, "parse_sentence_media",
+        lambda core_bytes, on_line_error=None, core_path=None: [LineMedia("L1", 0, 100, 530)])
+    catalog = tmp_path / "catalog.csv"
+    _write_minimal_catalog(catalog, ["L1"])
+    cov = tmp_path / "coverage.json"
+    missing_sidecar = tmp_path / "no-such-cores.txt"
+
+    rc = wem_metadata.main(_argv(tmp_path, missing_sidecar, catalog=catalog,
+                                 extra=("--sample-cap", "500", "--coverage-out", str(cov))))
+
+    assert rc == 0
+    section = json.loads(cov.read_text(encoding="utf-8"))["wem-metadata"]
+    assert section["sample_cap"] == 500   # the rescan this run ran WAS capped

@@ -693,3 +693,34 @@ def test_coverage_artifact_records_tier_tally_and_totals(tmp_path, monkeypatch):
     assert set(bind["tiers"]) == {"S", "1", "2", "E", "3"}
     assert bind["rows"] == sum(bind["tiers"].values())
     assert bind["clips_failed"] == 0
+
+
+def test_stale_bind_coverage_cleared_when_package_preflight_fails(tmp_path):
+    """clear_stage_coverage runs on ENTRY now -- before the --package preflight
+    and the circuit-breaker abort -- so a forced re-run (marker deleted) that
+    fails early leaves 'coverage unknown', not the prior run's stale claim
+    (issue #87 finding 2: the clear used to sit AFTER those early returns, so a
+    broken-decoder re-run left 'bind' asserting complete with its marker gone).
+    Sibling sections stay untouched."""
+    import json
+    from deciwaves.engine.coverage import write_stage_coverage
+    catalog, wem_meta, clip_index = _write_fixture(tmp_path)
+    cov = tmp_path / "coverage.json"
+    write_stage_coverage(str(cov), "bind", {"bound": 54564})
+    write_stage_coverage(str(cov), "wem-metadata", {"coverage_pct": 100.0})
+    bad_pkg = tmp_path / "not-a-package"   # nonexistent -> hzd_package_error returns an error
+
+    rc = asr_bind.main([
+        "--package", str(bad_pkg),
+        "--clip-index", str(clip_index),
+        "--wem-metadata", str(wem_meta),
+        "--catalog", str(catalog),
+        "--out", str(tmp_path / "asr-manifest.csv"),
+        "--errors", str(tmp_path / "asr-errors.log"),
+        "--transcripts-out", str(tmp_path / "asr-transcripts.csv"),
+        "--coverage-out", str(cov)])
+
+    assert rc == 1                                            # preflight failed
+    data = json.loads(cov.read_text(encoding="utf-8"))
+    assert "bind" not in data                                # stale section dropped on entry
+    assert data == {"wem-metadata": {"coverage_pct": 100.0}}  # sibling untouched

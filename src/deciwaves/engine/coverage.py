@@ -42,32 +42,43 @@ def _load_object(path: str) -> dict:
     """The artifact's current sections, or ``{}`` (with a warning for anything
     but a simply-missing file). ``ValueError`` covers both ``JSONDecodeError``
     and ``UnicodeDecodeError`` -- a torn write or a tool re-saving the file as
-    UTF-16 (this is a Windows-only project) must mean "rebuild the derived
-    file", never a crash on every subsequent run (issue #81)."""
+    UTF-16 (this is a Windows-only project) must mean "treat the derived file as
+    empty", never a crash on every subsequent run (issue #81).
+
+    The warning says "ignoring it", NOT "rebuilding it": whether a rebuild
+    follows is the CALLER's business -- ``write_stage_coverage`` overwrites (so
+    it rebuilds), but ``clear_stage_coverage`` returns without a write once the
+    section is absent from the empty load, leaving the corrupt bytes in place
+    (issue #87 finding 6 -- the old "rebuilding it" lied on the clear path)."""
     try:
         existing = json.loads(Path(path).read_text(encoding="utf-8"))
     except FileNotFoundError:
         return {}
     except (ValueError, OSError) as exc:
-        print(f"warning: {path} is corrupted or unreadable ({exc}); rebuilding it")
+        print(f"warning: {path} is corrupted or unreadable ({exc}); ignoring it")
         return {}
     if not isinstance(existing, dict):
         print(f"warning: {path} held {type(existing).__name__}, not a JSON "
-              f"object; rebuilding it")
+              f"object; ignoring it")
         return {}
     return existing
 
 
 def _write_object(path: str, obj: dict) -> None:
-    """Atomic replace of the artifact. Never raises on OS-level failure
-    (issue #81): a typo'd --coverage-out (an existing directory, a read-only
-    location) must not fail a stage whose real work already succeeded --
-    coverage is informational, so warn and move on."""
+    """Atomic replace of the artifact. Never raises (issue #81): a stage whose
+    real work already succeeded must not be failed by its coverage bookkeeping.
+
+    Two failure classes are swallowed at this informational boundary:
+    ``OSError`` for an unwritable target (a typo'd --coverage-out pointing at an
+    existing directory or a read-only location), and ``TypeError``/``ValueError``
+    from ``json.dumps`` for a non-serializable stat (a set, ``Path``, datetime,
+    numpy scalar, or a circular ref -- issue #87 finding 3). No current caller
+    passes such a value, so the latter guards the contract, not a live crash."""
     try:
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
         atomic_write(path, lambda tmp: Path(tmp).write_text(
             json.dumps(obj, indent=2) + "\n", encoding="utf-8"))
-    except OSError as exc:
+    except (OSError, TypeError, ValueError) as exc:
         print(f"warning: couldn't write coverage summary {path} ({exc}) -- "
               f"the stage's real outputs are unaffected")
 
