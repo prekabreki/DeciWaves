@@ -52,6 +52,17 @@ _SEV_STYLE = {
 # The tools setup fetches, in summary order -- the rows that get a per-tool spinner.
 _SETUP_TOOLS = ("vgmstream", "VGAudio", "ffmpeg")
 
+# Tool paths, warnings, doctor rows and error/summary lines are exactly what a user needs to
+# paste into an issue when a check fails, so the labels that carry them must be selectable and
+# copyable rather than inert display text (#108).
+_SELECTABLE = Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard
+
+
+def _selectable(label: QLabel) -> QLabel:
+    """Mark ``label`` so its text can be selected with the mouse or keyboard and copied (#108)."""
+    label.setTextInteractionFlags(_SELECTABLE)
+    return label
+
 
 def _clear(layout) -> None:
     while layout.count():
@@ -149,7 +160,7 @@ class DoctorPanel(QWidget):
         marker.setStyleSheet(f"color: {colour};")
         h.addWidget(marker)
         text = item.message if not item.fix else f"{item.message}  —  Fix: {item.fix}"
-        h.addWidget(QLabel(text), 1)
+        h.addWidget(_selectable(QLabel(text)), 1)
         return row
 
     def _on_finished(self, _code: int, text: str) -> None:
@@ -191,9 +202,9 @@ class SetupScreen(QWidget):
         for tool in _SETUP_TOOLS:
             tools_box.addLayout(self._tool_row(tool))
 
-        self._paths_label = QLabel("")   # ds_install / oodle / hzd / fw summary rows
+        self._paths_label = _selectable(QLabel(""))   # ds_install / oodle / hzd / fw summary rows
         self._paths_label.setWordWrap(True)
-        self._warnings_label = QLabel("")
+        self._warnings_label = _selectable(QLabel(""))
         self._warnings_label.setWordWrap(True)
         self._warnings_label.setStyleSheet(f"color: {_SEV_STYLE[SEV_WARN][1]};")
 
@@ -215,7 +226,7 @@ class SetupScreen(QWidget):
         spinner.setRange(0, 0)      # indeterminate -- setup emits no download progress
         spinner.setVisible(False)
         spinner.setMaximumWidth(120)
-        status = QLabel("—")
+        status = _selectable(QLabel("—"))
         self._tool_spinner[tool] = spinner
         self._tool_status[tool] = status
         h.addStretch(1)

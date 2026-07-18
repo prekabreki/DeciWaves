@@ -7,6 +7,9 @@ import sys
 import pytest
 
 pytest.importorskip("PySide6")
+from PySide6.QtCore import Qt  # noqa: E402
+from PySide6.QtWidgets import QLabel  # noqa: E402
+
 from deciwaves.gui.doctor_model import (  # noqa: E402
     SEV_ERROR,
     SEV_NEUTRAL,
@@ -15,6 +18,10 @@ from deciwaves.gui.doctor_model import (  # noqa: E402
     DoctorItem,
 )
 from deciwaves.gui.views.setup import DoctorPanel, SetupDoctorView, SetupScreen  # noqa: E402
+
+
+def _is_selectable(label) -> bool:
+    return bool(label.textInteractionFlags() & Qt.TextSelectableByMouse)
 
 SLOW = "import time\nfor i in range(200):\n print(i, flush=True); time.sleep(0.02)"
 
@@ -59,6 +66,16 @@ def test_doctor_panel_shows_fix_hints_verbatim(qtbot):
     qtbot.addWidget(p)
     p.render_payload(_DOCTOR_PAYLOAD)
     assert "run deciwaves setup --ds-install <root>" in p.rendered_text()
+
+
+def test_doctor_rows_are_selectable(qtbot):
+    # a user who hits an error must be able to select/copy the row text to paste into an
+    # issue -- the message/fix labels carry selectable text, not inert display text (#108).
+    p = DoctorPanel()
+    qtbot.addWidget(p)
+    p.render_payload(_DOCTOR_PAYLOAD)
+    carriers = [lbl for lbl in p._rows.findChildren(QLabel) if "DS install: bad" in lbl.text()]
+    assert carriers and all(_is_selectable(lbl) for lbl in carriers)
 
 
 def test_doctor_panel_regrades_on_game_change_without_a_new_run(qtbot):
@@ -118,6 +135,18 @@ def test_setup_screen_parses_summary_and_warnings_on_finish(qtbot):
         assert s.run() is True
     assert "ffmpeg" in {r.label for r in s.rows()}
     assert any("oo2core" in w for w in s.warnings())
+
+
+def test_setup_output_widgets_are_selectable(qtbot):
+    # tool paths, per-tool status and warning lines are what a user pastes into an issue on a
+    # failed setup, so every output-bearing label must be selectable/copyable (#108).
+    s = SetupScreen(base=[sys.executable, "-c", _FAKE_SETUP])
+    qtbot.addWidget(s)
+    with qtbot.waitSignal(s.finished, timeout=8000):
+        assert s.run() is True
+    assert _is_selectable(s._paths_label)
+    assert _is_selectable(s._warnings_label)
+    assert all(_is_selectable(lbl) for lbl in s._tool_status.values())
 
 
 def test_redownload_button_forces_and_recheck_button_skips_downloads(qtbot, monkeypatch):
