@@ -16,6 +16,7 @@ from deciwaves.gui.library_model import (
     check_all,
     check_none,
     distinct_speakers,
+    empty_state_message,
     has_known_lengths,
     load_lines,
     load_selection,
@@ -437,3 +438,29 @@ def test_availability_by_id_lookup_is_cheap_and_per_row():
     assert availability_by_id(rows, "hzd", bind_done=True) == {"a": True, "b": True}
     # DS: always available
     assert availability_by_id(rows, "ds", bind_done=False) == {"a": True, "b": True}
+
+
+# --- empty / no-results overlay (#121) -------------------------------------
+
+def test_empty_state_message_no_catalog():
+    """No rows loaded at all -> guidance to run Scan (audit H6, #121)."""
+    assert empty_state_message(0, 0) == "No catalog yet - run Scan on the Pipeline tab"
+
+
+def test_empty_state_message_filters_hide_everything():
+    """A non-empty catalog whose filters exclude every row -> a *different* message."""
+    assert empty_state_message(5, 0) == "No lines match - clear filters"
+
+
+def test_empty_state_message_none_when_rows_visible():
+    """Rows to show -> no overlay (the grid speaks for itself)."""
+    assert empty_state_message(5, 3) is None
+    assert empty_state_message(5, 5) is None
+
+
+def test_empty_state_message_uses_ascii_hyphens():
+    """User-facing strings use ASCII hyphens, never em-dashes (repo convention)."""
+    for msg in (empty_state_message(0, 0), empty_state_message(3, 0)):
+        assert msg is not None
+        assert "—" not in msg and "–" not in msg
+        assert " - " in msg

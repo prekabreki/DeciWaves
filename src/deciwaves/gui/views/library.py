@@ -7,7 +7,7 @@ here ▷ only reflects availability and emits an (as-yet unconnected) ``preview_
 from __future__ import annotations
 
 from PySide6.QtCore import QAbstractTableModel, QEvent, QModelIndex, Qt, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -31,6 +31,7 @@ from deciwaves.gui.library_model import (
     check_all,
     check_none,
     distinct_speakers,
+    empty_state_message,
     has_known_lengths,
     is_bind_done,
     load_lines,
@@ -43,9 +44,16 @@ from deciwaves.gui.library_model import (
     visible_rows,
 )
 
-# Gray foreground for a pending/unavailable ▷ (spec §6.2/§6.5). A value type -- safe to build
-# at import time without a running QApplication.
+# Gray foreground for a pending/unavailable preview glyph (spec §6.2/§6.5). A value type --
+# safe to build at import time without a running QApplication.
 _PREVIEW_PENDING_FG = QColor(0x88, 0x88, 0x88)
+
+# Preview affordance glyphs (#109, audit M10): a *filled* triangle reads as a play button, a
+# hollow one as a disabled/pending control -- neither reads as a tree-expand arrow the way the
+# old bare "▷" did. Rendered enlarged (see LibraryView._preview_font) with a pointing-hand
+# cursor over playable rows.
+_PREVIEW_GLYPH_PLAYABLE = "▶"
+_PREVIEW_GLYPH_UNAVAILABLE = "▷"
 
 
 class _TableModel(QAbstractTableModel):
@@ -53,7 +61,7 @@ class _TableModel(QAbstractTableModel):
     view's unchecked set (checked is the default), so a bulk selection command only needs a
     ``dataChanged`` over the checkbox column -- never a full model rebuild."""
 
-    COLS = ["▷", "✓", "id / name", "length", "speaker", "subtitle"]
+    COLS = ["▶", "✓", "id / name", "length", "speaker", "subtitle"]
     COL_PREVIEW, COL_CHECK, COL_ID, COL_LEN, COL_SPEAKER, COL_SUB = range(6)
 
     def __init__(self, view: LibraryView):
@@ -102,9 +110,19 @@ class _TableModel(QAbstractTableModel):
         if role == Qt.CheckStateRole and col == self.COL_CHECK:
             checked = row.line_id not in self._view._unchecked
             return Qt.Checked if checked else Qt.Unchecked
+        # Render the preview glyph enlarged so it reads as a play control, not a tiny
+        # tree-expand triangle (#109). The font is built once on the view.
+        if role == Qt.FontRole and col == self.COL_PREVIEW:
+            return self._view._preview_font
+        if role == Qt.TextAlignmentRole and col == self.COL_PREVIEW:
+            return int(Qt.AlignCenter)
         if role == Qt.DisplayRole:
             if col == self.COL_PREVIEW:
-                return "▷"
+                # Filled ▶ for a playable row, hollow ▷ for one that can't play yet (#109):
+                # the shape itself now carries availability, not just the (subtler) color.
+                return (_PREVIEW_GLYPH_PLAYABLE
+                        if self._view._available.get(row.line_id, False)
+                        else _PREVIEW_GLYPH_UNAVAILABLE)
             if col == self.COL_ID:
                 return row.name or row.line_id
             if col == self.COL_LEN:
@@ -197,6 +215,12 @@ class LibraryView(QWidget):
         selection.addWidget(self._undo_btn)
         selection.addStretch(1)
 
+        # Enlarged font for the ▶/▷ preview glyph (#109): built here, where a QApplication is
+        # guaranteed to exist, so it inherits the app default and just bumps the point size.
+        self._preview_font = QFont()
+        base_pt = self._preview_font.pointSize()
+        self._preview_font.setPointSize(base_pt + 5 if base_pt > 0 else 14)
+
         # --- table ---
         self._model = _TableModel(self)
         self._table = QTableView()
@@ -206,8 +230,24 @@ class LibraryView(QWidget):
         self._table.setSortingEnabled(False)  # we sort the model ourselves (None-last)
         header = self._table.horizontalHeader()
         header.setSectionsClickable(True)
+        header.setSectionResizeMode(_TableModel.COL_PREVIEW, QHeaderView.Fixed)
+        self._table.setColumnWidth(_TableModel.COL_PREVIEW, 44)  # roomy click target (#109)
         header.setSectionResizeMode(_TableModel.COL_SUB, QHeaderView.Stretch)
         header.sectionClicked.connect(self._on_header_clicked)
+
+        # Empty / no-results overlay (#121): a centered message floated over the viewport when
+        # the grid would otherwise be blank -- distinguishes "no catalog yet" from "filters hid
+        # everything". Parented to the viewport so it paints above the (empty) grid.
+        self._empty_overlay = QLabel("", self._table.viewport())
+        self._empty_overlay.setAlignment(Qt.AlignCenter)
+        self._empty_overlay.setWordWrap(True)
+        self._empty_overlay.setStyleSheet("color: #888888;")
+        self._empty_overlay.hide()
+
+        # Pointing-hand cursor over a playable ▶ (#109): needs per-pixel mouse tracking so the
+        # cursor updates on hover, not only on click.
+        self._table.viewport().setMouseTracking(True)
+        self._table.viewport().installEventFilter(self)
 
         self._status = QLabel("")
 
@@ -299,6 +339,18 @@ class LibraryView(QWidget):
             self._sort_key, self._sort_desc)
         self._model.set_rows(self._visible)
         self._update_status()
+        self._update_overlay()
+
+    def _update_overlay(self) -> None:
+        """Show/hide the empty-state message (#121) for the current row counts. The message
+        choice is the Qt-free ``empty_state_message`` -- here we only place and toggle it."""
+        msg = empty_state_message(self.total_count(), self.visible_count())
+        if msg is None:
+            self._empty_overlay.hide()
+            return
+        self._empty_overlay.setText(msg)
+        self._empty_overlay.resize(self._table.viewport().size())
+        self._empty_overlay.show()
 
     def _on_header_clicked(self, section: int) -> None:
         key = self._SORT_KEYS.get(section)
@@ -361,8 +413,9 @@ class LibraryView(QWidget):
 
     def eventFilter(self, obj, event):
         """Keyboard on the table (spec §6.5): Enter/Return previews the current row (same
-        availability gate as clicking ▷); Space toggles the current row's checkbox from any
-        column, not just the check column."""
+        availability gate as clicking ▶); Space toggles the current row's checkbox from any
+        column, not just the check column. On the viewport we also keep the empty-state overlay
+        sized to it (#121) and show a pointing-hand cursor while hovering a playable ▶ (#109)."""
         if obj is self._table and event.type() == QEvent.KeyPress:
             key = event.key()
             if key in (Qt.Key_Return, Qt.Key_Enter):
@@ -371,7 +424,27 @@ class LibraryView(QWidget):
             if key == Qt.Key_Space:
                 self._toggle_current_row_check()
                 return True
+        elif obj is self._table.viewport():
+            if event.type() == QEvent.Resize:
+                self._empty_overlay.resize(event.size())
+            elif event.type() == QEvent.MouseMove:
+                self._update_preview_cursor(event.position().toPoint())
         return super().eventFilter(obj, event)
+
+    def _update_preview_cursor(self, pos) -> None:
+        """Pointing-hand cursor while hovering a *playable* preview cell, the arrow otherwise
+        (#109) -- makes the ▶ read as a clickable control. An unavailable ▷ keeps the arrow,
+        matching its no-op click."""
+        idx = self._table.indexAt(pos)
+        playable = (
+            idx.isValid()
+            and idx.column() == _TableModel.COL_PREVIEW
+            and self._available.get(self._model.row_at(idx.row()).line_id, False)
+        )
+        if playable:
+            self._table.viewport().setCursor(Qt.PointingHandCursor)
+        else:
+            self._table.viewport().unsetCursor()
 
     def _current_row(self) -> LineRow | None:
         idx = self._table.currentIndex()

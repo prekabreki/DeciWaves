@@ -10,7 +10,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 from PySide6.QtCore import QEvent, Qt  # noqa: E402
-from PySide6.QtGui import QKeyEvent  # noqa: E402
+from PySide6.QtGui import QFont, QKeyEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from deciwaves.gui.library_model import load_selection  # noqa: E402
@@ -255,6 +255,80 @@ def test_preview_column_availability_ds_and_fw_available(qtbot, tmp_path):
     idx = v._model.index(0, v._model.COL_PREVIEW)
     assert v._model.data(idx, Qt.ForegroundRole) is None
     assert v._model.data(idx, Qt.ToolTipRole) is None
+
+
+def test_empty_overlay_shows_no_catalog_when_total_zero(qtbot, tmp_path):
+    """No artifact on disk -> the table isn't a blank grid; it carries the 'run Scan'
+    guidance (#121, audit H6)."""
+    ws = str(tmp_path)  # no catalog written
+    v = LibraryView()
+    qtbot.addWidget(v)
+    v.refresh("ds", ws)
+    assert v.total_count() == 0
+    assert v._empty_overlay.isVisibleTo(v) is True
+    assert v._empty_overlay.text() == "No catalog yet - run Scan on the Pipeline tab"
+
+
+def test_empty_overlay_shows_no_results_when_filters_hide_everything(qtbot, tmp_path):
+    """A loaded catalog whose filters exclude every row shows the *no-results* message, which
+    is distinct from the *no-catalog* message (#121)."""
+    ws = str(tmp_path)
+    _write_ds_catalog(ws, [_cat_row(line_id="a", subtitle_en="hello")])
+    v = LibraryView()
+    qtbot.addWidget(v)
+    v.refresh("ds", ws)
+    v._search.setText("no-such-line")
+    assert v.total_count() == 1 and v.visible_count() == 0
+    assert v._empty_overlay.isVisibleTo(v) is True
+    assert v._empty_overlay.text() == "No lines match - clear filters"
+
+
+def test_empty_overlay_hidden_when_rows_visible(qtbot, tmp_path):
+    """Rows to show -> the overlay stays hidden and the grid speaks for itself (#121)."""
+    ws = str(tmp_path)
+    _write_ds_catalog(ws, [_cat_row(line_id="a")])
+    v = LibraryView()
+    qtbot.addWidget(v)
+    v.refresh("ds", ws)
+    assert v.visible_count() == 1
+    assert v._empty_overlay.isVisibleTo(v) is False
+
+
+def test_preview_glyph_filled_for_playable_hollow_for_unavailable(qtbot, tmp_path):
+    """The ▶ affordance reads as a play control: a *filled* triangle on a playable row (DS is
+    always playable) and a *hollow* one on an unavailable row (HZD pre-bind) -- shape, not just
+    color, now carries availability (#109, audit M10)."""
+    ws = str(tmp_path)
+    _write_ds_catalog(ws, [_cat_row(line_id="a")])
+    _write_csv(os.path.join(ws, "out", "hzd", "catalog.csv"), DS_CAT,
+               [_cat_row(line_id="h1", wem_path_en="")])
+
+    v = LibraryView()
+    qtbot.addWidget(v)
+    v.refresh("ds", ws)  # DS: available
+    ds_glyph = v._model.data(v._model.index(0, v._model.COL_PREVIEW), Qt.DisplayRole)
+    assert ds_glyph == "▶"
+
+    v.refresh("hzd", ws)  # HZD pre-bind: unavailable
+    hzd_glyph = v._model.data(v._model.index(0, v._model.COL_PREVIEW), Qt.DisplayRole)
+    assert hzd_glyph == "▷"
+    assert ds_glyph != hzd_glyph
+
+
+def test_preview_glyph_rendered_enlarged(qtbot, tmp_path):
+    """The preview cell asks for an enlarged font so it doesn't read as a tiny tree triangle
+    (#109). We assert the model returns a bigger point size for the preview column than the
+    view's default -- pragmatic proxy for 'rendered larger'."""
+    ws = str(tmp_path)
+    _write_ds_catalog(ws, [_cat_row(line_id="a")])
+    v = LibraryView()
+    qtbot.addWidget(v)
+    v.refresh("ds", ws)
+    font = v._model.data(v._model.index(0, v._model.COL_PREVIEW), Qt.FontRole)
+    assert font is not None
+    assert font.pointSize() > QFont().pointSize()  # bigger than the app-default glyph size
+    # a non-preview column carries no font override
+    assert v._model.data(v._model.index(0, v._model.COL_ID), Qt.FontRole) is None
 
 
 def test_filter_state_resets_on_game_change_but_persists_same_game(qtbot, tmp_path):

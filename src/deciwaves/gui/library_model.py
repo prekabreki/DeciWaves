@@ -435,3 +435,22 @@ def preview_unavailable_tooltip(game: str, *, bind_done: bool) -> str:
     if game == "fw":
         return "No audio for this line"
     return "Preview unavailable"
+
+
+# --- empty / no-results overlay (#121, audit H6) ---------------------------
+
+def empty_state_message(total: int, visible: int) -> str | None:
+    """The message the Library should overlay on an otherwise-blank grid, or ``None`` when
+    there are rows to show (audit H6, #121). Two distinct states are worth different guidance:
+
+    - ``total == 0``  -- nothing has been loaded at all (no catalog artifact yet).
+    - ``visible == 0`` (with ``total > 0``) -- there is a catalog, but the current filters
+      exclude every row.
+
+    ASCII hyphens only in the returned text (no em-dashes), per the repo's user-facing
+    string convention."""
+    if total == 0:
+        return "No catalog yet - run Scan on the Pipeline tab"
+    if visible == 0:
+        return "No lines match - clear filters"
+    return None
