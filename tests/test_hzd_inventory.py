@@ -101,3 +101,89 @@ def test_harvest_skips_oversized_and_undersized_by_locator_length():
 
     too_small = _make_fake_fw([("a.core", 11, payload)])
     assert harvest_sentence_cores(too_small) == []
+
+
+# ---------------------------------------------------------------------------
+# Read-failure observability (issue #66): a core whose body read raises must not
+# vanish silently -- the harvester reports it through an on_read_error callback so
+# callers can log + count it (the one drop the GUI issues panel couldn't see).
+# ---------------------------------------------------------------------------
+
+class _RaisingFakeHzdPackage(_FakeHzdPackage):
+    """A fake whose read_by_hash raises for a designated set of path hashes."""
+
+    def __init__(self, locators, blobs, raise_for):
+        super().__init__(locators, blobs)
+        self._raise_for = raise_for
+
+    def read_by_hash(self, path_hash: int) -> bytes:
+        if path_hash in self._raise_for:
+            raise OSError(f"boom {path_hash:#x}")
+        return super().read_by_hash(path_hash)
+
+
+def test_harvest_invokes_on_read_error_for_unreadable_cores():
+    from deciwaves.games.hzd.inventory import harvest_sentence_cores
+
+    good = b"localized/sentences/mq01_x/mq010_cut/sentences\x00pad"
+    base = _make_fake_fw([("a.core", len(good), good), ("b.core", 64, b"x" * 64)])
+    bad_hash = file_hash("synthetic/entry_1.core")
+    fw = _RaisingFakeHzdPackage(base.locators, base._blobs, {bad_hash})
+
+    seen: list[tuple[int, Exception]] = []
+    paths = harvest_sentence_cores(fw, on_read_error=lambda h, e: seen.append((h, e)))
+
+    # the readable core is still harvested; the unreadable one is reported, not dropped
+    assert paths == ["localized/sentences/mq01_x/mq010_cut/sentences"]
+    assert len(seen) == 1
+    assert seen[0][0] == bad_hash
+    assert isinstance(seen[0][1], OSError)
+
+
+def test_harvest_without_callback_still_skips_unreadable_cores():
+    """Backward compatibility: no callback => a failed read is skipped silently
+    (today's behavior), never propagated as a crash."""
+    from deciwaves.games.hzd.inventory import harvest_sentence_cores
+
+    good = b"localized/sentences/mq01_x/mq010_cut/sentences\x00pad"
+    base = _make_fake_fw([("a.core", len(good), good), ("b.core", 64, b"x" * 64)])
+    bad_hash = file_hash("synthetic/entry_1.core")
+    fw = _RaisingFakeHzdPackage(base.locators, base._blobs, {bad_hash})
+
+    assert harvest_sentence_cores(fw) == ["localized/sentences/mq01_x/mq010_cut/sentences"]
+
+
+def test_format_read_error_is_a_single_tab_safe_line():
+    """The errors log is tab-delimited (field) and newline-delimited (record), parsed
+    per line by the GUI issues panel (spec §5.4). An exception message that itself
+    embeds a tab/newline must not split one failure into a malformed multi-line record
+    (review finding #2)."""
+    from deciwaves.games.hzd.inventory import format_read_error
+
+    line = format_read_error(0x1234, ValueError("bad\nmulti\tline\r\n"))
+    assert line.endswith("\n") and line.count("\n") == 1   # exactly one physical record
+    assert "\r" not in line
+    assert line.count("\t") == 1                            # only the field delimiter
+    assert line.startswith("harvest:0x")
+    assert "ValueError" in line and "bad multi line" in line  # message preserved, flattened
+
+
+def test_write_harvest_read_errors_dedups_by_skip_tags():
+    """The shared writer (single owner of the collector/write format across catalog +
+    wem-metadata, review finding #3) skips any error whose tag is in skip_tags -- how
+    catalog's append-mode log avoids growing across resumes."""
+    import io
+    from deciwaves.games.hzd.inventory import (
+        write_harvest_read_errors, read_error_tag,
+    )
+
+    buf = io.StringIO()
+    errors = [(0x1111, OSError("a")), (0x2222, ValueError("b"))]
+    write_harvest_read_errors(buf, errors, skip_tags={read_error_tag(0x1111)})
+    out = buf.getvalue()
+    assert read_error_tag(0x2222) in out
+    assert read_error_tag(0x1111) not in out   # already logged -> skipped
+
+    buf2 = io.StringIO()
+    write_harvest_read_errors(buf2, errors)     # no skips -> both written
+    assert buf2.getvalue().count("harvest:") == 2

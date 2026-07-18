@@ -146,7 +146,7 @@ def test_catalog_main_writes_cores_sidecar_with_dialogue_only_paths(tmp_path, mo
     reader = _FakeReader()
     monkeypatch.setattr(profile_mod, "build_profile", lambda package: _FakeProfile(reader))
     monkeypatch.setattr(inventory_mod, "harvest_sentence_cores",
-                         lambda fw, sample_cap=None: harvested)
+                         lambda fw, sample_cap=None, on_read_error=None: harvested)
     monkeypatch.setattr(catalog_mod, "parse_sentences_fw",
                          lambda core_bytes, on_line_error=None, core_path=None: [])
 
@@ -187,7 +187,7 @@ def test_catalog_main_sample_cap_leaves_existing_cores_sidecar_untouched(tmp_pat
     reader = _FakeReader()
     monkeypatch.setattr(profile_mod, "build_profile", lambda package: _FakeProfile(reader))
     monkeypatch.setattr(inventory_mod, "harvest_sentence_cores",
-                         lambda fw, sample_cap=None: ["localized/sentences/capped/scene/sentences"])
+                         lambda fw, sample_cap=None, on_read_error=None: ["localized/sentences/capped/scene/sentences"])
     monkeypatch.setattr(catalog_mod, "parse_sentences_fw",
                          lambda core_bytes, on_line_error=None, core_path=None: [])
 
@@ -225,7 +225,7 @@ def test_catalog_main_uncapped_still_writes_cores_sidecar(tmp_path, monkeypatch)
     reader = _FakeReader()
     monkeypatch.setattr(profile_mod, "build_profile", lambda package: _FakeProfile(reader))
     monkeypatch.setattr(inventory_mod, "harvest_sentence_cores",
-                         lambda fw, sample_cap=None: ["localized/sentences/full/scene/sentences"])
+                         lambda fw, sample_cap=None, on_read_error=None: ["localized/sentences/full/scene/sentences"])
     monkeypatch.setattr(catalog_mod, "parse_sentences_fw",
                          lambda core_bytes, on_line_error=None, core_path=None: [])
 
@@ -248,6 +248,89 @@ def test_catalog_main_uncapped_still_writes_cores_sidecar(tmp_path, monkeypatch)
     assert read_core_paths_sidecar(str(cores_sidecar)) == ["localized/sentences/full/scene/sentences"]
 
 
+def test_catalog_main_records_harvest_read_failures(tmp_path, monkeypatch, capsys):
+    """Issue #66: cores whose body read fails during the harvest content-scan must be
+    recorded (errors log) and counted in the end-of-run summary -- not dropped silently
+    (the one drop the GUI issues panel couldn't otherwise see, spec §5.4)."""
+    import deciwaves.games.hzd.profile as profile_mod
+    import deciwaves.games.hzd.inventory as inventory_mod
+    from deciwaves.games.hzd import catalog as catalog_mod
+
+    def fake_harvest(fw, sample_cap=None, on_read_error=None):
+        # simulate two unreadable cores surfaced via the callback the harvester exposes
+        if on_read_error is not None:
+            on_read_error(0x1111, OSError("boom-a"))
+            on_read_error(0x2222, ValueError("boom-b"))
+        return ["localized/sentences/mq/scene/sentences"]
+
+    reader = _FakeReader()
+    monkeypatch.setattr(profile_mod, "build_profile", lambda package: _FakeProfile(reader))
+    monkeypatch.setattr(inventory_mod, "harvest_sentence_cores", fake_harvest)
+    monkeypatch.setattr(catalog_mod, "parse_sentences_fw",
+                        lambda core_bytes, on_line_error=None, core_path=None: [])
+
+    fake_pkg = tmp_path / "package"; fake_pkg.mkdir()
+    (fake_pkg / "PackFileLocators.bin").write_bytes(b"x")
+
+    errors_log = tmp_path / "catalog-errors.log"
+    rc = catalog_mod.main([
+        "--package", str(fake_pkg),
+        "--out", str(tmp_path / "catalog.csv"),
+        "--errors", str(errors_log),
+        "--processed", str(tmp_path / "catalog-processed.txt"),
+        "--cores-out", str(tmp_path / "catalog-cores.txt"),
+    ])
+    assert rc == 0
+    err_text = errors_log.read_text(encoding="utf-8")
+    assert "harvest:" in err_text            # tagged distinctly from per-core parse failures
+    assert "boom-a" in err_text and "boom-b" in err_text
+    printed = capsys.readouterr().out
+    assert "2 unreadable during harvest" in printed
+
+
+def test_catalog_harvest_read_failures_do_not_grow_across_resumes(tmp_path, monkeypatch, capsys):
+    """A persistently-unreadable core must have exactly ONE harvest entry in
+    catalog-errors.log, not one appended per resume. The harvest re-scans the whole
+    pack every run (unlike the per-core loop, which skips cores already in the
+    processed sidecar), so an append-mode log would otherwise duplicate the same
+    'harvest:<hash>' line on every resume -- the FW-extract non-growth contract
+    (test_extract_errors_log_does_not_grow_across_resumes...), applied here."""
+    import deciwaves.games.hzd.profile as profile_mod
+    import deciwaves.games.hzd.inventory as inventory_mod
+    from deciwaves.games.hzd import catalog as catalog_mod
+
+    def fake_harvest(fw, sample_cap=None, on_read_error=None):
+        # the SAME core fails to read on every run (a persistent, deterministic failure)
+        if on_read_error is not None:
+            on_read_error(0x1111, OSError("boom-persistent"))
+        return ["localized/sentences/mq/scene/sentences"]
+
+    reader = _FakeReader()
+    monkeypatch.setattr(profile_mod, "build_profile", lambda package: _FakeProfile(reader))
+    monkeypatch.setattr(inventory_mod, "harvest_sentence_cores", fake_harvest)
+    monkeypatch.setattr(catalog_mod, "parse_sentences_fw",
+                        lambda core_bytes, on_line_error=None, core_path=None: [])
+
+    fake_pkg = tmp_path / "package"; fake_pkg.mkdir()
+    (fake_pkg / "PackFileLocators.bin").write_bytes(b"x")
+    errors_log = tmp_path / "catalog-errors.log"
+    argv = [
+        "--package", str(fake_pkg),
+        "--out", str(tmp_path / "catalog.csv"),
+        "--errors", str(errors_log),
+        "--processed", str(tmp_path / "catalog-processed.txt"),
+        "--cores-out", str(tmp_path / "catalog-cores.txt"),
+    ]
+
+    for _ in range(3):   # first run + two resumes
+        assert catalog_mod.main(argv) == 0
+
+    harvest_lines = [ln for ln in errors_log.read_text(encoding="utf-8").splitlines()
+                     if ln.startswith("harvest:")]
+    assert len(harvest_lines) == 1, harvest_lines
+    assert "boom-persistent" in harvest_lines[0]
+
+
 def test_catalog_main_uncapped_cores_sidecar_carries_locators_header(tmp_path, monkeypatch):
     """Issue #45: an uncapped run's cores sidecar must carry a locators-fingerprint
     header wem_metadata can check for staleness against a patched pack."""
@@ -258,7 +341,7 @@ def test_catalog_main_uncapped_cores_sidecar_carries_locators_header(tmp_path, m
     reader = _FakeReader()
     monkeypatch.setattr(profile_mod, "build_profile", lambda package: _FakeProfile(reader))
     monkeypatch.setattr(inventory_mod, "harvest_sentence_cores",
-                         lambda fw, sample_cap=None: ["localized/sentences/full/scene/sentences"])
+                         lambda fw, sample_cap=None, on_read_error=None: ["localized/sentences/full/scene/sentences"])
     monkeypatch.setattr(catalog_mod, "parse_sentences_fw",
                          lambda core_bytes, on_line_error=None, core_path=None: [])
 
@@ -292,7 +375,7 @@ def test_catalog_main_sample_capped_cores_sidecar_unchanged_including_header(tmp
     reader = _FakeReader()
     monkeypatch.setattr(profile_mod, "build_profile", lambda package: _FakeProfile(reader))
     monkeypatch.setattr(inventory_mod, "harvest_sentence_cores",
-                         lambda fw, sample_cap=None: ["localized/sentences/capped/scene/sentences"])
+                         lambda fw, sample_cap=None, on_read_error=None: ["localized/sentences/capped/scene/sentences"])
     monkeypatch.setattr(catalog_mod, "parse_sentences_fw",
                          lambda core_bytes, on_line_error=None, core_path=None: [])
 
@@ -337,7 +420,7 @@ def test_catalog_main_resumes_after_zero_byte_out(tmp_path, monkeypatch):
     reader = _FakeReader()
     monkeypatch.setattr(profile_mod, "build_profile", lambda package: _FakeProfile(reader))
     monkeypatch.setattr(inventory_mod, "harvest_sentence_cores",
-                         lambda fw, sample_cap=None: ["localized/sentences/mq/scene/sentences"])
+                         lambda fw, sample_cap=None, on_read_error=None: ["localized/sentences/mq/scene/sentences"])
     monkeypatch.setattr(catalog_mod, "parse_sentences_fw",
                          lambda core_bytes, on_line_error=None, core_path=None: [_FakeLine()])
 
@@ -369,7 +452,7 @@ def test_catalog_main_accepts_bare_filename_out(tmp_path, monkeypatch):
 
     reader = _FakeReader()
     monkeypatch.setattr(profile_mod, "build_profile", lambda package: _FakeProfile(reader))
-    monkeypatch.setattr(inventory_mod, "harvest_sentence_cores", lambda fw, sample_cap=None: [])
+    monkeypatch.setattr(inventory_mod, "harvest_sentence_cores", lambda fw, sample_cap=None, on_read_error=None: [])
     monkeypatch.setattr(catalog_mod, "parse_sentences_fw",
                          lambda core_bytes, on_line_error=None, core_path=None: [])
 

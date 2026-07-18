@@ -161,7 +161,7 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     from deciwaves.games.hzd.profile import build_profile, hzd_package_error
-    from deciwaves.games.hzd.inventory import harvest_sentence_cores
+    from deciwaves.games.hzd.inventory import harvest_sentence_cores, write_harvest_read_errors
     err = hzd_package_error(args.package)
     if err:
         print(err)
@@ -171,7 +171,15 @@ def main(argv=None):
 
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     print("harvesting sentence-core paths (content scan)...", flush=True)
-    harvested = harvest_sentence_cores(fw, sample_cap=args.sample_cap or None)
+    # Cores whose body read fails during the harvest scan used to vanish silently
+    # (issue #66). Capture them so they land in the errors log + end-of-run summary,
+    # like every other drop the GUI issues panel surfaces (spec §5.4). Only path
+    # hashes are available here -- the harvest works precisely because it does NOT
+    # have path strings for these locator records.
+    harvest_read_errors: list[tuple[int, Exception]] = []
+    harvested = harvest_sentence_cores(
+        fw, sample_cap=args.sample_cap or None,
+        on_read_error=lambda h, exc: harvest_read_errors.append((h, exc)))
     paths = select_sentence_cores(harvested)
     # Persist this run's resolved dialogue-core list so wem-metadata (--cores) can
     # reuse it instead of repeating this same full-pack scan (issue #31) -- BUT NOT
@@ -202,6 +210,14 @@ def main(argv=None):
     # (but before writing) the CSV must still get a header, else the first data
     # row silently becomes the fieldnames on the next load (fcc0d1c, finding 9).
     new_file = not os.path.isfile(args.out) or os.path.getsize(args.out) == 0
+    # Harvest failures are re-derived on every run (the content scan isn't resume-gated
+    # the way the per-core loop is, so it re-fails the same cores each time). Dedup
+    # against what the append-mode log already holds, or a persistent failure would gain
+    # one duplicate line per resume (issue #66; the FW-extract non-growth contract).
+    already_logged: set[str] = set()
+    if os.path.isfile(args.errors):
+        with open(args.errors, encoding="utf-8") as fexist:
+            already_logged = {ln.split("\t", 1)[0] for ln in fexist if ln.startswith("harvest:")}
     cores_ok = cores_failed = total_lines = 0
     with open(args.out, "a", newline="", encoding="utf-8") as fout, \
          open(args.errors, "a", encoding="utf-8") as ferr, \
@@ -209,6 +225,12 @@ def main(argv=None):
         writer = csv.DictWriter(fout, fieldnames=CSV_COLUMNS)
         if new_file:
             writer.writeheader()
+        # Record harvest-scan read failures (issue #66), tagged "harvest:<hash>" to set
+        # them apart from the per-core parse failures written below (which key on the
+        # readable core_path). Skip any a previous run already logged (see the dedup
+        # note above); the summary count below stays per-run.
+        write_harvest_read_errors(ferr, harvest_read_errors, skip_tags=already_logged)
+        ferr.flush()
         for core_path in todo:
             cat, scene = classify_hzd(core_path)
             line_errs = []
@@ -236,7 +258,8 @@ def main(argv=None):
             fproc.write(core_path + "\n"); fproc.flush()
             cores_ok += 1
             total_lines += len(rows)
-    print(f"done: {cores_ok} cores, {cores_failed} failed, {total_lines} lines -> {args.out}")
+    print(f"done: {cores_ok} cores, {cores_failed} failed, {total_lines} lines, "
+          f"{len(harvest_read_errors)} unreadable during harvest -> {args.out}")
     return 0
 
 

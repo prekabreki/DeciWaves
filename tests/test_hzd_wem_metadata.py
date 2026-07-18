@@ -147,7 +147,7 @@ def test_falls_back_to_rescan_and_still_excludes_simpletext_when_sidecar_missing
 
     calls = {"n": 0}
 
-    def _fake_harvest(fw, sample_cap=None):
+    def _fake_harvest(fw, sample_cap=None, on_read_error=None):
         calls["n"] += 1
         return harvested
     monkeypatch.setattr(wem_metadata, "harvest_sentence_cores", _fake_harvest)
@@ -169,6 +169,41 @@ def test_falls_back_to_rescan_and_still_excludes_simpletext_when_sidecar_missing
     assert reader.read_calls == ["localized/sentences/mq/scene/sentences"]
     printed = capsys.readouterr().out.lower()
     assert "rescan" in printed
+
+
+def test_rescan_records_harvest_read_failures(tmp_path, monkeypatch, capsys):
+    """Issue #66 / spec §5.4: the fallback rescan reaches the same harvest content-scan
+    catalog does; a core whose body read fails there must be recorded in the errors log
+    and counted in the summary, not silently dropped."""
+    harvested = ["localized/sentences/mq/scene/sentences"]
+    reader = _FakeReader({"localized/sentences/mq/scene/sentences": b"CORE_BYTES"})
+    _patch_profile(monkeypatch, reader)
+
+    def _fake_harvest(fw, sample_cap=None, on_read_error=None):
+        if on_read_error is not None:
+            on_read_error(0x1111, OSError("boom-a"))
+            on_read_error(0x2222, ValueError("boom-b"))
+        return harvested
+    monkeypatch.setattr(wem_metadata, "harvest_sentence_cores", _fake_harvest)
+    monkeypatch.setattr(
+        wem_metadata, "parse_sentence_media",
+        lambda core_bytes, on_line_error=None, core_path=None: [LineMedia("L1", 0, 100, 530)])
+
+    missing_sidecar = tmp_path / "no-such-cores.txt"
+    catalog = tmp_path / "catalog.csv"
+    _write_minimal_catalog(catalog, ["L1"])
+    out = tmp_path / "wem-metadata.csv"
+    errors = tmp_path / "wem-metadata-errors.log"
+
+    rc = wem_metadata.main(
+        _argv(tmp_path, missing_sidecar, catalog=catalog, out=out, errors=errors))
+
+    assert rc == 0
+    err_text = errors.read_text(encoding="utf-8")
+    assert "harvest:" in err_text
+    assert "boom-a" in err_text and "boom-b" in err_text
+    printed = capsys.readouterr().out
+    assert "2 unreadable during harvest" in printed
 
 
 # ---------------------------------------------------------------------------
@@ -214,7 +249,7 @@ def test_mismatched_locators_header_warns_ignores_and_regenerates(tmp_path, monk
     harvested = ["localized/sentences/fresh/scene/sentences"]
     reader = _FakeReader({"localized/sentences/fresh/scene/sentences": b"CORE_BYTES"})
     _patch_profile(monkeypatch, reader)
-    monkeypatch.setattr(wem_metadata, "harvest_sentence_cores", lambda fw, sample_cap=None: harvested)
+    monkeypatch.setattr(wem_metadata, "harvest_sentence_cores", lambda fw, sample_cap=None, on_read_error=None: harvested)
     monkeypatch.setattr(
         wem_metadata, "parse_sentence_media",
         lambda core_bytes, on_line_error=None, core_path=None: [LineMedia("L1", 0, 100, 530)])
@@ -252,7 +287,7 @@ def test_mismatched_header_with_sample_cap_does_not_overwrite_sidecar(tmp_path, 
     harvested = ["localized/sentences/fresh/scene/sentences"]
     reader = _FakeReader({"localized/sentences/fresh/scene/sentences": b"CORE_BYTES"})
     _patch_profile(monkeypatch, reader)
-    monkeypatch.setattr(wem_metadata, "harvest_sentence_cores", lambda fw, sample_cap=None: harvested)
+    monkeypatch.setattr(wem_metadata, "harvest_sentence_cores", lambda fw, sample_cap=None, on_read_error=None: harvested)
     monkeypatch.setattr(
         wem_metadata, "parse_sentence_media",
         lambda core_bytes, on_line_error=None, core_path=None: [LineMedia("L1", 0, 100, 530)])
@@ -513,7 +548,7 @@ def test_sample_cap_recorded_when_rescan_is_capped(tmp_path, monkeypatch):
     reader = _FakeReader({"localized/sentences/mq/scene/sentences": b"CORE_BYTES"})
     _patch_profile(monkeypatch, reader)
     monkeypatch.setattr(wem_metadata, "harvest_sentence_cores",
-                        lambda fw, sample_cap=None: ["localized/sentences/mq/scene/sentences"])
+                        lambda fw, sample_cap=None, on_read_error=None: ["localized/sentences/mq/scene/sentences"])
     monkeypatch.setattr(
         wem_metadata, "parse_sentence_media",
         lambda core_bytes, on_line_error=None, core_path=None: [LineMedia("L1", 0, 100, 530)])

@@ -40,7 +40,7 @@ from deciwaves.engine.coverage import (
     clear_stage_coverage, default_coverage_path, write_stage_coverage,
 )
 from deciwaves.games.hzd.profile import build_profile, cores_sidecar_header
-from deciwaves.games.hzd.inventory import harvest_sentence_cores
+from deciwaves.games.hzd.inventory import harvest_sentence_cores, write_harvest_read_errors
 from deciwaves.games.hzd.catalog import select_sentence_cores
 from deciwaves.games.hzd.sentence_fw import parse_sentence_media
 
@@ -144,11 +144,17 @@ def main(argv=None):
                 paths = None
                 stale = True
 
+    harvest_read_errors: list[tuple[int, Exception]] = []
     if paths is None:
         if not stale:
             print(f"wem-metadata: no core-path sidecar at {a.cores} -- rescanning the pack "
                   f"(run `hzd catalog` first to skip this full-pack scan)", flush=True)
-        harvested = harvest_sentence_cores(fw, sample_cap=a.sample_cap or None)
+        # The fallback rescan reaches the same harvest content-scan catalog does, so it
+        # inherits the same silent-drop hazard (issue #66 / spec §5.4): record read
+        # failures instead of losing them.
+        harvested = harvest_sentence_cores(
+            fw, sample_cap=a.sample_cap or None,
+            on_read_error=lambda h, exc: harvest_read_errors.append((h, exc)))
         paths = select_sentence_cores(harvested)
         rescanned = True
         if stale:
@@ -166,6 +172,13 @@ def main(argv=None):
          open(a.errors, "w", encoding="utf-8") as ferr:
         w = csv.writer(f)
         w.writerow(COLUMNS)
+        # Harvest-scan read failures (issue #66), via the shared inventory writer so
+        # this log and catalog's stay byte-identical for the GUI issues panel (spec
+        # §5.4). This log is opened "w" (truncated each run), so no dedup (skip_tags) is
+        # needed -- unlike catalog's append-mode log. Empty unless this run took the
+        # fallback rescan path (a trusted sidecar skips the harvest entirely).
+        write_harvest_read_errors(ferr, harvest_read_errors)
+        ferr.flush()
         for core_path in paths:
             line_errs = []
             try:
@@ -185,7 +198,8 @@ def main(argv=None):
             ferr.flush()
 
     print(f"wem-metadata: {len(paths)} cores ({cores_failed} failed), "
-          f"{lines_written} lines -> {a.out}")
+          f"{lines_written} lines, {len(harvest_read_errors)} unreadable during harvest "
+          f"-> {a.out}")
     # Coverage bookkeeping must never fail a stage whose real product -- the
     # metadata CSV above, built WITHOUT the catalog -- already succeeded (issue
     # #87 finding 1). coverage_report opens --catalog, which a missing or
