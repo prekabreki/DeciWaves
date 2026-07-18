@@ -215,7 +215,7 @@ def _fetch_tools(tools_dir: Path, skip_downloads: bool, force: bool = False):
     return rows, any_failed
 
 
-def _print_summary(tool_rows, ds_install, oodle_dll, hzd_package, fw_package, fw_gamescript):
+def _print_summary(tool_rows, ds_install, oodle_dll, hzd_package, fw_package, fw_gamescript, fw_types):
     print("\nDeciWaves setup summary:")
     print(f"  {'tool':<10} {'status':<32} path")
     for label, status, p in tool_rows:
@@ -225,6 +225,7 @@ def _print_summary(tool_rows, ds_install, oodle_dll, hzd_package, fw_package, fw
     print(f"  {'hzd_pkg':<10} {'ok' if hzd_package else '--':<32} {hzd_package or '(not set)'}")
     print(f"  {'fw_pkg':<10} {'ok' if fw_package else '--':<32} {fw_package or '(not set)'}")
     print(f"  {'fw_script':<10} {'ok' if fw_gamescript else '--':<32} {fw_gamescript or '(not set -- optional, BYO)'}")
+    print(f"  {'fw_types':<10} {'ok' if fw_types else '--':<32} {fw_types or '(not set -- optional, BYO)'}")
 
 
 def run_setup(argv) -> int:
@@ -243,6 +244,10 @@ def run_setup(argv) -> int:
     ap.add_argument("--fw-gamescript", default=None, help="path to your own Forbidden West gamescript "
                     "transcript (BYO, optional -- see docs/BYO.md); needed for `fw run` to reach "
                     'match/full-reel/render without passing --gamescript every time; pass "" to clear')
+    ap.add_argument("--fw-types", default=None, help="path to your own Forbidden West types.json "
+                    "(Decima RTTI type map, BYO, optional -- see docs/BYO.md); persisted so `fw run`'s "
+                    "subtitle-bind stage uses it instead of the workspace-root types.json default; "
+                    'pass "" to clear')
     ap.add_argument("--tools-dir", default=None, help="where to fetch vgmstream/VGAudio/ffmpeg (default: %%LOCALAPPDATA%%\\DeciWaves\\tools)")
     ap.add_argument("--skip-downloads", action="store_true", help="don't fetch tools, just re-check what's already there and rewrite config")
     ap.add_argument("--force", action="store_true", help="re-download a tool even if its exe is already present in --tools-dir (default: skip it)")
@@ -267,6 +272,7 @@ def run_setup(argv) -> int:
     hzd_package = _merged(args.hzd_package, saved.get("hzd_package", ""))
     fw_package = _merged(args.fw_package, saved.get("fw_package", ""))
     fw_gamescript = _merged(args.fw_gamescript, saved.get("fw_gamescript", ""))
+    fw_types = _merged(args.fw_types, saved.get("fw_types", ""))
     tools_dir = (
         Path(args.tools_dir).resolve() if args.tools_dir
         else Path(saved["tools_dir"]).resolve() if saved.get("tools_dir")
@@ -295,7 +301,7 @@ def run_setup(argv) -> int:
               "Tools are set up regardless -- rerun `deciwaves setup` with a game path once you "
               "have one, or check status anytime with `deciwaves doctor`.")
 
-    _print_summary(tool_rows, ds_install, oodle_dll, hzd_package, fw_package, fw_gamescript)
+    _print_summary(tool_rows, ds_install, oodle_dll, hzd_package, fw_package, fw_gamescript, fw_types)
 
     config.save({
         "tools_dir": str(tools_dir),
@@ -304,6 +310,7 @@ def run_setup(argv) -> int:
         "fw_package": fw_package,
         "oodle_dll": oodle_dll,
         "fw_gamescript": fw_gamescript,
+        "fw_types": fw_types,
     })
     print(f"\nWrote {config.path()}")
     return 1 if tools_failed else 0

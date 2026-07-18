@@ -422,3 +422,15 @@ def test_save_uses_os_replace_not_direct_write(tmp_path, monkeypatch):
     src, dst = calls[0]
     assert str(dst).endswith("config.json")
     assert src != dst
+
+
+def test_fw_types_survives_save_load_round_trip(tmp_path, monkeypatch):
+    # #103: the BYO types.json path is a persisted config key, so a value set on
+    # it must survive save()->load() the same as any other key (fw_gamescript,
+    # fw_package, ...). Guards that "fw_types" is in config.KEYS -- save() only
+    # writes keys it knows about, so a missing KEYS entry would silently drop it.
+    monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(tmp_path / "cfg"))
+    types_json = str(tmp_path / "types.json")
+
+    config.save({"fw_types": types_json})
+    assert config.load()["fw_types"] == types_json

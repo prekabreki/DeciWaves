@@ -31,7 +31,7 @@ class SetupRow:
 def build_setup_argv(base: list[str], *, force: bool = False, skip_downloads: bool = False,
                      ds_install: str | None = None, hzd_package: str | None = None,
                      fw_package: str | None = None, fw_gamescript: str | None = None,
-                     tools_dir: str | None = None) -> list[str]:
+                     fw_types: str | None = None, tools_dir: str | None = None) -> list[str]:
     """``base + setup + flags``. A ``None`` path is omitted (setup keeps the saved value);
     ``""`` is passed through to clear it; any real path is absolutized (spec §4)."""
     argv = [*base, "setup"]
@@ -41,7 +41,7 @@ def build_setup_argv(base: list[str], *, force: bool = False, skip_downloads: bo
         argv.append("--skip-downloads")
     for flag, val in (("--ds-install", ds_install), ("--hzd-package", hzd_package),
                       ("--fw-package", fw_package), ("--fw-gamescript", fw_gamescript),
-                      ("--tools-dir", tools_dir)):
+                      ("--fw-types", fw_types), ("--tools-dir", tools_dir)):
         if val is None:
             continue
         argv.extend([flag, "" if val == "" else os.path.abspath(val)])
