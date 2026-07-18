@@ -171,26 +171,35 @@ def main(argv=None):
     print(f"FW reel ({a.stem}): {len(spine)} lines across "
           f"{len({s.episode for s in spine})} episodes")
     if not spine:
-        # A selection that matches nothing is a NO-OP, not a failure -- DS's
-        # empty-playlist precedent (review of #64: `--tiers D` is endorsed by
-        # the flag's help yet never matches the standard full-reel manifest,
-        # DLC ships via games/fw/dlc.py's own manifest; failing would make a
-        # deliberate no-op indistinguishable from a broken pipeline). Checked
-        # HERE, before measure/assemble side effects (cache writes, pack read).
-        # Drop a stale render-errors.log from a PRIOR run: measure (its only
-        # writer, which rewrites it each run) never runs on a no-op, so a
-        # leftover log would otherwise be misread as this run's failures.
+        # Checked HERE, before measure/assemble side effects (cache writes,
+        # pack read). Drop a stale render-errors.log from a PRIOR run: measure
+        # (its only writer, which rewrites it each run) never runs on either
+        # branch below, so a leftover log would otherwise be misread as this
+        # run's failures.
         try:
             os.remove(a.errors)
         except OSError:
             pass
         if not manifest_rows:
-            print(f"render: nothing to render: {a.manifest} has no rows -- "
-                  f"no reels written to {a.out_dir}.")
-        else:
-            print(f"render: nothing to render: none of the {len(manifest_rows)} "
-                  f"rows in {a.manifest} match --tiers {a.tiers} -- no reels "
-                  f"written to {a.out_dir}.")
+            # Empty INPUT: a header-only manifest means an upstream stage
+            # produced nothing -- a broken/empty pipeline, not a selection.
+            # Fail LOUD (issue #85) so `fw run`/the GUI stage strip can't show
+            # render green with zero audio end-to-end -- the empty-input
+            # sub-case of the partial-rip-looks-complete failure #64/#63/#81
+            # exist to kill.
+            print(f"render: ERROR - {a.manifest} has no rows -- upstream "
+                  f"produced no lines to render. Re-run `deciwaves fw "
+                  f"full-reel`; no reels written to {a.out_dir}.")
+            return 1
+        # Empty SELECTION: rows present, none matched the tier filter. A
+        # legitimate NO-OP, not a failure -- DS's empty-playlist precedent
+        # (review of #64: `--tiers D` is endorsed by the flag's help yet never
+        # matches the standard full-reel manifest, DLC ships via
+        # games/fw/dlc.py's own manifest; failing would make a deliberate no-op
+        # indistinguishable from a broken pipeline).
+        print(f"render: nothing to render: none of the {len(manifest_rows)} "
+              f"rows in {a.manifest} match --tiers {a.tiers} -- no reels "
+              f"written to {a.out_dir}.")
         return 0
 
     os.makedirs(a.out_dir, exist_ok=True)

@@ -155,20 +155,25 @@ def test_fw_render_main_empty_spine_drops_stale_errors_log(tmp_path, capsys):
     assert not stale.exists()   # gone, not silently attributed to this no-op
 
 
-def test_fw_render_main_empty_manifest_blames_rows_not_tiers(tmp_path, capsys):
-    """A header-only manifest (upstream bound nothing) is a no-op, but its
-    message must name the real cause -- zero rows -- not the --tiers filter,
-    which a user could never fix by editing (review of #64)."""
+def test_fw_render_main_empty_input_manifest_is_upstream_error(tmp_path, capsys):
+    """A header-only manifest means an upstream stage produced nothing -- a
+    broken/empty pipeline, NOT a deliberate selection. It must fail LOUD (rc 1)
+    so `fw run`/the GUI stage strip can't show render green with zero audio
+    end-to-end (issue #85; the empty-INPUT case #64/#63/#81 exist to kill). The
+    message names the real cause -- zero rows, upstream -- not the --tiers
+    filter a user could never fix by editing (kept from the review of #64)."""
     manifest = tmp_path / "full-reel-manifest.csv"
     _write_manifest(manifest, [])   # header only, 0 data rows
 
     rc = render.main(_render_argv(tmp_path, manifest))
 
-    assert rc == 0
+    assert rc == 1
     out = capsys.readouterr().out
-    assert "nothing to render" in out
+    assert "ERROR" in out
     assert "no rows" in out
+    assert str(manifest) in out
     assert "--tiers" not in out    # don't misdirect to a filter that can't help
+    assert not (tmp_path / "cache").exists()   # fired before assemble side effects
 
 
 # ---------------------------------------------------------------------------
