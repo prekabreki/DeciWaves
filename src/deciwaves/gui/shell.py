@@ -23,6 +23,8 @@ from deciwaves.gui.pipeline_model import (
     scan_argv,
     stage_states,
 )
+from deciwaves.gui.preview import PreviewPlayer
+from deciwaves.gui.preview_model import PreviewResolver
 from deciwaves.gui.views import LibraryView, PipelineView
 
 # game key -> its doctor install/config check (reused from the CLI, issue #67 / spec §3).
@@ -64,6 +66,16 @@ class MainWindow(QMainWindow):
         self.runner.output.connect(self.pipeline.append_log)
         self.runner.started.connect(self._on_job_started)
         self.runner.finished.connect(self._on_job_finished)
+
+        # inline audio preview (#71, spec §6.5): the Library's ▷ / enter emits
+        # preview_requested(line_id); play it through one app-wide player, off the UI thread.
+        self.player = PreviewPlayer(self)
+        self._resolver: PreviewResolver | None = None
+        self._resolver_key: tuple[str, str] | None = None
+        self.library.preview_requested.connect(self._on_preview_requested)
+        # decode/config failures are surfaced in the same log console job output uses, so a
+        # missing decoder or unconfigured install is visible rather than swallowed.
+        self.player.preview_failed.connect(lambda msg: self.pipeline.append_log(f"preview: {msg}\n"))
 
         # poll markers/coverage while a job runs so the strip advances live (spec §5.3)
         self._poll = QTimer(self)
@@ -121,6 +133,22 @@ class MainWindow(QMainWindow):
         self.views.setCurrentIndex(index)
         if index == 1:   # Library -- pick up rows written since it was last shown
             self._refresh_library()
+
+    # --- inline preview (#71) ----------------------------------------------
+
+    def _preview_resolver(self) -> PreviewResolver:
+        """The resolver for the current (game, workspace), rebuilt only when either changes --
+        a rebuild drops the prior game's stale manifests/heavy handles, while repeated previews
+        of the same game reuse its cached PackIndex/HzdPackage."""
+        key = (self.bar.current_game(), self._workspace())
+        if self._resolver is None or self._resolver_key != key:
+            self._resolver = PreviewResolver(key[0], key[1])
+            self._resolver_key = key
+        return self._resolver
+
+    def _on_preview_requested(self, line_id: str) -> None:
+        audio_path = self.library.audio_path_for(line_id)
+        self.player.play_line(self._preview_resolver(), line_id, audio_path)
 
     # --- job control -------------------------------------------------------
 

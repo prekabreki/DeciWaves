@@ -79,6 +79,33 @@ def load() -> dict:
         return {}
     return cfg
 
+
+def apply_tool_env(cfg: dict | None = None) -> dict:
+    """Prepend the configured ``tools_dir`` to ``PATH`` and set each decode tool's override
+    env var (``DECIWAVES_VGMSTREAM``/``DECIWAVES_VGAUDIO``) from a copy sitting in it, so the
+    shelled-out decoders resolve. Idempotent: the ``PATH`` prepend is skipped when
+    ``tools_dir`` is already the front entry, and ``os.environ.setdefault`` never clobbers an
+    explicit override. Returns the loaded (or passed-in) config.
+
+    Shared by the CLI entrypoint (``cli.main``) and every GUI launch path (``gui.launch``) --
+    the ``deciwaves-gui`` gui_scripts shortcut bypasses ``cli.main()``, so without this the
+    inline-preview decoders (#71) would go unresolved when the GUI is launched that way.
+    """
+    if cfg is None:
+        cfg = load()
+    tools_dir = cfg.get("tools_dir")
+    if tools_dir and os.path.isdir(tools_dir):
+        existing = os.environ.get("PATH", "")
+        if tools_dir not in existing.split(os.pathsep):
+            os.environ["PATH"] = tools_dir + os.pathsep + existing
+        for tool in TOOLS:
+            if not tool.env_var:  # ffmpeg: resolved via PATH, no override env var
+                continue
+            p = Path(tools_dir) / tool.exe
+            if p.is_file():
+                os.environ.setdefault(tool.env_var, str(p))
+    return cfg
+
 # Flags whose value is a STAGE NAME, never a path (run.py's --until/--from,
 # issue #62): a cwd file/dir that happens to share a stage's name (`extract`,
 # `render`, `catalog`, ...) must not get absolutized into an argparse-choices
