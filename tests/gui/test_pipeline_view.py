@@ -51,6 +51,24 @@ def test_stage_strip_marks_running_stage(qtbot, tmp_path):
     assert s.running_stage() == "catalog"
 
 
+def test_stage_strip_rerun_gated_while_running(qtbot):
+    # Mutual exclusion (spec §5.3): while any job is active the "Re-run from here"
+    # affordance is disabled so a re-run can't launch a second concurrent job.
+    s = StageStrip()
+    qtbot.addWidget(s)
+    s.refresh("ds", ".")
+    s.set_running(True)
+    assert s.rerun_enabled() is False
+    fired = []
+    s.rerun_requested.connect(fired.append)
+    s.request_rerun("order")                      # gated -> must NOT emit while running
+    assert fired == []
+    s.set_running(False)                           # job finished -> affordance restored
+    assert s.rerun_enabled() is True
+    with qtbot.waitSignal(s.rerun_requested):
+        s.request_rerun("order")
+
+
 # --- PipelineControls ------------------------------------------------------
 
 def test_controls_hide_bind_for_ds_show_for_gpu_games(qtbot):

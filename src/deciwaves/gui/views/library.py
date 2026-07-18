@@ -23,6 +23,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from deciwaves.gui.export import ExportPanel
+from deciwaves.gui.export_model import can_export_mp3, catalog_source_path
 from deciwaves.gui.library_model import (
     LineRow,
     availability_by_id,
@@ -209,11 +211,16 @@ class LibraryView(QWidget):
 
         self._status = QLabel("")
 
+        # Export panel (#72, spec §8): operates on the checked rows. The shell connects its
+        # intent signals and drives its running-state; the Library keeps its context in sync.
+        self.export = ExportPanel()
+
         layout = QVBoxLayout(self)
         layout.addLayout(filters)
         layout.addLayout(selection)
         layout.addWidget(self._table, 1)
         layout.addWidget(self._status)
+        layout.addWidget(self.export)
 
         # --- wiring ---
         self._search.textChanged.connect(self._apply_filters)
@@ -390,10 +397,38 @@ class LibraryView(QWidget):
                 return r.audio_path
         return None
 
+    # --- checked-set accessors (export, #72) -------------------------------
+
+    def unchecked_ids(self) -> set[str]:
+        """The unchecked line_ids among the loaded rows -- a LIVE view (every toggle already
+        saves selection.json, but reading state here avoids any stale-flush race). The
+        filtered-CSV writer wants the unchecked set: it keeps rows whose id is NOT in it."""
+        loaded = {r.line_id for r in self._rows}
+        return {lid for lid in self._unchecked if lid in loaded}
+
+    def checked_ids(self) -> set[str]:
+        return {r.line_id for r in self._rows if r.line_id not in self._unchecked}
+
+    def checked_rows(self) -> list[LineRow]:
+        """The checked ``LineRow``s (id + audio_path), for the batch Dump-WAV worker."""
+        return [r for r in self._rows if r.line_id not in self._unchecked]
+
     # --- status + test accessors -------------------------------------------
+
+    def _sync_export(self) -> None:
+        """Keep the Export panel's context (checked-count + which artifacts exist) current.
+        Called on every status update, so it tracks refreshes and per-toggle selection edits.
+        The shell owns the panel's running-state separately."""
+        if self._game is None:
+            return
+        self.export.set_context(
+            self._game, self._workspace, self.checked_count(),
+            can_export_mp3(self._workspace, self._game),
+            catalog_source_path(self._workspace, self._game) is not None)
 
     def _update_status(self) -> None:
         self._status.setText(self.status_text())
+        self._sync_export()
 
     def rows(self) -> list[LineRow]:
         return list(self._rows)

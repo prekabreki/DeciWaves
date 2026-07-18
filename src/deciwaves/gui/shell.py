@@ -7,11 +7,21 @@ Scan/Bind/Re-run/Transcribe-all controls emit intent signals; this shell turns t
 (#68's gpu_gate) to every GPU action, and refreshes the strip/coverage/issues around runs."""
 from __future__ import annotations
 
+import os
+import shutil
+
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QMainWindow, QStackedWidget, QTabBar, QVBoxLayout, QWidget
 
 from deciwaves.cli import config, doctor
 from deciwaves.gui.cli_command import default_base
+from deciwaves.gui.export import DumpRunner
+from deciwaves.gui.export_model import (
+    ExportError,
+    catalog_source_path,
+    render_selection_argv,
+    write_render_selection,
+)
 from deciwaves.gui.global_bar import GlobalBar
 from deciwaves.gui.gpu_gate import confirm_gpu
 from deciwaves.gui.jobs import JobRunner
@@ -63,9 +73,24 @@ class MainWindow(QMainWindow):
         # exactly one pipeline job app-wide (spec §5.3)
         self.runner = JobRunner(self)
         self._job_game: str | None = None
+        self._job_kind: str | None = None  # "export" for a render job; None for pipeline jobs
         self.runner.output.connect(self.pipeline.append_log)
         self.runner.started.connect(self._on_job_started)
         self.runner.finished.connect(self._on_job_finished)
+
+        # filtered export (#72, spec §8): the Library's Export panel emits three intents. Export
+        # MP3 goes through the SAME single JobRunner (tracked via _job_kind so _on_job_finished
+        # surfaces the render rc); Dump WAV runs as an off-thread batch on its own runner; the
+        # catalog is a file copy. All three mutually-exclude with pipeline jobs (_sync_running).
+        self.dump = DumpRunner(self)
+        self.dump.progress.connect(self._on_dump_progress)
+        self.dump.row_failed.connect(
+            lambda lid, msg: self.pipeline.append_log(f"dump: {lid}: {msg}\n"))
+        self.dump.finished.connect(self._on_dump_finished)
+        self.library.export.export_mp3_requested.connect(self._on_export_mp3)
+        self.library.export.dump_wav_requested.connect(self._on_dump_wav)
+        self.library.export.export_catalog_requested.connect(self._on_export_catalog)
+        self.library.export.dump_cancel_requested.connect(self.dump.cancel)
 
         # inline audio preview (#71, spec §6.5): the Library's ▷ / enter emits
         # preview_requested(line_id); play it through one app-wide player, off the UI thread.
@@ -156,11 +181,15 @@ class MainWindow(QMainWindow):
         return confirm_gpu(self, game, self.pipeline.setup_doctor.doctor.last_payload())
 
     def _on_scan(self) -> None:
+        if self.runner.is_running or self.dump.is_running:
+            return   # one job at a time -- refuse a pipeline start while any job runs (§5.3)
         game = self.bar.current_game()
         self._job_game = game
         self.runner.start(scan_argv(default_base(), self._workspace(), game))
 
     def _on_process(self) -> None:
+        if self.runner.is_running or self.dump.is_running:
+            return
         game = self.bar.current_game()
         if not self._confirm_gpu(game):
             return
@@ -168,6 +197,8 @@ class MainWindow(QMainWindow):
         self.runner.start(process_argv(default_base(), self._workspace(), game))
 
     def _on_rerun(self, stage: str) -> None:
+        if self.runner.is_running or self.dump.is_running:
+            return   # a running dump/job must not be joined by a strip "Re-run from here" (§5.3)
         game = self.bar.current_game()
         if rerun_hits_gpu(game, stage) and not self._confirm_gpu(game):
             return
@@ -175,6 +206,8 @@ class MainWindow(QMainWindow):
         self.runner.start(rerun_from_argv(default_base(), self._workspace(), game, stage))
 
     def _on_escalate(self) -> None:
+        if self.runner.is_running or self.dump.is_running:
+            return
         game = self.bar.current_game()
         if not self._confirm_gpu(game):
             return
@@ -183,13 +216,98 @@ class MainWindow(QMainWindow):
 
     def _on_job_started(self) -> None:
         self.bar.set_job_chip(f"{self.bar.current_game()} · running")
-        self.pipeline.controls.set_running(True)
+        self._sync_running()
         self._poll.start()
 
-    def _on_job_finished(self, _code: int) -> None:
+    def _on_job_finished(self, code: int) -> None:
         self.bar.set_job_chip("idle")
-        self.pipeline.controls.set_running(False)
         self._poll.stop()
+        kind, game = self._job_kind, self._job_game
+        self._job_kind = None
         self._job_game = None
+        # Export renders run through this same runner: surface the render rc as success/error
+        # (this is where the empty-input / missing-decoder non-zero exits become a visible
+        # error, never a silent green -- spec §8.2). Pipeline jobs keep the existing behavior.
+        if kind == "export":
+            self._report_export_result(game, code)
+        self._sync_running()
         self._refresh_panels()
         self._refresh_library()   # surface catalog/asr-manifest rows written by Scan/Bind
+
+    def _sync_running(self) -> None:
+        """One job at a time (spec §5.3): a pipeline job, an export render, and a dump batch all
+        mutually exclude. Whenever ANY is active, disable the pipeline controls, the stage-strip
+        Re-run affordance, and the export panel; the export panel additionally shows a Cancel
+        while its own dump runs. Inline preview (▷/Enter) is intentionally left alone (§6.5)."""
+        busy = self.runner.is_running or self.dump.is_running
+        self.pipeline.controls.set_running(busy)
+        self.pipeline.strip.set_running(busy)
+        self.library.export.set_running(busy)
+        self.library.export.set_dumping(self.dump.is_running)
+
+    def _report_export_result(self, game: str | None, code: int) -> None:
+        if code == 0:
+            out = {"ds": "out/audio", "hzd": "out/hzd/audio",
+                   "fw": "out/fw/reels"}.get(game or "", "out/")
+            self.pipeline.append_log(
+                f"export: done — reels + tracklist sidecars written under {out}.\n")
+        else:
+            self.pipeline.append_log(
+                f"export: render failed (rc {code}) — see the log above "
+                f"(an empty selection with no renderable rows can also cause this).\n")
+
+    # --- export flows (#72) ------------------------------------------------
+
+    def _on_export_mp3(self, bitrate: int) -> None:
+        if self.runner.is_running or self.dump.is_running:
+            self.pipeline.append_log("export: a job is already running.\n")
+            return   # mirror _on_dump_wav: mutually exclude with the runner AND the dump (§5.3)
+        game = self.bar.current_game()
+        ws = self._workspace()
+        try:
+            csv_path = write_render_selection(ws, game, self.library.unchecked_ids())
+            argv = render_selection_argv(default_base(), ws, game, csv_path,
+                                         bitrate=bitrate, cfg=config.load())
+        except ExportError as exc:
+            self.pipeline.append_log(f"export: {exc}\n")
+            return
+        self._job_kind = "export"
+        self._job_game = game
+        if not self.runner.start(argv):
+            self.pipeline.append_log("export: a job is already running.\n")
+            self._job_kind = None
+            self._job_game = None
+
+    def _on_dump_wav(self, dest: str) -> None:
+        if self.runner.is_running or self.dump.is_running:
+            self.pipeline.append_log("dump: a job is already running.\n")
+            return
+        rows = [(r.line_id, r.audio_path) for r in self.library.checked_rows()]
+        if not rows:
+            self.pipeline.append_log("dump: no checked rows to dump.\n")
+            return
+        self.pipeline.append_log(f"dump: decoding {len(rows)} line(s) to {dest} …\n")
+        self.dump.start(self._preview_resolver(), rows, dest)
+        self._sync_running()
+
+    def _on_dump_progress(self, done: int, total: int) -> None:
+        self.library.export.set_dump_progress(done, total)
+
+    def _on_dump_finished(self, ok: int, failed: int) -> None:
+        self.pipeline.append_log(f"dump: done — {ok} ok, {failed} failed.\n")
+        self.library.export.dump_finished(ok, failed)
+        self._sync_running()
+
+    def _on_export_catalog(self, dest: str) -> None:
+        game = self.bar.current_game()
+        src = catalog_source_path(self._workspace(), game)
+        if src is None:
+            self.pipeline.append_log("export: no catalog artifact yet for this game.\n")
+            return
+        try:
+            os.makedirs(os.path.dirname(os.path.abspath(dest)), exist_ok=True)
+            shutil.copyfile(src, dest)
+        except OSError as exc:
+            self.pipeline.append_log(f"export: could not write catalog: {exc}\n")
+            return
+        self.pipeline.append_log(f"export: catalog copied to {dest}\n")
