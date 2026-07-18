@@ -22,6 +22,7 @@ from deciwaves.gui.export_model import (
     render_selection_argv,
     write_render_selection,
 )
+from deciwaves.gui.game_panel_model import transcript_order_argv
 from deciwaves.gui.global_bar import GlobalBar
 from deciwaves.gui.gpu_gate import confirm_gpu
 from deciwaves.gui.jobs import JobRunner
@@ -35,7 +36,7 @@ from deciwaves.gui.pipeline_model import (
 )
 from deciwaves.gui.preview import PreviewPlayer
 from deciwaves.gui.preview_model import PreviewResolver
-from deciwaves.gui.views import LibraryView, PipelineView
+from deciwaves.gui.views import GamePanel, LibraryView, PipelineView
 
 # game key -> its doctor install/config check (reused from the CLI, issue #67 / spec §3).
 _CHECKS = {
@@ -51,6 +52,10 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("DeciWaves")
 
         self.bar = GlobalBar()
+        # The adaptive per-game panel (#73, spec §7): one frame between the global bar and the
+        # tab stack, hosting DS/HZD/FW-specific controls. It swaps (hides/shows controls) on
+        # game change; both views see it.
+        self.game_panel = GamePanel()
         self.pipeline = PipelineView()
         self.library = LibraryView()
 
@@ -66,6 +71,7 @@ class MainWindow(QMainWindow):
         central = QWidget()
         layout = QVBoxLayout(central)
         layout.addWidget(self.bar)
+        layout.addWidget(self.game_panel)
         layout.addWidget(self._tabs)
         layout.addWidget(self.views, 1)
         self.setCentralWidget(central)
@@ -113,6 +119,23 @@ class MainWindow(QMainWindow):
         self.pipeline.strip.rerun_requested.connect(self._on_rerun)
         self.pipeline.coverage.escalate_requested.connect(self._on_escalate)
 
+        # the adaptive per-game panel (#73): swap controls on game change, then refresh its
+        # types.json/GPU context; its intents drive standalone re-order + BYO-path persistence.
+        self.game_panel.set_game(self.bar.current_game())
+        self.bar.game_changed.connect(self.game_panel.set_game)
+        self.bar.game_changed.connect(lambda _g: self._refresh_game_panel())
+        self.game_panel.transcript_order_requested.connect(self._on_transcript_order)
+        # BYO FW pickers persist through the setup path (merge/absolutize/clear + re-doctor),
+        # NOT a direct config.save. skip_downloads=True: persist the path + re-check only, so
+        # picking a file never triggers a surprise ~200 MB tool fetch (spec §7 / issue #103).
+        self.game_panel.gamescript_picked.connect(
+            lambda p: self.pipeline.setup_doctor.setup.run(fw_gamescript=p, skip_downloads=True))
+        self.game_panel.types_picked.connect(
+            lambda p: self.pipeline.setup_doctor.setup.run(fw_types=p, skip_downloads=True))
+        # a finished doctor run (incl. the one setup triggers) re-grades the panel's types.json
+        # + GPU/CUDA readiness from the fresh payload.
+        self.pipeline.setup_doctor.doctor.refreshed.connect(self._refresh_game_panel)
+
         self.bar.game_changed.connect(lambda _g: self._refresh_status())
         # re-grade the Doctor panel's promoted GPU items for the selected game (spec §3)
         self.bar.game_changed.connect(self.pipeline.setup_doctor.set_game)
@@ -125,6 +148,7 @@ class MainWindow(QMainWindow):
         self._refresh_status()
         self._refresh_panels()
         self._refresh_library()
+        self._refresh_game_panel()
 
     # --- status + panels ---------------------------------------------------
 
@@ -153,6 +177,13 @@ class MainWindow(QMainWindow):
         """Reload the Library's line list (#70). Cheap enough for game-change / tab-switch /
         job-finished; deliberately NOT on the mid-job poll, so it never resets mid-scroll."""
         self.library.refresh(self.bar.current_game(), self._workspace())
+
+    def _refresh_game_panel(self) -> None:
+        """Refresh the per-game panel's context (#73): the FW types.json grade + the GPU/CUDA
+        readiness label, from the current workspace/config and the last doctor payload."""
+        self.game_panel.set_context(
+            self._workspace(), config.load(),
+            self.pipeline.setup_doctor.doctor.last_payload())
 
     def _on_tab_changed(self, index: int) -> None:
         self.views.setCurrentIndex(index)
@@ -194,7 +225,27 @@ class MainWindow(QMainWindow):
         if not self._confirm_gpu(game):
             return
         self._job_game = game
-        self.runner.start(process_argv(default_base(), self._workspace(), game))
+        # the panel's first-bind ASR cap (#73, HZD only; None otherwise -> bind's own default).
+        # A cap change is inert while .done-bind stands (spec §9 #4) -- re-capping is the
+        # coverage bar's "Transcribe all" escalation, which owns the marker delete, not here.
+        self.runner.start(process_argv(default_base(), self._workspace(), game,
+                                       sample_cap=self.game_panel.sample_cap()))
+
+    def _on_transcript_order(self, path: str) -> None:
+        """The DS panel's "Re-order with transcript" affordance (#73, spec §7): run the
+        STANDALONE ``ds order --transcript <abs>`` on the single runner (never ``ds run``).
+        Same one-job-at-a-time + dump mutual exclusion as the other pipeline starts (§5.3)."""
+        if self.runner.is_running or self.dump.is_running:
+            self.pipeline.append_log("re-order: a job is already running.\n")
+            return
+        game = self.bar.current_game()
+        if game != "ds":   # DS-only affordance; the control is hidden for HZD/FW anyway
+            return
+        self._job_game = game
+        argv = transcript_order_argv(default_base(), self._workspace(), path)
+        if not self.runner.start(argv):
+            self.pipeline.append_log("re-order: a job is already running.\n")
+            self._job_game = None
 
     def _on_rerun(self, stage: str) -> None:
         if self.runner.is_running or self.dump.is_running:
@@ -233,6 +284,7 @@ class MainWindow(QMainWindow):
         self._sync_running()
         self._refresh_panels()
         self._refresh_library()   # surface catalog/asr-manifest rows written by Scan/Bind
+        self._refresh_game_panel()   # a bind/extract may have produced/consumed types.json
 
     def _sync_running(self) -> None:
         """One job at a time (spec §5.3): a pipeline job, an export render, and a dump batch all
@@ -266,8 +318,13 @@ class MainWindow(QMainWindow):
         ws = self._workspace()
         try:
             csv_path = write_render_selection(ws, game, self.library.unchecked_ids())
+            # thread the per-game panel's render scope (#73): DS {main_story}, HZD {spine_only},
+            # FW {tiers}. An explicit scope NARROWS (a checked row outside it is dropped);
+            # empty defaults reproduce #72's "exactly the checked rows" (render_selection_argv's
+            # kwargs default to today's behavior).
             argv = render_selection_argv(default_base(), ws, game, csv_path,
-                                         bitrate=bitrate, cfg=config.load())
+                                         bitrate=bitrate, cfg=config.load(),
+                                         **self.game_panel.render_scope())
         except ExportError as exc:
             self.pipeline.append_log(f"export: {exc}\n")
             return

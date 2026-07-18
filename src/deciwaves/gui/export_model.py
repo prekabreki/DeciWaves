@@ -14,7 +14,9 @@ rows. The filtered CSV already contains only the checked rows, so every render-s
 row-dropping flag is set to include everything: DS renders the filtered playlist straight (no
 ``--main-story``), HZD keeps all bound rows (no ``--spine-only``), and FW's ``--tiers``
 (which FILTERS by tier) is passed the union of every tier actually present so no checked row
-is dropped. Per-game render-scope toggles are #73's concern, not this module's.
+is dropped. That is the default; #73 adds optional render-scope kwargs to
+:func:`render_selection_argv` (the panel's ``--main-story``/``--spine-only``/``--tiers``
+narrowing) that layer on top without changing the no-kwargs default.
 """
 from __future__ import annotations
 
@@ -124,7 +126,8 @@ def _missing_source_message(game: str) -> str:
 
 
 def render_selection_argv(base: list[str], workspace: str, game: str, csv_path: str, *,
-                          bitrate: int, cfg: dict) -> list[str]:
+                          bitrate: int, cfg: dict, main_story: bool = False,
+                          spine_only: bool = False, tiers: str | None = None) -> list[str]:
     """Build the STANDALONE render argv (``deciwaves --workspace <abs> <game> render ...``) that
     renders exactly the rows in *csv_path*.
 
@@ -132,25 +135,45 @@ def render_selection_argv(base: list[str], workspace: str, game: str, csv_path: 
     game token. *csv_path* is passed absolute. Required install flags are pulled from *cfg*
     (``config.load()``) the same way ``cli/run.py`` does; a missing one raises
     :class:`ExportError` (Export MP3 surfaces the text, never crashes). *bitrate* is DS-only
-    (HZD/FW are hardcoded 128k, spec §8.2) -- ignored for the other two."""
+    (HZD/FW are hardcoded 128k, spec §8.2) -- ignored for the other two.
+
+    **Render scope (#73, spec §7 -- the per-game panel supplies these):** the three scope
+    kwargs default to the exact behavior of #72's unscoped export (render every checked row),
+    so callers that don't pass them are unchanged:
+
+    - ``main_story`` (DS): append ``--main-story`` iff True (default False = the whole filtered
+      playlist). When True it ADDITIONALLY culls side/non-story lines the user left checked --
+      an intentional scope-narrowing the panel toggle opts into.
+    - ``spine_only`` (HZD): append ``--spine-only`` iff True (default False = every bound row).
+    - ``tiers`` (FW): when given (non-None) it REPLACES the present-tier union and is passed
+      verbatim as ``--tiers``, so a checked row whose tier isn't in it IS dropped -- the same
+      deliberate scope-narrowing as DS ``--main-story``. When None (default) the union of every
+      tier present is used (:func:`_fw_tiers`), dropping nothing -- #72's contract. So "exactly
+      the checked rows" becomes "exactly the checked rows that also match the chosen scope."
+    """
     csv_abs = os.path.abspath(csv_path)
     if game == "ds":
         data_dir, oodle = _ds_install(cfg)
-        # No --main-story: render the filtered playlist straight, so exactly the checked rows
-        # render (--main-story would additionally cull side/non-story lines the user kept).
+        # Default: render the filtered playlist straight (exactly the checked rows). --main-story
+        # is opt-in scope-narrowing that also culls side/non-story lines (spec §7).
         tokens = ["render", "--playlist", csv_abs, "--data-dir", data_dir,
                   "--oodle", oodle, "--bitrate", str(int(bitrate))]
+        if main_story:
+            tokens.append("--main-story")
     elif game == "hzd":
         package = cfg.get("hzd_package")
         if not package:
             raise ExportError("HZD package is not configured. Run `deciwaves setup` first.")
-        # No --spine-only: it would drop every checked non-main-quest row.
+        # Default: keep every checked row. --spine-only is opt-in scope-narrowing to the mq spine.
         tokens = ["render", "--manifest", csv_abs, "--package", package]
+        if spine_only:
+            tokens.append("--spine-only")
     elif game == "fw":
-        # --tiers FILTERS by tier; pass the union of every tier present so no checked row is
-        # tier-dropped (--audio-root's out/fw default already points at the extracted WAVs).
-        tokens = ["render", "--manifest", csv_abs, "--tiers", _fw_tiers(csv_abs),
-                  "--uniform-mono"]
+        # An explicit panel --tiers REPLACES the union (scope-narrowing); with none, pass the
+        # union of every tier present so no checked row is tier-dropped (--audio-root's out/fw
+        # default already points at the extracted WAVs).
+        scope_tiers = tiers if tiers is not None else _fw_tiers(csv_abs)
+        tokens = ["render", "--manifest", csv_abs, "--tiers", scope_tiers, "--uniform-mono"]
     else:
         raise ExportError(f"Export is not supported for game {game!r}.")
     return build_cli_command(base, workspace, game, *tokens)

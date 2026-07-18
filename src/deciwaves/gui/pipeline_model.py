@@ -59,10 +59,24 @@ def scan_argv(base: list[str], workspace: str, game: str) -> list[str]:
     return build_cli_command(base, workspace, game, "run", "--until", scan_target(game))
 
 
-def process_argv(base: list[str], workspace: str, game: str) -> list[str]:
+def process_argv(base: list[str], workspace: str, game: str,
+                 sample_cap: int | None = None) -> list[str]:
     """Bind/Process = ``run`` onward; markers make it resume from the first incomplete
-    (GPU) stage, and bind falls back to its own bounded --sample-cap default."""
-    return build_cli_command(base, workspace, game, "run")
+    (GPU) stage, and bind falls back to its own bounded --sample-cap default.
+
+    *sample_cap* (#73, HZD only) is the panel's first-bind ASR cap: when given it is
+    forwarded to ``hzd run`` as ``--sample-cap <N>`` (``run.py`` passes it on to bind). 0 is a
+    real value ("uncapped, full pass"), so only ``None`` omits the flag. Ignored for non-HZD
+    games -- FW's ``run`` has no ``--sample-cap`` and the panel offers no cap for it.
+
+    GOTCHA (spec §9 #4): a cap change is INERT while ``out/hzd/.done-bind`` stands -- the cap
+    applies to the FIRST bind only. Re-capping needs that marker deleted, which only the
+    coverage-bar "Transcribe all" escalation (:func:`escalate_bind_argv`, ``--from bind``)
+    owns; this builder never deletes markers."""
+    tokens = ["run"]
+    if game == "hzd" and sample_cap is not None:
+        tokens += ["--sample-cap", str(int(sample_cap))]
+    return build_cli_command(base, workspace, game, *tokens)
 
 
 def rerun_from_argv(base: list[str], workspace: str, game: str, stage: str) -> list[str]:

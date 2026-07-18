@@ -61,6 +61,22 @@ def test_process_argv_is_plain_run(tmp_path):
     argv = process_argv(BASE, str(tmp_path), "hzd")
     assert argv[-1] == "run"
     assert "--until" not in argv
+    assert "--sample-cap" not in argv     # no cap given -> bind falls back to its own default
+
+
+def test_process_argv_threads_hzd_sample_cap(tmp_path):
+    # The HZD panel's first-bind cap (#73): --sample-cap is forwarded to `hzd run` -> bind.
+    argv = process_argv(BASE, str(tmp_path), "hzd", sample_cap=50)
+    assert argv[argv.index("--sample-cap") + 1] == "50"
+    # 0 (uncapped) is a real value, not "omit": forwarded as-is like asr_bind treats it.
+    argv0 = process_argv(BASE, str(tmp_path), "hzd", sample_cap=0)
+    assert argv0[argv0.index("--sample-cap") + 1] == "0"
+
+
+def test_process_argv_ignores_sample_cap_for_non_hzd(tmp_path):
+    # FW's `run` has no --sample-cap flag; the panel never offers a cap for it either.
+    argv = process_argv(BASE, str(tmp_path), "fw", sample_cap=50)
+    assert "--sample-cap" not in argv
 
 
 def test_rerun_from_argv(tmp_path):
