@@ -46,6 +46,7 @@ class StageStrip(QWidget):
         super().__init__(parent)
         self._states: list[StageState] = []
         self._running: str | None = None
+        self._busy = False   # a job is active app-wide -> the re-run affordance is gated
         self._row = QHBoxLayout(self)
         self._row.setAlignment(Qt.AlignLeft)
 
@@ -56,6 +57,16 @@ class StageStrip(QWidget):
         for st in self._states:
             self._row.addWidget(self._chip(st))
 
+    def set_running(self, running: bool) -> None:
+        """Mutual exclusion with any in-flight job (pipeline scan/bind, export render, or a
+        dump): disables the "Re-run from here" affordance so a re-run can't launch a second,
+        concurrent job while one runs (one job at a time, spec §5.3 -- mirrors
+        :meth:`PipelineControls.set_running`). Inline preview is deliberately untouched (§6.5)."""
+        self._busy = running
+
+    def rerun_enabled(self) -> bool:
+        return not self._busy
+
     def states(self) -> list[StageState]:
         return list(self._states)
 
@@ -63,6 +74,8 @@ class StageStrip(QWidget):
         return self._running
 
     def request_rerun(self, stage: str) -> None:
+        if self._busy:   # gated while a job runs -- no second concurrent job (spec §5.3)
+            return
         self.rerun_requested.emit(stage)
 
     def _chip(self, st: StageState) -> QWidget:
@@ -83,8 +96,9 @@ class StageStrip(QWidget):
 
     def _chip_menu(self, chip: QWidget, pos, stage: str) -> None:
         menu = QMenu(self)
-        menu.addAction("Re-run from here").triggered.connect(
-            lambda: self.request_rerun(stage))
+        action = menu.addAction("Re-run from here")
+        action.setEnabled(not self._busy)   # grayed out while a job runs (spec §5.3)
+        action.triggered.connect(lambda: self.request_rerun(stage))
         menu.exec(chip.mapToGlobal(pos))
 
 

@@ -181,11 +181,15 @@ class MainWindow(QMainWindow):
         return confirm_gpu(self, game, self.pipeline.setup_doctor.doctor.last_payload())
 
     def _on_scan(self) -> None:
+        if self.runner.is_running or self.dump.is_running:
+            return   # one job at a time -- refuse a pipeline start while any job runs (§5.3)
         game = self.bar.current_game()
         self._job_game = game
         self.runner.start(scan_argv(default_base(), self._workspace(), game))
 
     def _on_process(self) -> None:
+        if self.runner.is_running or self.dump.is_running:
+            return
         game = self.bar.current_game()
         if not self._confirm_gpu(game):
             return
@@ -193,6 +197,8 @@ class MainWindow(QMainWindow):
         self.runner.start(process_argv(default_base(), self._workspace(), game))
 
     def _on_rerun(self, stage: str) -> None:
+        if self.runner.is_running or self.dump.is_running:
+            return   # a running dump/job must not be joined by a strip "Re-run from here" (§5.3)
         game = self.bar.current_game()
         if rerun_hits_gpu(game, stage) and not self._confirm_gpu(game):
             return
@@ -200,6 +206,8 @@ class MainWindow(QMainWindow):
         self.runner.start(rerun_from_argv(default_base(), self._workspace(), game, stage))
 
     def _on_escalate(self) -> None:
+        if self.runner.is_running or self.dump.is_running:
+            return
         game = self.bar.current_game()
         if not self._confirm_gpu(game):
             return
@@ -228,11 +236,13 @@ class MainWindow(QMainWindow):
 
     def _sync_running(self) -> None:
         """One job at a time (spec §5.3): a pipeline job, an export render, and a dump batch all
-        mutually exclude. Disable the pipeline controls and the export panel whenever ANY is
-        active; the export panel additionally shows a Cancel while its own dump runs."""
-        running = self.runner.is_running or self.dump.is_running
-        self.pipeline.controls.set_running(running)
-        self.library.export.set_running(running)
+        mutually exclude. Whenever ANY is active, disable the pipeline controls, the stage-strip
+        Re-run affordance, and the export panel; the export panel additionally shows a Cancel
+        while its own dump runs. Inline preview (▷/Enter) is intentionally left alone (§6.5)."""
+        busy = self.runner.is_running or self.dump.is_running
+        self.pipeline.controls.set_running(busy)
+        self.pipeline.strip.set_running(busy)
+        self.library.export.set_running(busy)
         self.library.export.set_dumping(self.dump.is_running)
 
     def _report_export_result(self, game: str | None, code: int) -> None:
@@ -249,6 +259,9 @@ class MainWindow(QMainWindow):
     # --- export flows (#72) ------------------------------------------------
 
     def _on_export_mp3(self, bitrate: int) -> None:
+        if self.runner.is_running or self.dump.is_running:
+            self.pipeline.append_log("export: a job is already running.\n")
+            return   # mirror _on_dump_wav: mutually exclude with the runner AND the dump (§5.3)
         game = self.bar.current_game()
         ws = self._workspace()
         try:

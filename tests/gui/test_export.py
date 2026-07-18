@@ -191,6 +191,41 @@ def test_dump_worker_cancel_stops_early(qtbot, tmp_path):
     assert not os.path.exists(dest) or os.listdir(dest) == []
 
 
+def test_dump_worker_mid_batch_cancel_stops_early(qtbot, tmp_path):
+    # The prior cancel test cancels BEFORE run(); here the flag is tripped BETWEEN rows,
+    # so the loop's next-iteration guard must stop the batch with rows still unprocessed.
+    dest = tmp_path / "dest"
+    rows = [("a", None), ("b", None), ("c", None)]
+    signals = _DumpSignals()
+    holder = {}
+
+    class _CancelAfterFirst:
+        """Resolves row 1 normally, then trips the worker's cancel flag mid-row."""
+
+        def __init__(self, wav_dir):
+            self._dir = str(wav_dir)
+            os.makedirs(self._dir, exist_ok=True)
+            self.n = 0
+
+        def resolve_wav(self, line_id, audio_path):
+            self.n += 1
+            path = os.path.join(self._dir, f"src_{line_id}.wav")
+            with open(path, "wb") as f:
+                f.write(b"RIFF" + b"\x00" * 40)
+            if self.n == 1:
+                holder["worker"].cancel()      # cancel BETWEEN row 1 and row 2
+            return path
+
+    resolver = _CancelAfterFirst(tmp_path / "src")
+    worker = _DumpWorker(resolver, rows, str(dest), signals)
+    holder["worker"] = worker
+    _progress, failures, done = _run_worker(worker)
+    assert done == [(1, 0)]                     # only row 1 completed
+    assert resolver.n == 1                       # row 2 never resolved -> stopped early
+    assert failures == []
+    assert sorted(os.listdir(dest)) == ["a.wav"]
+
+
 def test_dump_runner_start_is_single_flight(qtbot, tmp_path):
     resolver = _FakeResolver(tmp_path / "src")
     runner = DumpRunner()
@@ -296,7 +331,53 @@ def test_shell_dump_starts_batch_and_excludes_pipeline(qtbot, tmp_path, monkeypa
     _make_ds_playlist(str(tmp_path))       # a checked row must exist to dump
     w = _mainwindow(qtbot, tmp_path, "ds")
     started = []
-    monkeypatch.setattr(w.dump, "start",
-                        lambda resolver, rows, dest: started.append((rows, dest)) or True)
+
+    def _fake_start(resolver, rows, dest):
+        started.append((rows, dest))
+        w.dump._running = True             # mirror DumpRunner.start flipping is_running
+        return True
+
+    monkeypatch.setattr(w.dump, "start", _fake_start)
     w.library.export.dump_wav_requested.emit(str(tmp_path / "dumpdir"))
     assert started, "expected the dump batch to start on the thread pool"
+    # While the dump runs the pipeline is mutually excluded (spec §5.3): both the
+    # Scan/Bind controls AND the stage-strip Re-run affordance are disabled.
+    assert w.pipeline.controls._scan_btn.isEnabled() is False
+    assert w.pipeline.strip.rerun_enabled() is False
+
+
+def test_shell_dump_running_blocks_pipeline_start(qtbot, tmp_path):
+    # A live dump must refuse a pipeline start even if the handler is invoked directly
+    # (e.g. via the strip's context menu) -- runner.start must never be reached.
+    w = _mainwindow(qtbot, tmp_path, "ds")
+    w.dump._running = True                  # a dump batch is live (is_running -> True)
+    calls = []
+    w.runner.start = lambda argv, cwd=None: calls.append(argv) or True
+    w._on_scan()
+    w._on_rerun("order")
+    assert calls == [], "a pipeline start must be refused while a dump is running"
+
+
+def test_shell_dump_running_blocks_export_mp3(qtbot, tmp_path, monkeypatch):
+    ws = str(tmp_path)
+    _make_ds_playlist(ws)
+    w = _mainwindow(qtbot, tmp_path, "ds")
+    monkeypatch.setattr("deciwaves.gui.shell.config.load", lambda: {"ds_install": r"C:\DS"})
+    w.dump._running = True                  # a dump batch is live
+    calls = []
+    w.runner.start = lambda argv, cwd=None: calls.append(argv) or True
+    w.library.export.export_mp3_requested.emit(128)
+    assert calls == [], "export MP3 must be refused while a dump is running"
+
+
+def test_shell_dump_disables_then_reenables_pipeline_and_strip(qtbot, tmp_path):
+    w = _mainwindow(qtbot, tmp_path, "ds")
+    w.dump._running = True
+    w._sync_running()
+    assert w.pipeline.controls._scan_btn.isEnabled() is False
+    assert w.pipeline.strip.rerun_enabled() is False
+    # DumpRunner clears is_running before emitting finished; simulate the same order.
+    w.dump._running = False
+    w._on_dump_finished(2, 0)
+    assert w.pipeline.controls._scan_btn.isEnabled() is True
+    assert w.pipeline.strip.rerun_enabled() is True
