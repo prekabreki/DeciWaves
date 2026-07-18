@@ -365,6 +365,9 @@ def test_bare_invocation_dispatches_to_run_guided(monkeypatch):
         called["workspace"] = workspace
         return 0
 
+    # Bare `deciwaves` prefers the GUI when the [gui] extra is importable (issue #67);
+    # force it absent so this exercises the guided fallback path it tests.
+    monkeypatch.setattr("deciwaves.cli.main._gui_is_available", lambda: False)
     monkeypatch.setattr("deciwaves.cli.guided.run_guided", _fake_run_guided)
     rc = cli.main([])
     assert rc == 0
@@ -384,6 +387,7 @@ def test_bare_workspace_flag_is_not_silently_ignored(monkeypatch, tmp_path):
         called["workspace"] = workspace
         return 0
 
+    monkeypatch.setattr("deciwaves.cli.main._gui_is_available", lambda: False)
     monkeypatch.setattr("deciwaves.cli.guided.run_guided", _fake_run_guided)
     rc = cli.main(["--workspace", str(tmp_path)])
     assert rc == 0
