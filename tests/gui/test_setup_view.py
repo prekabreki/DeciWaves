@@ -190,6 +190,19 @@ def test_regrade_leaves_a_genuinely_missing_tool_as_failed(qtbot):
     assert s._tool_status["ffmpeg"].text().startswith("FAILED")
 
 
+def test_regrade_restores_failed_text_when_a_softened_tool_goes_missing(qtbot):
+    # WARN (present) -> ERROR (a later Re-check no longer confirms it) must not leave the
+    # stale "using existing copy" text under a red row (#110 review finding).
+    s = SetupScreen(base=[sys.executable, "-c", "pass"])
+    qtbot.addWidget(s)
+    s._on_finished(0, _FFMPEG_FAILED_SUMMARY)
+    s.regrade_against_doctor([DoctorItem("ffmpeg", True, "ok", "ffmpeg: x", "")])
+    assert "existing" in s._tool_status["ffmpeg"].text().lower()   # softened to amber
+    s.regrade_against_doctor([])                                   # tool now gone
+    txt = s._tool_status["ffmpeg"].text()
+    assert "existing" not in txt.lower() and txt.startswith("FAILED")
+
+
 def test_setup_doctor_view_reconciles_rows_when_doctor_refreshes(qtbot, monkeypatch):
     # the wire: a doctor refresh re-grades the setup rows so the two panels can't disagree.
     v = SetupDoctorView(base=[sys.executable, "-c", "pass"])

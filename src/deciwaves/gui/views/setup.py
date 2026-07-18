@@ -259,8 +259,11 @@ class SetupScreen(QWidget):
                 continue
             sev = tool_severity(row, doctor_items)
             status = self._tool_status[tool]
-            if sev == SEV_WARN and row.failed:
-                status.setText("using existing copy (couldn't refresh)")
+            # Always (re)set the text, not just on the WARN branch: a later re-check can move
+            # a row WARN -> ERROR, and leaving the softened text would show "using existing
+            # copy" under a red row for a tool that's now gone (#110 review).
+            softened = sev == SEV_WARN and row.failed
+            status.setText("using existing copy (couldn't refresh)" if softened else row.detail)
             status.setStyleSheet(f"color: {_SEV_STYLE[sev][1]};")
 
     def _on_finished(self, code: int, text: str) -> None:
@@ -278,7 +281,9 @@ class SetupScreen(QWidget):
                 status.setStyleSheet("")
                 continue
             status.setText(row.detail)
-            sev = SEV_ERROR if row.failed else (SEV_OK if row.ok else SEV_NEUTRAL)
+            # Same row-only severity rule as tool_severity (doctor not consulted yet); reuse
+            # it so the pre-doctor paint and the post-doctor regrade can't drift (#110 review).
+            sev = tool_severity(row, [])
             status.setStyleSheet(f"color: {_SEV_STYLE[sev][1]};")
         path_rows = [r for r in self._rows if r.label not in _SETUP_TOOLS]
         self._paths_label.setText("\n".join(f"{r.label}: {r.detail}" for r in path_rows))

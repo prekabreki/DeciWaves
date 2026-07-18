@@ -190,3 +190,17 @@ def test_failed_tool_with_doctor_status_not_ok_stays_error():
 def test_neutral_tool_row_stays_neutral():
     row = SetupRow("ffmpeg", "-- (not set)", ok=False, failed=False)
     assert tool_severity(row, []) == SEV_NEUTRAL
+
+
+def test_fetched_tool_doctor_reports_broken_is_error_not_ok():
+    # reverse contradiction (#110 review): setup fetched ok, but doctor says the binary is
+    # broken (AV quarantine / wrong arch) -- follow doctor, don't show Setup green while
+    # Doctor shows the same tool red.
+    row = SetupRow("ffmpeg", "fetched C:/x/ffmpeg.exe", ok=True, failed=False)
+    assert tool_severity(row, [_doctor("ffmpeg", status="broken")]) == SEV_ERROR
+
+
+def test_fetched_tool_stays_ok_when_doctor_is_silent_or_confirms():
+    row = SetupRow("ffmpeg", "fetched C:/x/ffmpeg.exe", ok=True, failed=False)
+    assert tool_severity(row, []) == SEV_OK                      # doctor has no opinion
+    assert tool_severity(row, [_doctor("ffmpeg")]) == SEV_OK     # doctor confirms present

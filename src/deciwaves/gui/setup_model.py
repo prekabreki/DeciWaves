@@ -17,6 +17,7 @@ from deciwaves.gui.doctor_model import (
     SEV_NEUTRAL,
     SEV_OK,
     SEV_WARN,
+    STATUS_BROKEN,
     STATUS_OK,
     DoctorItem,
 )
@@ -88,15 +89,21 @@ _SETUP_TO_DOCTOR = {t.key: t.display for t in TOOLS}
 def tool_severity(row: SetupRow, doctor_items: list[DoctorItem]) -> str:
     """Severity for a setup tool row, reconciled against doctor's verdict (#110).
 
-    A tool that FAILED to (re-)fetch but that doctor confirms is present + valid
-    (``status == "ok"``) reads as a warning, not a hard error -- otherwise Setup shows a
-    red FAILED while Doctor shows the same tool green, on screen at the same time. Doctor's
-    own ``ok`` flag is True even for optional not_configured/unavailable checks, so this
-    gates on ``status == STATUS_OK``, never on ``ok`` alone."""
+    Doctor is authoritative on a tool's actual state, so the two panels can never show the
+    same tool red-and-green at once -- in *either* direction:
+
+    - a FAILED-to-refetch tool that doctor confirms present + valid is a warning ("using
+      existing copy"), not a hard error;
+    - a "fetched" tool that doctor reports broken (AV-quarantined, wrong arch) is an error,
+      not a green tick.
+
+    Doctor's own ``ok`` flag is True even for optional not_configured/unavailable checks, so
+    this gates on the concrete ``status`` (``ok``/``broken``), never on ``ok`` alone. When
+    doctor has no opinion on the tool the setup row's own state stands."""
+    name = _SETUP_TO_DOCTOR.get(row.label)
+    doc = next((d for d in doctor_items if d.name == name), None)
     if row.ok:
-        return SEV_OK
+        return SEV_ERROR if (doc is not None and doc.status == STATUS_BROKEN) else SEV_OK
     if not row.failed:
         return SEV_NEUTRAL
-    name = _SETUP_TO_DOCTOR.get(row.label)
-    present = any(d.name == name and d.status == STATUS_OK for d in doctor_items)
-    return SEV_WARN if present else SEV_ERROR
+    return SEV_WARN if (doc is not None and doc.status == STATUS_OK) else SEV_ERROR
