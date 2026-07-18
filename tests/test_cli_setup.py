@@ -200,6 +200,74 @@ def test_setup_saves_fw_gamescript_path(tmp_path, monkeypatch):
     assert cfg["fw_gamescript"] == str(gamescript)
 
 
+def test_setup_saves_fw_types_path(tmp_path, monkeypatch):
+    # #103: --fw-types persists a BYO Forbidden West types.json path, mirroring
+    # --fw-gamescript. A real path is saved (absolutized -- see the round-trip
+    # relative-flag test below).
+    types_json = tmp_path / "types.json"
+    monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.setattr(s, "_download_and_unpack", _stub_download_ok)
+    rc = s.run_setup([
+        "--tools-dir", str(tmp_path / "tools"),
+        "--fw-types", str(types_json),
+    ])
+    assert rc == 0
+    cfg = json.loads((tmp_path / "cfg" / "config.json").read_text())
+    assert cfg["fw_types"] == str(types_json)
+
+
+def test_setup_saves_absolute_path_for_relative_fw_types(tmp_path, monkeypatch):
+    # #103: a relative --fw-types is persisted absolute (issue #32 discipline),
+    # same as every other config-sourced path.
+    workdir = tmp_path / "workdir"
+    workdir.mkdir()
+    (workdir / "types.json").write_text("{}", encoding="utf-8")
+    monkeypatch.chdir(workdir)
+    monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.setattr(s, "_download_and_unpack", _stub_download_ok)
+
+    rc = s.run_setup(["--fw-types", "types.json", "--tools-dir", "tools"])
+    assert rc == 0
+
+    cfg = json.loads((tmp_path / "cfg" / "config.json").read_text())
+    assert cfg["fw_types"] == str(workdir / "types.json")
+
+
+def test_setup_second_run_preserves_fw_types_when_omitted(tmp_path, monkeypatch):
+    # #103: registering fw_types, then re-running setup for an unrelated flag
+    # without repeating --fw-types, must not blank it out -- same merge-over-saved
+    # contract (issue #36) as the other config keys.
+    types_json = tmp_path / "types.json"
+    hzd = tmp_path / "hzd.package"
+    cfg_dir = tmp_path / "cfg"
+    monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(cfg_dir))
+    monkeypatch.setattr(s, "_download_and_unpack", _stub_download_ok)
+
+    assert s.run_setup(["--fw-types", str(types_json), "--tools-dir", str(tmp_path / "tools")]) == 0
+    assert s.run_setup(["--hzd-package", str(hzd), "--tools-dir", str(tmp_path / "tools")]) == 0
+
+    cfg = json.loads((cfg_dir / "config.json").read_text())
+    assert cfg["fw_types"] == str(types_json)
+    assert cfg["hzd_package"] == str(hzd)
+
+
+def test_setup_explicit_empty_clears_saved_fw_types(tmp_path, monkeypatch):
+    # #103: `--fw-types ""` clears a previously saved value (the None-default
+    # argparse trick makes "explicit empty" distinguishable from "omitted"),
+    # same recovery path as --fw-gamescript "".
+    types_json = tmp_path / "types.json"
+    types_json.write_text("{}", encoding="utf-8")
+    cfg_dir = tmp_path / "cfg"
+    monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(cfg_dir))
+    monkeypatch.setattr(s, "_download_and_unpack", _stub_download_ok)
+
+    assert s.run_setup(["--fw-types", str(types_json), "--tools-dir", str(tmp_path / "tools")]) == 0
+    assert json.loads((cfg_dir / "config.json").read_text())["fw_types"] == str(types_json)
+
+    assert s.run_setup(["--fw-types", "", "--tools-dir", str(tmp_path / "tools")]) == 0
+    assert json.loads((cfg_dir / "config.json").read_text())["fw_types"] == ""
+
+
 def test_setup_second_run_preserves_fw_gamescript_when_omitted(tmp_path, monkeypatch):
     # Registering fw_gamescript, then later re-running setup for an unrelated
     # game/flag without repeating --fw-gamescript, must not blank it out --

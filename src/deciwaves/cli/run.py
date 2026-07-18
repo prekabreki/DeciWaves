@@ -485,7 +485,16 @@ def _fw_subtitle_bind_argv(ctx: dict) -> list:
     # no override -- see test_fw_subtitle_manifest_defaults.py for the lockstep
     # test guarding that (issue #17: they used to disagree, and this function
     # used to paper over it with an explicit --out).
-    return ["--package-dir", ctx["package"]]
+    #
+    # A persisted fw_types (BYO Decima RTTI map, `deciwaves setup --fw-types`) is
+    # forwarded as --types-json so `fw run` honors it without re-passing it every
+    # time (#103) -- same config-sourced pattern as _fw_match_argv's --gamescript.
+    # When unset, the flag is omitted and subtitle-bind keeps its own
+    # types.json-in-workspace-root default (subtitle_bind.main's --types-json).
+    argv = ["--package-dir", ctx["package"]]
+    if ctx.get("fw_types"):
+        argv += ["--types-json", ctx["fw_types"]]
+    return argv
 
 
 def _fw_match_argv(ctx: dict) -> list:
@@ -534,7 +543,13 @@ def _run_fw(cfg: dict, extra_argv: list) -> int:
     # `or`-based precedence as package/data_dir/oodle above (issue #23).
     gamescript = ns.gamescript or cfg.get("fw_gamescript", "")
 
-    ctx = {"package": package, "gamescript": gamescript}
+    # A persisted fw_types is read straight from config (no `fw run` flag of its
+    # own -- unlike --gamescript): subtitle-bind's --types-json is the only place
+    # it's consumed, and that stage still accepts its own --types-json for one-off
+    # overrides. Empty string / unset both mean "use subtitle-bind's default" (#103).
+    fw_types = cfg.get("fw_types", "")
+
+    ctx = {"package": package, "gamescript": gamescript, "fw_types": fw_types}
     names = [s.name for s in full_chain]
     gate_idx = names.index("match")  # first stage past the BYO --gamescript gate
     last_idx, rc = _slice_bounds("fw", full_chain, ns.from_stage, ns.until)

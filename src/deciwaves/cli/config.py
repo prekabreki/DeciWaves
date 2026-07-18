@@ -7,7 +7,7 @@ from typing import NamedTuple, Optional
 
 from deciwaves.engine.atomic_io import atomic_write
 
-KEYS = ("tools_dir", "ds_install", "hzd_package", "fw_package", "oodle_dll", "fw_gamescript")
+KEYS = ("tools_dir", "ds_install", "hzd_package", "fw_package", "oodle_dll", "fw_gamescript", "fw_types")
 
 # --- decode tool metadata -------------------------------------------------
 # Single source of truth for the three decode tools `deciwaves setup` fetches.

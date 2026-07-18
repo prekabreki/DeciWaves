@@ -50,18 +50,38 @@ def test_none_path_is_omitted_so_setup_keeps_the_saved_value():
 
 def test_all_path_flags_present_when_given():
     argv = build_setup_argv(BASE, ds_install="a", hzd_package="b", fw_package="c",
-                            fw_gamescript="d", tools_dir="e")
+                            fw_gamescript="d", fw_types="f", tools_dir="e")
     for flag in ("--ds-install", "--hzd-package", "--fw-package",
-                 "--fw-gamescript", "--tools-dir"):
+                 "--fw-gamescript", "--fw-types", "--tools-dir"):
         assert flag in argv
+
+
+def test_fw_types_path_is_absolutized(tmp_path, monkeypatch):
+    # #103: --fw-types is a path flag; the GUI always passes it absolute (spec §4).
+    monkeypatch.chdir(tmp_path)
+    argv = build_setup_argv(BASE, fw_types="types.json")
+    val = argv[argv.index("--fw-types") + 1]
+    assert os.path.isabs(val)
+    assert val == os.path.abspath("types.json")
+
+
+def test_fw_types_empty_string_passes_through_to_clear():
+    # `--fw-types ""` CLEARS a saved value; it must reach the CLI verbatim.
+    argv = build_setup_argv(BASE, fw_types="")
+    assert argv[argv.index("--fw-types") + 1] == ""
+
+
+def test_fw_types_none_is_omitted():
+    argv = build_setup_argv(BASE, fw_types=None)
+    assert "--fw-types" not in argv
 
 
 # --- parse_setup_summary (driven by the real _print_summary) ---------------
 
 def _real_summary(capsys, tool_rows, *, ds_install="", oodle_dll="", hzd_package="",
-                  fw_package="", fw_gamescript=""):
+                  fw_package="", fw_gamescript="", fw_types=""):
     cli_setup._print_summary(tool_rows, ds_install, oodle_dll, hzd_package,
-                             fw_package, fw_gamescript)
+                             fw_package, fw_gamescript, fw_types)
     return capsys.readouterr().out
 
 

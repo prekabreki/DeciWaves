@@ -918,6 +918,46 @@ def test_fw_byo_message_quotes_package_path_with_spaces():
     assert '"C:\\Games\\Forbidden West\\package"' in msg
 
 
+def test_fw_subtitle_bind_forwards_configured_types_json(tmp_path, monkeypatch):
+    """#103: a configured fw_types is forwarded to subtitle-bind as
+    --types-json, so a BYO types.json persisted via `deciwaves setup --fw-types`
+    is honored by `fw run` without re-passing it. Mirrors how a configured
+    fw_gamescript reaches the match stage as --gamescript."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    types_json = tmp_path / "types.json"
+    types_json.write_text("{}", encoding="utf-8")
+
+    mods = _mods("fw")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _fw_outputs(mods)))
+
+    cfg = {"fw_package": "PKG", "fw_types": str(types_json)}
+    # --until subtitle-bind: exercise the pre-gate slice, no gamescript needed.
+    rc = run_mod.run_game("fw", cfg, ["--until", "subtitle-bind"])
+    assert rc == 0
+
+    sb_argv = dict(calls)[mods["subtitle-bind"]]
+    assert _after(sb_argv, "--types-json") == str(types_json)
+
+
+def test_fw_subtitle_bind_omits_types_json_when_unset(tmp_path, monkeypatch):
+    """#103: with no fw_types configured, subtitle-bind gets NO --types-json --
+    it keeps its own types.json-in-workspace-root default."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+
+    mods = _mods("fw")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _fw_outputs(mods)))
+
+    rc = run_mod.run_game("fw", {"fw_package": "PKG"}, ["--until", "subtitle-bind"])
+    assert rc == 0
+
+    sb_argv = dict(calls)[mods["subtitle-bind"]]
+    assert "--types-json" not in sb_argv
+
+
 def test_fw_asr_gpu_gate_aborts_without_whisperx(tmp_path, monkeypatch, capsys):
     """Same upfront-scan contract as HZD's bind gate (issue #33): `extract` must
     not run at all if `asr` is going to fail the GPU gate anyway."""
