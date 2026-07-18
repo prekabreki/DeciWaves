@@ -49,7 +49,7 @@ class MainWindow(QMainWindow):
         self._tabs = QTabBar()
         self._tabs.addTab("Pipeline")
         self._tabs.addTab("Library")
-        self._tabs.currentChanged.connect(self.views.setCurrentIndex)
+        self._tabs.currentChanged.connect(self._on_tab_changed)
 
         central = QWidget()
         layout = QVBoxLayout(central)
@@ -80,11 +80,14 @@ class MainWindow(QMainWindow):
         # re-grade the Doctor panel's promoted GPU items for the selected game (spec §3)
         self.bar.game_changed.connect(self.pipeline.setup_doctor.set_game)
         self.bar.game_changed.connect(lambda _g: self._refresh_panels())
+        # reload the Library's line list for the selected game (#70, spec §6)
+        self.bar.game_changed.connect(lambda _g: self._refresh_library())
         self.bar.select_game("ds")   # DS is the built-first vertical slice
         # select_game("ds") leaves the combo on its existing index 0, so game_changed does
         # not fire -- prime the status line and panels for the initial game explicitly.
         self._refresh_status()
         self._refresh_panels()
+        self._refresh_library()
 
     # --- status + panels ---------------------------------------------------
 
@@ -108,6 +111,16 @@ class MainWindow(QMainWindow):
         if self.runner.is_running and self._job_game == game:
             running = self._active_stage(game)
         self.pipeline.refresh_panels(game, self._workspace(), running)
+
+    def _refresh_library(self) -> None:
+        """Reload the Library's line list (#70). Cheap enough for game-change / tab-switch /
+        job-finished; deliberately NOT on the mid-job poll, so it never resets mid-scroll."""
+        self.library.refresh(self.bar.current_game(), self._workspace())
+
+    def _on_tab_changed(self, index: int) -> None:
+        self.views.setCurrentIndex(index)
+        if index == 1:   # Library -- pick up rows written since it was last shown
+            self._refresh_library()
 
     # --- job control -------------------------------------------------------
 
@@ -151,3 +164,4 @@ class MainWindow(QMainWindow):
         self._poll.stop()
         self._job_game = None
         self._refresh_panels()
+        self._refresh_library()   # surface catalog/asr-manifest rows written by Scan/Bind
