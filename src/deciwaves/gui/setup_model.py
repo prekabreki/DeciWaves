@@ -11,6 +11,16 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+from deciwaves.cli.config import TOOLS
+from deciwaves.gui.doctor_model import (
+    SEV_ERROR,
+    SEV_NEUTRAL,
+    SEV_OK,
+    SEV_WARN,
+    STATUS_OK,
+    DoctorItem,
+)
+
 # Labels setup prints in its summary (setup._print_summary): the three fetched tools plus
 # the derived path rows. Used to pick summary lines out of the surrounding chatter.
 _TOOL_LABELS = ("vgmstream", "VGAudio", "ffmpeg")
@@ -68,3 +78,25 @@ def parse_setup_summary(text: str) -> list[SetupRow]:
 def parse_setup_warnings(text: str) -> list[str]:
     """The verbatim ``WARNING:`` lines setup emits (Oodle-not-located, HZD path hints)."""
     return [ln.strip() for ln in text.splitlines() if ln.strip().startswith("WARNING:")]
+
+
+# setup's summary label ("vgmstream") -> doctor's check name ("vgmstream-cli"), so a setup
+# tool row can be reconciled against the matching `doctor --json` check (#110).
+_SETUP_TO_DOCTOR = {t.key: t.display for t in TOOLS}
+
+
+def tool_severity(row: SetupRow, doctor_items: list[DoctorItem]) -> str:
+    """Severity for a setup tool row, reconciled against doctor's verdict (#110).
+
+    A tool that FAILED to (re-)fetch but that doctor confirms is present + valid
+    (``status == "ok"``) reads as a warning, not a hard error -- otherwise Setup shows a
+    red FAILED while Doctor shows the same tool green, on screen at the same time. Doctor's
+    own ``ok`` flag is True even for optional not_configured/unavailable checks, so this
+    gates on ``status == STATUS_OK``, never on ``ok`` alone."""
+    if row.ok:
+        return SEV_OK
+    if not row.failed:
+        return SEV_NEUTRAL
+    name = _SETUP_TO_DOCTOR.get(row.label)
+    present = any(d.name == name and d.status == STATUS_OK for d in doctor_items)
+    return SEV_WARN if present else SEV_ERROR

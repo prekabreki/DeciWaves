@@ -7,8 +7,14 @@ import sys
 import pytest
 
 pytest.importorskip("PySide6")
-from deciwaves.gui.doctor_model import SEV_ERROR, SEV_NEUTRAL, SEV_OK, SEV_WARN  # noqa: E402
-from deciwaves.gui.views.setup import DoctorPanel, SetupScreen  # noqa: E402
+from deciwaves.gui.doctor_model import (  # noqa: E402
+    SEV_ERROR,
+    SEV_NEUTRAL,
+    SEV_OK,
+    SEV_WARN,
+    DoctorItem,
+)
+from deciwaves.gui.views.setup import DoctorPanel, SetupDoctorView, SetupScreen  # noqa: E402
 
 SLOW = "import time\nfor i in range(200):\n print(i, flush=True); time.sleep(0.02)"
 
@@ -133,3 +139,66 @@ def test_setup_screen_is_busy_while_running_then_clears(qtbot):
     with qtbot.waitSignal(s.finished, timeout=8000):
         s.cancel()
     assert s.is_busy is False
+
+
+# --- Doctor auto-run on launch (#107) --------------------------------------
+
+_FFMPEG_FAILED_SUMMARY = (
+    "DeciWaves setup summary:\n"
+    "  ffmpeg     FAILED: ffmpeg ([Errno 13] denied)  //nas/ffmpeg.exe\n"
+)
+
+
+def test_doctor_auto_checks_only_once(qtbot, monkeypatch):
+    # auto_check() runs doctor the first time the panel becomes visible, then never again
+    # on later show/hide cycles.
+    p = DoctorPanel(base=[sys.executable, "-c", "pass"])
+    qtbot.addWidget(p)
+    calls = []
+    monkeypatch.setattr(p, "recheck", lambda: (calls.append(1), True)[-1])
+    assert p.auto_check() is True
+    assert p.auto_check() is False
+    assert calls == [1]
+
+
+def test_doctor_auto_runs_on_first_show(qtbot):
+    # showing the panel (as launch does) kicks a doctor run with no click -- so a healthy
+    # install shows its statuses immediately instead of blank "-" placeholders.
+    p = DoctorPanel(base=[sys.executable, "-c", 'print(\'{"ok": true, "checks": []}\')'])
+    qtbot.addWidget(p)
+    with qtbot.waitSignal(p.refreshed, timeout=8000):
+        p.show()
+
+
+# --- Setup/Doctor status reconciliation (#110) -----------------------------
+
+def test_regrade_downgrades_a_failed_tool_doctor_confirms_present(qtbot):
+    s = SetupScreen(base=[sys.executable, "-c", "pass"])
+    qtbot.addWidget(s)
+    s._on_finished(0, _FFMPEG_FAILED_SUMMARY)
+    assert s._tool_status["ffmpeg"].text().startswith("FAILED")     # red before reconcile
+    s.regrade_against_doctor([DoctorItem("ffmpeg", True, "ok", "ffmpeg: x", "")])
+    txt = s._tool_status["ffmpeg"].text()
+    assert "FAILED" not in txt and "existing" in txt.lower()        # no longer contradicts
+
+
+def test_regrade_leaves_a_genuinely_missing_tool_as_failed(qtbot):
+    s = SetupScreen(base=[sys.executable, "-c", "pass"])
+    qtbot.addWidget(s)
+    s._on_finished(0, _FFMPEG_FAILED_SUMMARY)
+    s.regrade_against_doctor([])                 # doctor doesn't confirm it -> stays FAILED
+    assert s._tool_status["ffmpeg"].text().startswith("FAILED")
+
+
+def test_setup_doctor_view_reconciles_rows_when_doctor_refreshes(qtbot, monkeypatch):
+    # the wire: a doctor refresh re-grades the setup rows so the two panels can't disagree.
+    v = SetupDoctorView(base=[sys.executable, "-c", "pass"])
+    qtbot.addWidget(v)
+    monkeypatch.setattr(v.doctor, "recheck", lambda: True)   # don't spawn on setup.finished
+    v.setup._on_finished(0, _FFMPEG_FAILED_SUMMARY)
+    assert v.setup._tool_status["ffmpeg"].text().startswith("FAILED")
+    import json
+    v.doctor._on_finished(0, json.dumps({"ok": True, "checks": [
+        {"name": "ffmpeg", "ok": True, "status": "ok", "message": "ffmpeg: x", "fix": ""}]}))
+    txt = v.setup._tool_status["ffmpeg"].text()
+    assert "FAILED" not in txt and "existing" in txt.lower()
