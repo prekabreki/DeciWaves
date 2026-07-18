@@ -1,7 +1,6 @@
 """DeciWaves — voice-audio extraction for Decima-engine games you own."""
 import argparse
 import importlib
-import os
 import sys
 from pathlib import Path
 
@@ -88,16 +87,9 @@ def _gui_is_available() -> bool:
     return gui.is_available()
 
 def _apply_config_env():
-    cfg = config.load()
-    if cfg.get("tools_dir") and os.path.isdir(cfg["tools_dir"]):
-        os.environ["PATH"] = cfg["tools_dir"] + os.pathsep + os.environ.get("PATH", "")
-        for tool in config.TOOLS:  # single TOOLS table -- see config.py (issue #32)
-            if not tool.env_var:  # ffmpeg: resolved via PATH, no override env var
-                continue
-            p = Path(cfg["tools_dir"]) / tool.exe
-            if p.is_file():
-                os.environ.setdefault(tool.env_var, str(p))
-    return cfg
+    # Shared with the GUI launch path (see config.apply_tool_env / gui.launch, issue #71) so
+    # the decode tools resolve no matter which console-script started the process.
+    return config.apply_tool_env()
 
 def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)

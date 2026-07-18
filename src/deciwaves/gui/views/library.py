@@ -6,7 +6,7 @@ here ▷ only reflects availability and emits an (as-yet unconnected) ``preview_
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
+from PySide6.QtCore import QAbstractTableModel, QEvent, QModelIndex, Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -226,6 +226,9 @@ class LibraryView(QWidget):
         self._check_none_btn.clicked.connect(self._on_check_none)
         self._undo_btn.clicked.connect(self._on_undo)
         self._table.clicked.connect(self._on_cell_clicked)
+        # desktop conventions (spec §6.5): enter plays the current row, space toggles its
+        # checkbox -- handled here rather than relying on the table's column-dependent default.
+        self._table.installEventFilter(self)
 
     # --- data lifecycle ----------------------------------------------------
 
@@ -348,6 +351,44 @@ class LibraryView(QWidget):
         row = self._model.row_at(index.row())
         if self._available.get(row.line_id, False):  # unavailable ▷ is a no-op
             self.preview_requested.emit(row.line_id)
+
+    def eventFilter(self, obj, event):
+        """Keyboard on the table (spec §6.5): Enter/Return previews the current row (same
+        availability gate as clicking ▷); Space toggles the current row's checkbox from any
+        column, not just the check column."""
+        if obj is self._table and event.type() == QEvent.KeyPress:
+            key = event.key()
+            if key in (Qt.Key_Return, Qt.Key_Enter):
+                self._preview_current_row()
+                return True
+            if key == Qt.Key_Space:
+                self._toggle_current_row_check()
+                return True
+        return super().eventFilter(obj, event)
+
+    def _current_row(self) -> LineRow | None:
+        idx = self._table.currentIndex()
+        return self._model.row_at(idx.row()) if idx.isValid() else None
+
+    def _preview_current_row(self) -> None:
+        row = self._current_row()
+        if row is not None and self._available.get(row.line_id, False):
+            self.preview_requested.emit(row.line_id)
+
+    def _toggle_current_row_check(self) -> None:
+        row = self._current_row()
+        if row is None:
+            return
+        self._set_checked(row.line_id, row.line_id in self._unchecked)  # flip current state
+        self._model.refresh_checks()
+
+    def audio_path_for(self, line_id: str) -> str | None:
+        """The row's ``audio_path`` for *line_id* (DS stream path / FW WAV; ``None`` for HZD or
+        an unknown id) -- the shell hands it to the preview resolver alongside the id."""
+        for r in self._rows:
+            if r.line_id == line_id:
+                return r.audio_path
+        return None
 
     # --- status + test accessors -------------------------------------------
 

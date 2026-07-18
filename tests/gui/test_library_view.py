@@ -9,10 +9,16 @@ import wave
 import pytest
 
 pytest.importorskip("PySide6")
-from PySide6.QtCore import Qt  # noqa: E402
+from PySide6.QtCore import QEvent, Qt  # noqa: E402
+from PySide6.QtGui import QKeyEvent  # noqa: E402
+from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from deciwaves.gui.library_model import load_selection  # noqa: E402
 from deciwaves.gui.views.library import LibraryView  # noqa: E402
+
+
+def _send_key(widget, key):
+    QApplication.sendEvent(widget, QKeyEvent(QEvent.KeyPress, key, Qt.NoModifier))
 
 DS_CAT = ["line_id", "core_path", "line_index", "category", "scene", "speaker_code",
           "speaker_name", "subtitle_en", "wem_path_en", "language"]
@@ -165,6 +171,49 @@ def test_preview_requested_emitted(qtbot, tmp_path):
     with qtbot.waitSignal(v.preview_requested) as blocker:
         v._on_cell_clicked(idx)
     assert blocker.args == ["a"]
+
+
+def test_enter_key_previews_current_row(qtbot, tmp_path):
+    """Enter on the current row emits preview_requested for it (spec §6.5 'enter plays')."""
+    ws = str(tmp_path)
+    _write_ds_catalog(ws, [_cat_row(line_id="a"), _cat_row(line_id="b")])
+    v = LibraryView()
+    qtbot.addWidget(v)
+    v.refresh("ds", ws)
+    v._table.setCurrentIndex(v._model.index(1, v._model.COL_ID))  # row "b"
+    got = []
+    v.preview_requested.connect(got.append)
+    _send_key(v._table, Qt.Key_Return)
+    assert got == ["b"]
+
+
+def test_enter_key_on_unavailable_row_is_noop(qtbot, tmp_path):
+    """Enter never previews an unavailable line (HZD pre-bind), same gate as clicking ▷."""
+    ws = str(tmp_path)
+    _write_csv(os.path.join(ws, "out", "hzd", "catalog.csv"), DS_CAT,
+               [_cat_row(line_id="h1", wem_path_en="")])
+    v = LibraryView()
+    qtbot.addWidget(v)
+    v.refresh("hzd", ws)
+    v._table.setCurrentIndex(v._model.index(0, v._model.COL_ID))
+    v.preview_requested.connect(lambda _lid: pytest.fail("unavailable row must not preview"))
+    _send_key(v._table, Qt.Key_Return)
+
+
+def test_space_key_toggles_current_row_checkbox(qtbot, tmp_path):
+    """Space toggles the current row's checkbox from any column (spec §6.5 'space toggles')."""
+    ws = str(tmp_path)
+    _write_ds_catalog(ws, [_cat_row(line_id="a"), _cat_row(line_id="b")])
+    v = LibraryView()
+    qtbot.addWidget(v)
+    v.refresh("ds", ws)
+    v._table.setCurrentIndex(v._model.index(0, v._model.COL_ID))  # row "a", not the check col
+    assert v.checked_count() == 2
+    _send_key(v._table, Qt.Key_Space)
+    assert v.checked_count() == 1
+    assert "a" in load_selection(ws, "ds")
+    _send_key(v._table, Qt.Key_Space)  # toggles back
+    assert v.checked_count() == 2
 
 
 def test_preview_column_availability_hzd_prebind_dimmed(qtbot, tmp_path):

@@ -22,5 +22,10 @@ def launch(argv=None) -> int:
     if not is_available():
         print(f"The DeciWaves GUI needs the [gui] extra. Install it with:\n    {INSTALL_HINT}")
         return 1
+    # Apply persisted tool paths (DECIWAVES_VGMSTREAM/VGAUDIO) here too: the `deciwaves-gui`
+    # gui_scripts shortcut lands on this function directly, bypassing cli.main()'s own
+    # _apply_config_env(), so without this inline preview (#71) couldn't find the decoders.
+    from deciwaves.cli import config
+    config.apply_tool_env()
     from deciwaves.gui.app import run_app
     return run_app(argv)
