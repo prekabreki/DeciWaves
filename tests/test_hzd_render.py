@@ -300,17 +300,24 @@ def test_hzd_render_main_zero_decode_exits_nonzero(tmp_path, monkeypatch, capsys
     assert str(tmp_path / "render-errors.log") in out
 
 
+# A manifest row whose tier is unbound (build_spine drops it) -> a NON-EMPTY
+# manifest that still yields an empty spine: the legit "selection matched
+# nothing" no-op (rc 0), as distinct from an empty-INPUT manifest (0 rows ->
+# rc 1, issue #85). "3" is not in render.BOUND_TIERS.
+_UNBOUND_ROW = {"clip_row": "10", "line_id": "MQ04_a", "tier": "3"}
+
+
 def test_hzd_render_main_empty_spine_is_a_noop_success(tmp_path, monkeypatch, capsys):
-    """An empty spine is a NO-OP, not a failure -- DS's empty-playlist
-    precedent (review of #64: `--spine-only` against a bind that so far bound
-    only side/DLC scenes legitimately yields zero main-quest rows; failing
-    would give a deliberate narrowing the same rc as a broken decoder). Still
-    loud, with mode-appropriate wording: default full-reel mode is about
-    bound STORY rows, not just main-quest ones. The no-op must fire BEFORE the
-    pack is opened and before any dir/errors side effect -- pinned here (as the
-    FW twin does) so a refactor that moved the guard below HzdPackage() or
-    os.makedirs can't regress silently."""
-    argv = _main_fixture(tmp_path, [])  # headers-only manifest -> empty spine
+    """An empty SELECTION (rows present, none bound) is a NO-OP, not a failure
+    -- DS's empty-playlist precedent (review of #64: `--spine-only` against a
+    bind that so far bound only side/DLC scenes legitimately yields zero
+    main-quest rows; failing would give a deliberate narrowing the same rc as a
+    broken decoder). Still loud, with mode-appropriate wording: default
+    full-reel mode is about bound STORY rows, not just main-quest ones. The
+    no-op must fire BEFORE the pack is opened and before any dir/errors side
+    effect -- pinned here (as the FW twin does) so a refactor that moved the
+    guard below HzdPackage() or os.makedirs can't regress silently."""
+    argv = _main_fixture(tmp_path, [_UNBOUND_ROW])  # rows present, none bound -> empty spine
     monkeypatch.setattr(render, "HzdPackage", _no_pack_open)  # opening it fails the test
 
     rc = render.main(argv)
@@ -326,10 +333,10 @@ def test_hzd_render_main_empty_spine_is_a_noop_success(tmp_path, monkeypatch, ca
 
 
 def test_hzd_render_main_empty_spine_only_names_main_quest_rows(tmp_path, monkeypatch, capsys):
-    """The empty-spine wording is mode-dependent; --spine-only must name the
+    """The empty-selection wording is mode-dependent; --spine-only must name the
     main-quest subset (review of #64) -- the branch the default-mode test above
     can't reach, so without this a wording/predicate regression ships green."""
-    argv = _main_fixture(tmp_path, []) + ["--spine-only"]
+    argv = _main_fixture(tmp_path, [_UNBOUND_ROW]) + ["--spine-only"]
     monkeypatch.setattr(render, "HzdPackage", _no_pack_open)
 
     rc = render.main(argv)
@@ -344,7 +351,7 @@ def test_hzd_render_main_empty_spine_drops_stale_errors_log(tmp_path, monkeypatc
     """Same rewritten-each-run contract as FW: the no-op drops a prior run's
     render-errors.log so it isn't misread as this run's failures (review of
     #64) -- decode, its only writer, never runs on the no-op."""
-    argv = _main_fixture(tmp_path, [])  # headers-only manifest -> empty spine
+    argv = _main_fixture(tmp_path, [_UNBOUND_ROW])  # rows present, none bound -> empty spine
     stale = tmp_path / "render-errors.log"
     stale.write_text("MQ99\t9\tprior-run failure\n", encoding="utf-8")
     monkeypatch.setattr(render, "HzdPackage", _no_pack_open)
@@ -353,3 +360,25 @@ def test_hzd_render_main_empty_spine_drops_stale_errors_log(tmp_path, monkeypatc
 
     assert rc == 0
     assert not stale.exists()   # gone, not silently attributed to this no-op
+
+
+def test_hzd_render_main_empty_input_manifest_is_upstream_error(tmp_path, monkeypatch, capsys):
+    """A header-only manifest (0 rows) means an upstream stage (bind) produced
+    nothing -- a broken/empty pipeline, NOT a deliberate selection. It must fail
+    LOUD (rc 1) so `hzd run`/the GUI stage strip can't show render green with
+    zero audio end-to-end (issue #85; the empty-INPUT case #64/#63/#81 exist to
+    kill). Fires before the pack is opened, and drops a stale errors log."""
+    argv = _main_fixture(tmp_path, [])  # headers-only manifest -> empty INPUT
+    stale = tmp_path / "render-errors.log"
+    stale.write_text("MQ99\t9\tprior-run failure\n", encoding="utf-8")
+    monkeypatch.setattr(render, "HzdPackage", _no_pack_open)  # must not open the pack
+
+    rc = render.main(argv)
+
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "ERROR" in out
+    assert "no rows" in out
+    assert str(tmp_path / "manifest.csv") in out
+    assert not stale.exists()                 # stale log dropped, not attributed here
+    assert not (tmp_path / "audio").exists()  # fired before any decode/assemble

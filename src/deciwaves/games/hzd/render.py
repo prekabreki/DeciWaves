@@ -223,22 +223,39 @@ def main(argv=None):
     else:
         from deciwaves.games.hzd.episode_map import HZD_EPISODE_MAP
         episode_map = HZD_EPISODE_MAP
-    spine = build_spine(_load_csv(a.manifest), catalog, clip_index, episode_map=episode_map)
+    manifest_rows = _load_csv(a.manifest)
+    spine = build_spine(manifest_rows, catalog, clip_index, episode_map=episode_map)
     kind = "main-quest spine" if a.spine_only else "full story reel"
     print(f"{kind}: {len(spine)} lines across {len({s.episode for s in spine})} scenes")
     if not spine:
-        # An empty spine is a NO-OP, not a failure -- DS's empty-playlist
-        # precedent (review of #64: `--spine-only` against a bind that so far
-        # bound only side/DLC scenes legitimately yields zero main-quest rows;
-        # failing would give that deliberate narrowing the same rc as a broken
-        # decode toolchain). Checked here, before the pack is opened.
-        # Drop a stale render-errors.log from a PRIOR run: decode (its only
-        # writer, which rewrites it each run) never runs on a no-op, so a
+        # Checked here, before the pack is opened. Drop a stale
+        # render-errors.log from a PRIOR run: decode (its only writer, which
+        # rewrites it each run) never runs on either branch below, so a
         # leftover log would otherwise be misread as this run's failures.
+        # (The --package pre-check above still runs first, so a legit-empty
+        # selection plus an invalid --package returns the package error, not
+        # this no-op -- a documented asymmetry vs FW, issue #85; an invalid
+        # package genuinely can't render, so rc 1 there is defensible.)
         try:
             os.remove(a.errors)
         except OSError:
             pass
+        if not manifest_rows:
+            # Empty INPUT: a header-only manifest means an upstream stage (bind)
+            # produced nothing -- a broken/empty pipeline, not a selection. Fail
+            # LOUD (issue #85) so `hzd run`/the GUI stage strip can't show
+            # render green with zero audio end-to-end -- the empty-input
+            # sub-case of the partial-rip-looks-complete failure #64/#63/#81
+            # exist to kill.
+            print(f"render: ERROR - {a.manifest} has no rows -- upstream "
+                  f"produced no lines to render. Re-run `deciwaves hzd bind`; "
+                  f"no reels written to {a.out_dir}.")
+            return 1
+        # Empty SELECTION: rows present, none bound/in-scope. A legitimate
+        # NO-OP, not a failure -- DS's empty-playlist precedent (review of #64:
+        # `--spine-only` against a bind that so far bound only side/DLC scenes
+        # legitimately yields zero main-quest rows; failing would give that
+        # deliberate narrowing the same rc as a broken decode toolchain).
         what = ("bound main-quest rows (--spine-only)" if a.spine_only
                 else "bound story rows")
         print(f"render: nothing to render: {a.manifest} has no {what} -- "
