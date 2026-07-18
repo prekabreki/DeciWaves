@@ -41,7 +41,10 @@ def test_bind_confirms_gpu_then_runs(qtbot, tmp_path, monkeypatch):
     monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: QMessageBox.Yes)
     calls = _capture_jobs(w)
     w.pipeline.controls._bind_btn.click()
-    assert calls and calls[0][-1] == "run" and "--until" not in calls[0]
+    # `hzd run`, resuming into bind; the per-game panel now threads its first-bind cap (#73),
+    # so `run` is followed by the panel's default --sample-cap 300 (never a --until slice).
+    assert calls and "run" in calls[0] and "--until" not in calls[0]
+    assert calls[0][calls[0].index("--sample-cap") + 1] == "300"
 
 
 def test_bind_aborts_when_gpu_declined(qtbot, tmp_path, monkeypatch):

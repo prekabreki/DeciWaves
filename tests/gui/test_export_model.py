@@ -287,6 +287,63 @@ def test_fw_argv_tiers_cover_every_tier_present(tmp_path, parsed_stage_args):
     assert {i.line_id for i in kept} == {"a", "b", "c", "d", "e"}   # nothing tier-dropped
 
 
+# --- render_selection_argv scope kwargs (#73, backward-compatible) ---------
+
+def test_ds_main_story_kwarg_appends_flag(tmp_path, parsed_stage_args):
+    from deciwaves.engine import render as ds_render
+    ws = str(tmp_path)
+    _make_ds_playlist(ws, ["a"])
+    csv_path = write_render_selection(ws, "ds", unchecked=set())
+    cfg = {"ds_install": r"C:\DS"}
+    argv = render_selection_argv(default_base(), ws, "ds", csv_path, bitrate=128, cfg=cfg,
+                                 main_story=True)
+    assert "--main-story" in argv
+    ns = parsed_stage_args(ds_render.main, _stage_tokens(argv))
+    assert ns.main_story is True
+    # regression guard: the default (no kwarg) still omits it -- #72's contract.
+    unscoped = render_selection_argv(default_base(), ws, "ds", csv_path, bitrate=128, cfg=cfg)
+    assert "--main-story" not in unscoped
+
+
+def test_hzd_spine_only_kwarg_appends_flag(tmp_path, parsed_stage_args):
+    from deciwaves.games.hzd import render as hzd_render
+    ws = str(tmp_path)
+    _make_hzd_manifest(ws, ["x"])
+    csv_path = write_render_selection(ws, "hzd", unchecked=set())
+    cfg = {"hzd_package": "PKG"}
+    argv = render_selection_argv(default_base(), ws, "hzd", csv_path, bitrate=128, cfg=cfg,
+                                 spine_only=True)
+    assert "--spine-only" in argv
+    ns = parsed_stage_args(hzd_render.main, _stage_tokens(argv))
+    assert ns.spine_only is True
+    unscoped = render_selection_argv(default_base(), ws, "hzd", csv_path, bitrate=128, cfg=cfg)
+    assert "--spine-only" not in unscoped
+
+
+def test_fw_explicit_tiers_replace_union_and_can_drop_a_row(tmp_path, parsed_stage_args):
+    from deciwaves.games.fw import render as fw_render
+    ws = str(tmp_path)
+    root = os.path.join(ws, "out", "fw")
+    _write_csv(os.path.join(root, "full-reel-manifest.csv"), FW_COLS, [
+        _fw_row("a", tier="1"), _fw_row("w", tier="W"),
+    ])
+    csv_path = write_render_selection(ws, "fw", unchecked=set())
+    # explicit tiers REPLACE the present-tier union -- the W row is intentionally dropped.
+    argv = render_selection_argv(default_base(), ws, "fw", csv_path, bitrate=128, cfg={},
+                                 tiers="1,2,S")
+    ns = parsed_stage_args(fw_render.main, _stage_tokens(argv))
+    assert ns.tiers == "1,2,S"
+    kept = fw_render.build_spine(
+        [_fw_row("a", tier="1", gamescript_index="0"),
+         _fw_row("w", tier="W", gamescript_index="1")],
+        bound_tiers={"1", "2", "S"})
+    assert {i.line_id for i in kept} == {"a"}   # the W-tier row is scope-narrowed out
+    # regression guard: with no explicit tiers, the union covers every present tier (#72).
+    unscoped = render_selection_argv(default_base(), ws, "fw", csv_path, bitrate=128, cfg={})
+    ns2 = parsed_stage_args(fw_render.main, _stage_tokens(unscoped))
+    assert {t.strip() for t in ns2.tiers.split(",")} == {"1", "W"}
+
+
 # --- catalog_source_path ---------------------------------------------------
 
 def test_catalog_source_ds_and_hzd(tmp_path):
