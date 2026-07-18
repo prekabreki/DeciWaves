@@ -119,6 +119,13 @@ def main(argv=None):
                          "rip is distinguishable from a complete one on disk")
     a = ap.parse_args(argv)
 
+    # Invalidate this stage's prior coverage section on ENTRY -- before the
+    # --package preflight and the circuit-breaker abort below -- so a forced
+    # re-run (marker deleted) that fails early leaves "coverage unknown", not a
+    # stale claim, keeping section-absent == marker-absent in sync (issue #81;
+    # #87 finding 2). Only a successful run re-writes the section at the end.
+    clear_stage_coverage(a.coverage_out, "bind")
+
     cat = load_catalog_dict(a.catalog)
     story_ids = {lid for lid, r in cat.items()
                  if r.get("category") != "ambient" and r.get("subtitle_en", "").strip()}
@@ -271,11 +278,6 @@ def main(argv=None):
                          "score": round(score, 1), "transcript": transcripts.get(cr, "")})
 
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
-    # About to replace the manifest: drop the old coverage section first, so a
-    # failure between this rewrite and the section write below leaves
-    # "coverage unknown" rather than a stale claim (issue #81, same contract
-    # as wem_metadata.py).
-    clear_stage_coverage(a.coverage_out, "bind")
     with open(a.out, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=MANIFEST_COLS)
         w.writeheader()

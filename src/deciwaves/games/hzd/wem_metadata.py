@@ -104,6 +104,14 @@ def main(argv=None):
                          "trusted)")
     a = ap.parse_args(argv)
 
+    # Invalidate this stage's prior coverage section on ENTRY -- before any
+    # early-return failure path below -- so a forced re-run (marker deleted)
+    # that fails the preflight, or can't recompute coverage, leaves "coverage
+    # unknown" rather than a stale claim, keeping section-absent == marker-absent
+    # in sync (issue #81; #87 finding 2). Only a successful run re-writes the
+    # section at the end.
+    clear_stage_coverage(a.coverage_out, "wem-metadata")
+
     from deciwaves.games.hzd.profile import hzd_package_error
     err = hzd_package_error(a.package)
     if err:
@@ -119,6 +127,7 @@ def main(argv=None):
     # live pack's locators fingerprint; see the module docstring for the 3 outcomes.
     paths = read_core_paths_sidecar(a.cores)
     stale = False
+    rescanned = False   # did the pack get (re)scanned this run? -> whether --sample-cap applied
     if paths is not None:
         header = read_core_paths_sidecar_header(a.cores)
         if header is None:
@@ -141,6 +150,7 @@ def main(argv=None):
                   f"(run `hzd catalog` first to skip this full-pack scan)", flush=True)
         harvested = harvest_sentence_cores(fw, sample_cap=a.sample_cap or None)
         paths = select_sentence_cores(harvested)
+        rescanned = True
         if stale:
             if a.sample_cap:
                 print(f"sample-cap active: stale {a.cores} left untouched, not "
@@ -152,11 +162,6 @@ def main(argv=None):
 
     cores_failed = 0
     lines_written = 0
-    # About to replace a.out: the previous run's persisted coverage section
-    # describes the OLD file, so drop it NOW -- a failure between this rewrite
-    # and the fresh section write at the end must leave "coverage unknown",
-    # not a stale claim about content that no longer exists (issue #81).
-    clear_stage_coverage(a.coverage_out, "wem-metadata")
     with open(a.out, "w", newline="", encoding="utf-8") as f, \
          open(a.errors, "w", encoding="utf-8") as ferr:
         w = csv.writer(f)
@@ -181,16 +186,29 @@ def main(argv=None):
 
     print(f"wem-metadata: {len(paths)} cores ({cores_failed} failed), "
           f"{lines_written} lines -> {a.out}")
-    report = coverage_report(a.out, a.catalog)
-    print(report)
-    # Persist what the two lines above print (issue #63): coverage numbers
-    # were stdout-only, so a partial scan looked complete on disk.
-    write_stage_coverage(a.coverage_out, "wem-metadata", {
-        "cores": len(paths), "cores_failed": cores_failed,
-        "lines_written": lines_written,
-        # The cap in effect (issue #81): a capped rescan must be
-        # distinguishable on disk from a complete scan, like bind's section.
-        "sample_cap": a.sample_cap, **report})
+    # Coverage bookkeeping must never fail a stage whose real product -- the
+    # metadata CSV above, built WITHOUT the catalog -- already succeeded (issue
+    # #87 finding 1). coverage_report opens --catalog, which a missing or
+    # UTF-16-resaved file makes raise (FileNotFoundError/UnicodeDecodeError)
+    # AFTER the CSV is written; under `hzd run` that would discard a completed
+    # stage. On failure: warn and exit 0, leaving the section absent (cleared on
+    # entry) = "coverage unknown", since it couldn't be computed.
+    try:
+        report = coverage_report(a.out, a.catalog)
+        print(report)
+        # Persist what the report prints (issue #63): coverage numbers were
+        # stdout-only, so a partial scan looked complete on disk.
+        write_stage_coverage(a.coverage_out, "wem-metadata", {
+            "cores": len(paths), "cores_failed": cores_failed,
+            "lines_written": lines_written,
+            # The cap in effect (issue #81, #87 finding 5): recorded only when a
+            # rescan actually ran -- a trusted sidecar makes --sample-cap a
+            # no-op, and a complete scan must not read as capped on disk.
+            "sample_cap": a.sample_cap if rescanned else 0, **report})
+    except (OSError, ValueError) as exc:
+        print(f"warning: couldn't compute story coverage from {a.catalog} "
+              f"({exc}) -- the metadata CSV {a.out} is unaffected; this stage's "
+              f"coverage is left unknown")
     return 0
 
 

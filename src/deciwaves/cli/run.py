@@ -81,7 +81,17 @@ def _remove_marker(game: str, stage_name: str) -> None:
     section (engine/coverage.py, issue #63) must stop asserting the old
     completeness too, or the GUI coverage bar would keep reporting a bind the
     pipeline itself just declared stale (issue #81). No-op for stages/games
-    that never wrote a section."""
+    that never wrote a section.
+
+    Scope (issue #87 finding 4): this clears the section in the DEFAULT
+    coverage artifact only. `run` (and thus the GUI) never overrides a stage's
+    ``--coverage-out``, so within the chained/GUI path the stage wrote there and
+    this clears exactly it. A stage run STANDALONE with a non-default
+    ``--coverage-out`` wrote its section elsewhere, and `run` has no record of
+    that path to invalidate -- so a later `--from`/cascade won't clear it. That
+    custom-path staleness is out of scope by design (threading per-stage
+    coverage paths through the marker system would be over-engineering for a
+    non-GUI edge)."""
     try:
         os.remove(_done_marker(game, stage_name))
     except FileNotFoundError:
