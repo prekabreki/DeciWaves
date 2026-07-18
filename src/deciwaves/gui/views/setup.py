@@ -103,6 +103,10 @@ class DoctorPanel(QWidget):
     def items(self) -> list[DoctorItem]:
         return list(self._items)
 
+    def last_payload(self) -> dict | None:
+        """The most recent ``doctor --json`` payload (for the pre-bind CUDA probe, #69)."""
+        return self._payload
+
     def severity_of(self, name: str) -> str:
         for item in self._items:
             if item.name == name:
