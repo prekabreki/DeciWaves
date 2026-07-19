@@ -84,7 +84,9 @@ class DoctorPanel(QWidget):
 
         layout = QVBoxLayout(self)
         header = QHBoxLayout()
-        header.addWidget(QLabel("<b>Doctor</b>"))
+        label = QLabel("<b>Doctor</b>")
+        label.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
+        header.addWidget(label)
         header.addStretch(1)
         header.addWidget(self._recheck_btn)
         layout.addLayout(header)
@@ -146,10 +148,13 @@ class DoctorPanel(QWidget):
         h = QHBoxLayout(row)
         h.setContentsMargins(0, 0, 0, 0)
         marker = QLabel(glyph)
+        marker.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
         marker.setStyleSheet(f"color: {colour};")
         h.addWidget(marker)
         text = item.message if not item.fix else f"{item.message}  —  Fix: {item.fix}"
-        h.addWidget(QLabel(text), 1)
+        text_label = QLabel(text)
+        text_label.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
+        h.addWidget(text_label, 1)
         return row
 
     def _on_finished(self, _code: int, text: str) -> None:
@@ -191,15 +196,19 @@ class SetupScreen(QWidget):
         for tool in _SETUP_TOOLS:
             tools_box.addLayout(self._tool_row(tool))
 
-        self._paths_label = QLabel("")   # ds_install / oodle / hzd / fw summary rows
+        self._paths_label = QLabel("")
         self._paths_label.setWordWrap(True)
+        self._paths_label.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
         self._warnings_label = QLabel("")
         self._warnings_label.setWordWrap(True)
+        self._warnings_label.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
         self._warnings_label.setStyleSheet(f"color: {_SEV_STYLE[SEV_WARN][1]};")
 
         layout = QVBoxLayout(self)
         header = QHBoxLayout()
-        header.addWidget(QLabel("<b>Setup</b>"))
+        label = QLabel("<b>Setup</b>")
+        label.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
+        header.addWidget(label)
         header.addStretch(1)
         for btn in (self._run_btn, self._redownload_btn, self._recheck_btn):
             header.addWidget(btn)
@@ -210,12 +219,15 @@ class SetupScreen(QWidget):
 
     def _tool_row(self, tool: str) -> QHBoxLayout:
         h = QHBoxLayout()
-        h.addWidget(QLabel(tool))
+        label = QLabel(tool)
+        label.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
+        h.addWidget(label)
         spinner = QProgressBar()
         spinner.setRange(0, 0)      # indeterminate -- setup emits no download progress
         spinner.setVisible(False)
         spinner.setMaximumWidth(120)
         status = QLabel("—")
+        status.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
         self._tool_spinner[tool] = spinner
         self._tool_status[tool] = status
         h.addStretch(1)
