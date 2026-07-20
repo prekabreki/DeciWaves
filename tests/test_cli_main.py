@@ -181,6 +181,23 @@ def test_non_run_stage_help_does_not_execute_the_stage(tmp_path, capsys):
     assert not (tmp_path / "out").exists()
 
 
+def test_redirected_help_on_cp1252_stdout_does_not_mojibake():
+    """``deciwaves --help`` with stdout redirected to a file on a cp1252 Windows
+    console must not raise ``UnicodeEncodeError`` (issue #59). Use a real
+    ``io.TextIOWrapper`` around ``BytesIO`` with cp1252 encoding -- the same
+    arrangement Python creates when stdout is piped to a file -- so encoding
+    is exercised, unlike ``capsys``'s ``StringIO`` which never encodes."""
+    import io
+    fake_stdout = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+    saved, cli.sys.stdout = cli.sys.stdout, fake_stdout
+    try:
+        with pytest.raises(SystemExit) as exc:
+            cli.main(["--help"])
+        assert exc.value.code == 0
+    finally:
+        cli.sys.stdout = saved
+
+
 def test_relative_stage_flag_path_survives_workspace_chdir(monkeypatch, tmp_path):
     """chdir-before-dispatch used to mis-resolve relative stage-flag paths: a
     relative --gamescript is meant relative to where the user ran `deciwaves`

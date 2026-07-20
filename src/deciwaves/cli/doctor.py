@@ -6,7 +6,7 @@ record (``name`` / ``status`` / ``message`` / ``fix``) that both renders the
 human ``[ok]``/``[--]`` report line AND serializes to JSON, so callers never
 substring-parse the text. ``run_doctor`` wires them together and prints either
 the text report (default) or ``--json`` (issue #65: the GUI's Doctor panel,
-docs/deciwaves-gui-spec.md §3, renders the checks as a status list without
+docs/deciwaves-gui-spec.md sec. 3, renders the checks as a status list without
 parsing text).
 
 Exit-code contract: 0 only when every *required* check passes. Missing tools

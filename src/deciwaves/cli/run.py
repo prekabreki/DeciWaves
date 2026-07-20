@@ -1,4 +1,4 @@
-"""``deciwaves <game> run`` — chain a game's stages end-to-end, with resume + gating.
+"""``deciwaves <game> run`` -- chain a game's stages end-to-end, with resume + gating.
 
 Deliberately dumb and explicit (YAGNI): a :class:`Stage` is a name, its STAGES module
 string, and a function that builds that stage's argv from a small per-game context
