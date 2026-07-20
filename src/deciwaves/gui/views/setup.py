@@ -152,6 +152,7 @@ class DoctorPanel(QWidget):
         h.addWidget(marker)
         text = item.message if not item.fix else f"{item.message}  —  Fix: {item.fix}"
         text_label = QLabel(text)
+        text_label.setWordWrap(True)
         text_label.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
         h.addWidget(text_label, 1)
         return row
