@@ -141,6 +141,27 @@ def test_issues_panel_lists_error_groups(qtbot, tmp_path):
     assert any(g.source == "catalog-errors.log" for g in p.groups())
 
 
+# --- Tooltips ---------------------------------------------------------------
+
+def test_stage_chips_have_tooltips(qtbot, tmp_path):
+    from deciwaves.gui.views.pipeline_panels import StageStrip
+    _touch_marker(str(tmp_path), "hzd", "catalog")
+    s = StageStrip()
+    qtbot.addWidget(s)
+    s.refresh("hzd", str(tmp_path))
+    # each chip label should have a non-empty tooltip
+    for i in range(s._row.count()):
+        w = s._row.itemAt(i).widget()
+        if w is not None:
+            assert w.toolTip(), f"Stage chip at index {i} should have a non-empty tooltip"
+
+
+def test_issues_header_has_tooltip(qtbot):
+    p = IssuesPanel()
+    qtbot.addWidget(p)
+    assert p._header.toolTip(), "Issues header should have a non-empty tooltip"
+
+
 def test_issues_panel_empty_when_clean(qtbot, tmp_path):
     p = IssuesPanel()
     qtbot.addWidget(p)

@@ -141,6 +141,22 @@ def test_setup_screen_is_busy_while_running_then_clears(qtbot):
     assert s.is_busy is False
 
 
+# --- Tooltips ---------------------------------------------------------------
+
+def test_doctor_recheck_button_has_tooltip(qtbot):
+    p = DoctorPanel()
+    qtbot.addWidget(p)
+    assert p._recheck_btn.toolTip(), "Doctor Re-check button should have a non-empty tooltip"
+
+
+def test_setup_buttons_have_tooltips(qtbot):
+    s = SetupScreen()
+    qtbot.addWidget(s)
+    assert s._run_btn.toolTip(), "Run setup button should have a non-empty tooltip"
+    assert s._redownload_btn.toolTip(), "Re-download button should have a non-empty tooltip"
+    assert s._recheck_btn.toolTip(), "Re-check button should have a non-empty tooltip"
+
+
 # --- Doctor auto-run on launch (#107) --------------------------------------
 
 _FFMPEG_FAILED_SUMMARY = (

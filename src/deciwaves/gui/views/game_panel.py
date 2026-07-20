@@ -83,6 +83,7 @@ class GamePanel(QWidget):
 
         # --- render scope: DS --main-story ---
         self._main_story = QCheckBox("Main story only (--main-story)")
+        self._main_story.setToolTip("Only include main story missions, skip side content")
         main_story_box = self._wrap(self._row(self._main_story))
 
         # --- render scope: HZD --spine-only ---
@@ -97,8 +98,11 @@ class GamePanel(QWidget):
         # --- DS transcript picker + re-order affordance (transient, NOT persisted) ---
         self._transcript_edit = QLineEdit()
         self._transcript_edit.setPlaceholderText("Narrative transcript (BYO, optional)")
+        self._transcript_edit.setToolTip("Path to a narrative transcript file for story ordering")
         self._transcript_browse = QPushButton("Browse…")
+        self._transcript_browse.setToolTip("Browse for a narrative transcript file")
         self._reorder_btn = QPushButton("Re-order with transcript")
+        self._reorder_btn.setToolTip("Re-order episodes using the selected transcript")
         transcript_box = self._wrap(self._row(
             QLabel("Transcript:"), self._transcript_edit,
             self._transcript_browse, self._reorder_btn))
@@ -106,7 +110,9 @@ class GamePanel(QWidget):
         # --- FW required types.json picker ---
         self._types_edit = QLineEdit()
         self._types_edit.setReadOnly(True)
+        self._types_edit.setToolTip("Path to types.json (required for subtitle bind)")
         self._types_browse = QPushButton("Browse…")
+        self._types_browse.setToolTip("Browse for types.json")
         self._types_status = QLabel("")
         types_box = self._wrap(
             self._row(QLabel("types.json (required):"), self._types_edit, self._types_browse),
@@ -116,7 +122,9 @@ class GamePanel(QWidget):
         self._gamescript_edit = QLineEdit()
         self._gamescript_edit.setReadOnly(True)
         self._gamescript_edit.setPlaceholderText("Gamescript (BYO, optional -- speaker + order)")
+        self._gamescript_edit.setToolTip("Path to a gamescript file for speaker labels and ordering")
         self._gamescript_browse = QPushButton("Browse…")
+        self._gamescript_browse.setToolTip("Browse for a gamescript file")
         gamescript_box = self._wrap(self._row(
             QLabel("Gamescript:"), self._gamescript_edit, self._gamescript_browse))
 

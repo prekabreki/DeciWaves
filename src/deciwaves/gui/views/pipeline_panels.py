@@ -87,6 +87,7 @@ class StageStrip(QWidget):
             colour, mark = _PENDING, "○"
         label = f"{mark} {st.name}" + (" (GPU)" if st.gpu else "")
         chip = QLabel(label)
+        chip.setToolTip(f"Pipeline stage: {st.name} — right-click to re-run from here")
         weight = "bold" if st.name == self._running else "normal"
         chip.setStyleSheet(f"color: {colour}; font-weight: {weight}; padding: 2px 6px;")
         chip.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -177,6 +178,7 @@ class IssuesPanel(QWidget):
         super().__init__(parent)
         self._groups: list = []
         self._header = QLabel("<b>Issues</b>")
+        self._header.setToolTip("Errors and warnings found during pipeline stages")
         self._body = QWidget()
         self._body_layout = QVBoxLayout(self._body)
         self._body_layout.setContentsMargins(0, 0, 0, 0)

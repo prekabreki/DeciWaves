@@ -77,6 +77,7 @@ class DoctorPanel(QWidget):
         self._runner.finished.connect(self._on_finished)
 
         self._recheck_btn = QPushButton("Re-check")
+        self._recheck_btn.setToolTip("Re-run Doctor to check system and tool status")
         self._recheck_btn.clicked.connect(self.recheck)
         self._rows = QWidget()
         self._rows_layout = QVBoxLayout(self._rows)
@@ -178,8 +179,11 @@ class SetupScreen(QWidget):
         self._runner.finished.connect(self._on_finished)
 
         self._run_btn = QPushButton("Run setup")
+        self._run_btn.setToolTip("Download and configure required tools (vgmstream, VGAudio, ffmpeg)")
         self._redownload_btn = QPushButton("Re-download")
+        self._redownload_btn.setToolTip("Force re-download of all tools")
         self._recheck_btn = QPushButton("Re-check (offline)")
+        self._recheck_btn.setToolTip("Re-check installed tools without downloading")
         self._run_btn.clicked.connect(lambda: self.run())
         self._redownload_btn.clicked.connect(lambda: self.run(force=True))
         self._recheck_btn.clicked.connect(lambda: self.run(skip_downloads=True))
