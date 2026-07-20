@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from deciwaves.gui import theme
 from deciwaves.gui.cuda_probe import cuda_status
 from deciwaves.gui.game_panel_model import (
     FW_TIERS_DEFAULT,
@@ -44,13 +45,6 @@ from deciwaves.gui.game_panel_model import (
     types_status,
     validate_fw_tiers,
 )
-
-# Status colours -- match the global bar / setup panel (green ok, red required-missing,
-# amber warn, grey neutral/unknown).
-_C_OK = "#167f3b"
-_C_ERR = "#b00020"
-_C_WARN = "#b06f00"
-_C_NEUTRAL = "#666666"
 
 _SAMPLE_CAP_MAX = 100000   # generous ceiling; 0 = unlimited (special value text below)
 
@@ -96,9 +90,9 @@ class GamePanel(QWidget):
         self._tiers_edit = QLineEdit(FW_TIERS_DEFAULT)
         self._tiers_edit.setMaximumWidth(120)
         self._tiers_hint = QLabel(FW_TIERS_HINT)
-        self._tiers_hint.setStyleSheet(f"color: {_C_NEUTRAL}; font-style: italic;")
+        self._tiers_hint.setStyleSheet(f"color: {theme.NEUTRAL}; font-style: italic;")
         self._tiers_warning = QLabel("")
-        self._tiers_warning.setStyleSheet(f"color: {_C_ERR};")
+        self._tiers_warning.setStyleSheet(f"color: {theme.ERR};")
         self._tiers_warning.setVisible(False)
         tiers_box = QWidget()
         v = QVBoxLayout(tiers_box)
@@ -153,7 +147,7 @@ class GamePanel(QWidget):
         }
 
         self._scan_warning = QLabel("")
-        self._scan_warning.setStyleSheet(f"color: {_C_NEUTRAL};")
+        self._scan_warning.setStyleSheet(f"color: {theme.NEUTRAL};")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -229,25 +223,25 @@ class GamePanel(QWidget):
         self._types_edit.setText(path)
         if status == "ok":
             self._types_status.setText(f"types.json: OK — {path}")
-            self._types_status.setStyleSheet(f"color: {_C_OK};")
+            self._types_status.setStyleSheet(f"color: {theme.OK};")
         else:
             self._types_status.setText(
                 "types.json: MISSING — required for bind (subtitle-bind onward); "
                 "scan + preview work without it")
-            self._types_status.setStyleSheet(f"color: {_C_ERR};")
+            self._types_status.setStyleSheet(f"color: {theme.ERR};")
 
     def _refresh_gpu_status(self, payload: dict | None) -> None:
         status = cuda_status(payload)
         if status == "ok":
             self._gpu_label.setText("GPU: CUDA ready")
-            self._gpu_label.setStyleSheet(f"color: {_C_OK};")
+            self._gpu_label.setStyleSheet(f"color: {theme.OK};")
         elif status == "":
             self._gpu_label.setText("GPU: unknown — run Doctor to check CUDA")
-            self._gpu_label.setStyleSheet(f"color: {_C_NEUTRAL};")
+            self._gpu_label.setStyleSheet(f"color: {theme.NEUTRAL};")
         else:
             self._gpu_label.setText(
                 "GPU: no CUDA GPU detected — this stage may take days on CPU")
-            self._gpu_label.setStyleSheet(f"color: {_C_WARN};")
+            self._gpu_label.setStyleSheet(f"color: {theme.WARN};")
 
     # --- picker intents (dialogs opened here; the shell does the work) ------
 

@@ -6,7 +6,7 @@ here ▶ only reflects availability and emits an (as-yet unconnected) ``preview_
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QAbstractTableModel, QEvent, QModelIndex, Qt, Signal
+from PySide6.QtCore import QAbstractTableModel, QEvent, QModelIndex, Qt, QTimer, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -161,6 +161,10 @@ class LibraryView(QWidget):
         self._unavailable_tooltip = ""
         self._sort_key: str | None = None
         self._sort_desc = False
+        self._checked_count = 0
+        self._can_export_mp3 = False
+        self._has_catalog_source = False
+        self._selection_debounce: QTimer | None = None
 
         # --- filter row ---
         self._search = QLineEdit()
@@ -278,6 +282,9 @@ class LibraryView(QWidget):
         self._short_secs.setEnabled(has_len)
         self._uncheck_short_btn.setEnabled(has_len)
 
+        self._checked_count = len(self._rows) - len(self._unchecked)
+        self._can_export_mp3 = can_export_mp3(workspace, game)
+        self._has_catalog_source = catalog_source_path(workspace, game) is not None
         self._apply_filters()
 
     def _reset_filter_state(self) -> None:
@@ -314,20 +321,42 @@ class LibraryView(QWidget):
         self._apply_filters()
 
     # --- selection (never touched by filters/sort) -------------------------
+    # All bulk selection commands operate on EVERY row (self._rows), NOT the
+    # filtered subset (self._visible). A filter is a viewing convenience, not
+    # a selection guard -- checking "Check all" checks everything, not only the
+    # rows that match the current search/speaker/hide-dupes/hide-nosub filter.
 
     def _set_checked(self, line_id: str, checked: bool) -> None:
-        """A single checkbox toggle: update + persist the unchecked set (no model rebuild)."""
+        """A single checkbox toggle: update + persist the unchecked set (no model rebuild).
+        Count tracked incrementally; disk write debounced on rapid toggles."""
         if checked:
             self._unchecked.discard(line_id)
+            self._checked_count += 1
         else:
             self._unchecked.add(line_id)
-        save_selection(self._workspace, self._game, self._unchecked)
+            self._checked_count -= 1
+        self._debounced_save()
+
+    def _debounced_save(self) -> None:
+        """Write the selection to disk, debouncing rapid toggles: the first toggle in a
+        burst writes immediately; subsequent toggles within the debounce window are batched
+        and written once when the window expires."""
         self._update_status()
+        if self._selection_debounce is None:
+            save_selection(self._workspace, self._game, self._unchecked)
+            self._selection_debounce = QTimer.singleShot(150, self._flush_selection)
+
+    def _flush_selection(self) -> None:
+        """Debounce timer expired: persist the accumulated unchecked set."""
+        self._selection_debounce = None
+        save_selection(self._workspace, self._game, self._unchecked)
 
     def _apply_selection(self, new_unchecked: set[str]) -> None:
-        """Apply a bulk selection command, pushing the prior set onto the undo stack."""
+        """Apply a bulk selection command (operates on ALL rows, not just visible),
+        pushing the prior set onto the undo stack."""
         self._undo.append(set(self._unchecked))
         self._unchecked = new_unchecked
+        self._checked_count = len(self._rows) - len(self._unchecked)
         save_selection(self._workspace, self._game, self._unchecked)
         self._model.refresh_checks()
         self._update_status()
@@ -349,6 +378,7 @@ class LibraryView(QWidget):
         if not self._undo:
             return
         self._unchecked = self._undo.pop()
+        self._checked_count = len(self._rows) - len(self._unchecked)
         save_selection(self._workspace, self._game, self._unchecked)
         self._model.refresh_checks()
         self._update_status()
@@ -420,14 +450,12 @@ class LibraryView(QWidget):
 
     def _sync_export(self) -> None:
         """Keep the Export panel's context (checked-count + which artifacts exist) current.
-        Called on every status update, so it tracks refreshes and per-toggle selection edits.
-        The shell owns the panel's running-state separately."""
+        Uses cached booleans computed once per refresh (not a disk read per toggle)."""
         if self._game is None:
             return
         self.export.set_context(
-            self._game, self._workspace, self.checked_count(),
-            can_export_mp3(self._workspace, self._game),
-            catalog_source_path(self._workspace, self._game) is not None)
+            self._game, self._workspace, self._checked_count,
+            self._can_export_mp3, self._has_catalog_source)
 
     def _update_status(self) -> None:
         self._status.setText(self.status_text())
@@ -443,7 +471,7 @@ class LibraryView(QWidget):
         return len(self._visible)
 
     def checked_count(self) -> int:
-        return sum(1 for r in self._rows if r.line_id not in self._unchecked)
+        return self._checked_count
 
     def status_text(self) -> str:
         return f"{self.checked_count()} checked · {self.visible_count()} visible · {self.total_count()} total"

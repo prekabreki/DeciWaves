@@ -3,6 +3,8 @@ line, workspace picker, and the single job chip. Visible everywhere because the 
 job may belong to a game other than the one currently selected."""
 from __future__ import annotations
 
+from deciwaves.gui import theme
+
 from PySide6.QtCore import QTimer, Signal
 from PySide6.QtWidgets import (
     QComboBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidget,
@@ -79,7 +81,7 @@ class GlobalBar(QWidget):
 
     def set_install_status(self, text: str, ok: bool) -> None:
         self._status.setText(text)
-        self._status.setStyleSheet("color: #167f3b;" if ok else "color: #b00020;")
+        self._status.setStyleSheet(f"color: {theme.OK};" if ok else f"color: {theme.ERR};")
 
     def set_job_chip(self, text: str) -> None:
         self._chip.setText(text)

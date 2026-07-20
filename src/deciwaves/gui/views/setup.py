@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from deciwaves.gui import theme
 from deciwaves.gui.capture import CaptureRunner
 from deciwaves.gui.cli_command import default_base
 from deciwaves.gui.doctor_model import (
@@ -41,12 +42,12 @@ from deciwaves.gui.setup_model import (
     tool_severity,
 )
 
-# severity -> (glyph, colour). Matches the global bar's green/red (global_bar.py).
+# severity -> (glyph, colour). Single source of truth in gui.theme.
 _SEV_STYLE = {
-    SEV_OK: ("●", "#167f3b"),
-    SEV_ERROR: ("✕", "#b00020"),
-    SEV_WARN: ("▲", "#b06f00"),
-    SEV_NEUTRAL: ("—", "#666666"),
+    SEV_OK: ("●", theme.OK),
+    SEV_ERROR: ("✕", theme.ERR),
+    SEV_WARN: ("▲", theme.WARN),
+    SEV_NEUTRAL: ("—", theme.NEUTRAL),
 }
 
 # The tools setup fetches, in summary order -- the rows that get a per-tool spinner.
