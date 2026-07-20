@@ -21,7 +21,9 @@ import argparse
 import io
 import os
 import shutil
+import stat
 import sys
+import time
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -67,6 +69,30 @@ def _short_reason(exc: Exception) -> str:
     return msg
 
 
+def _replace_with_retry(temp: Path, target: Path, attempts: int = 3, backoff: float = 0.5) -> None:
+    """Atomically replace *target* with *temp* using ``os.replace()``,
+    retrying on ``PermissionError`` (e.g. a locked or read-only target on
+    a UNC/network share, issue #111) with a short backoff.  On final
+    failure the error names the offending file and suggests a remedy.
+    """
+    last_err: Exception | None = None
+    for try_num in range(attempts):
+        try:
+            if target.exists():
+                os.chmod(str(target), stat.S_IWRITE)
+            os.replace(str(temp), str(target))
+            return
+        except PermissionError as exc:
+            last_err = exc
+            if try_num < attempts - 1:
+                time.sleep(backoff)
+    raise PermissionError(
+        f"Cannot write {target}: {last_err}. "
+        f"Close the file, clear its read-only bit, or use a local tools "
+        f"directory (network/UNC shares can refuse in-place overwrites)."
+    ) from last_err
+
+
 def _download_and_unpack(url: str, dest_dir: Path, timeout: float = DOWNLOAD_TIMEOUT_SECONDS,
                           manifest_path: Path | None = None) -> None:
     """Fetch `url` (a zip) and flatten every file it contains directly into
@@ -91,17 +117,30 @@ def _download_and_unpack(url: str, dest_dir: Path, timeout: float = DOWNLOAD_TIM
     dest_dir.mkdir(parents=True, exist_ok=True)
     with urllib.request.urlopen(url, timeout=timeout) as resp:
         data = resp.read()
-    extracted = []
-    with zipfile.ZipFile(io.BytesIO(data)) as zf:
-        for info in zf.infolist():
-            if info.is_dir():
-                continue
-            name = Path(info.filename).name
-            if not name:
-                continue
-            with zf.open(info) as src, open(dest_dir / name, "wb") as dst:
-                shutil.copyfileobj(src, dst)
-            extracted.append(name)
+    extracted: list[str] = []
+    temp_files: list[Path] = []
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            for info in zf.infolist():
+                if info.is_dir():
+                    continue
+                name = Path(info.filename).name
+                if not name:
+                    continue
+                target = dest_dir / name
+                temp = dest_dir / (name + ".tmp")
+                temp_files.append(temp)
+                with zf.open(info) as src, open(temp, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+                _replace_with_retry(temp, target)
+                extracted.append(name)
+                temp_files.remove(temp)
+    finally:
+        for t in temp_files:
+            try:
+                t.unlink()
+            except FileNotFoundError:
+                pass
     if manifest_path is not None:
         manifest_path.write_text("\n".join(extracted) + "\n", encoding="utf-8")
 
