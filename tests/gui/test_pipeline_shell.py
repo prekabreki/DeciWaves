@@ -81,18 +81,61 @@ def test_rerun_crossing_gpu_declined_starts_nothing(qtbot, tmp_path, monkeypatch
     assert calls == []
 
 
-def test_escalate_uncaps_without_dialog_when_gpu_present(qtbot, tmp_path, monkeypatch):
+def test_escalate_uncaps_without_gpu_dialog_when_gpu_present(qtbot, tmp_path, monkeypatch):
     w = MainWindow()
     qtbot.addWidget(w)
     w.bar.set_workspace(str(tmp_path))
     w.bar.select_game("hzd")
     w.pipeline.setup_doctor.doctor.render_payload(_CUDA_OK)
-    monkeypatch.setattr(QMessageBox, "warning",
-                        lambda *a, **k: pytest.fail("no dialog when GPU present"))
+    monkeypatch.setattr("deciwaves.gui.shell.MainWindow._confirm_escalate",
+                        lambda self: True)   # accept destructive confirm
     calls = _capture_jobs(w)
     w.pipeline.coverage.escalate_requested.emit()
     argv = calls[0]
     assert argv[argv.index("--sample-cap") + 1] == "0" and "--from" in argv
+
+
+def test_escalate_rejected_does_not_start_job(qtbot, tmp_path, monkeypatch):
+    w = MainWindow()
+    qtbot.addWidget(w)
+    w.bar.set_workspace(str(tmp_path))
+    w.bar.select_game("hzd")
+    monkeypatch.setattr("deciwaves.gui.shell.MainWindow._confirm_escalate",
+                        lambda self: False)
+    calls = _capture_jobs(w)
+    w.pipeline.coverage.escalate_requested.emit()
+    assert calls == []
+
+
+def test_rerun_invalidates_completed_rejected_does_nothing(qtbot, tmp_path, monkeypatch):
+    w = MainWindow()
+    qtbot.addWidget(w)
+    w.bar.set_workspace(str(tmp_path))
+    w.bar.select_game("hzd")
+    hzd_out = os.path.join(str(tmp_path), "out", "hzd")
+    os.makedirs(hzd_out, exist_ok=True)
+    for stage in ["bind", "render"]:
+        open(os.path.join(hzd_out, f".done-{stage}"), "w").close()
+    monkeypatch.setattr("deciwaves.gui.shell.MainWindow._confirm_rerun",
+                        lambda self, stage: False)
+    calls = _capture_jobs(w)
+    w.pipeline.strip.request_rerun("catalog")
+    assert calls == []
+
+
+def test_rerun_invalidates_completed_accepted_starts_job(qtbot, tmp_path, monkeypatch):
+    w = MainWindow()
+    qtbot.addWidget(w)
+    w.bar.set_workspace(str(tmp_path))
+    w.bar.select_game("ds")
+    ds_out = os.path.join(str(tmp_path), "out", "ds")
+    os.makedirs(ds_out, exist_ok=True)
+    open(os.path.join(ds_out, ".done-render"), "w").close()
+    monkeypatch.setattr("deciwaves.gui.shell.MainWindow._confirm_rerun",
+                        lambda self, stage: True)
+    calls = _capture_jobs(w)
+    w.pipeline.strip.request_rerun("catalog")
+    assert calls and calls[0][-2:] == ["--from", "catalog"]
 
 
 def test_panels_refresh_on_game_change(qtbot, tmp_path):

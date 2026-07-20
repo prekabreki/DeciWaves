@@ -11,7 +11,7 @@ import os
 import shutil
 
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QMainWindow, QStackedWidget, QTabBar, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QMainWindow, QMessageBox, QStackedWidget, QTabBar, QVBoxLayout, QWidget
 
 from deciwaves.cli import config, doctor
 from deciwaves.gui.cli_command import default_base
@@ -220,6 +220,29 @@ class MainWindow(QMainWindow):
     def _confirm_gpu(self, game: str) -> bool:
         return confirm_gpu(self, game, self.pipeline.setup_doctor.doctor.last_payload())
 
+    def _confirm_escalate(self) -> bool:
+        resp = QMessageBox.warning(
+            self, "Transcribe all",
+            "This re-transcribes every line uncapped — hours. Continue?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        return resp == QMessageBox.Yes
+
+    def _rerun_invalidates_completed(self, game: str, stage: str) -> bool:
+        states = stage_states(game, self._workspace())
+        names = [s.name for s in states]
+        if stage not in names:
+            return False
+        idx = names.index(stage)
+        return any(states[i].done for i in range(idx + 1, len(states)))
+
+    def _confirm_rerun(self, stage: str) -> bool:
+        resp = QMessageBox.warning(
+            self, "Re-run from here",
+            f"Re-running from \"{stage}\" will discard completed stages after "
+            f"this point. Continue?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        return resp == QMessageBox.Yes
+
     def _on_scan(self) -> None:
         if self.runner.is_running or self.dump.is_running:
             return   # one job at a time -- refuse a pipeline start while any job runs (§5.3)
@@ -260,6 +283,8 @@ class MainWindow(QMainWindow):
         if self.runner.is_running or self.dump.is_running:
             return   # a running dump/job must not be joined by a strip "Re-run from here" (§5.3)
         game = self.bar.current_game()
+        if self._rerun_invalidates_completed(game, stage) and not self._confirm_rerun(stage):
+            return
         if rerun_hits_gpu(game, stage) and not self._confirm_gpu(game):
             return
         self._job_game = game
@@ -269,6 +294,8 @@ class MainWindow(QMainWindow):
         if self.runner.is_running or self.dump.is_running:
             return
         game = self.bar.current_game()
+        if not self._confirm_escalate():
+            return
         if not self._confirm_gpu(game):
             return
         self._job_game = game
