@@ -32,7 +32,7 @@ from deciwaves.engine.render import (
 from deciwaves.engine.parallel import KeyedLocks, default_jobs
 from deciwaves.engine.pack.hzd_package import HzdPackage
 from deciwaves.games.hzd.atrac9 import decode_wem_to_wav, Atrac9Error
-from deciwaves.games.hzd.catalog import load_catalog_dict
+from deciwaves.games.hzd.catalog import load_catalog_dict, load_hzd_manifest_join
 from deciwaves.games.hzd.profile import VOICE_ARCHIVE as ARCHIVE
 
 BOUND_TIERS = {"S", "1", "2", "E"}   # E = recovered by bucket elimination (mis-bind fix)
@@ -217,7 +217,9 @@ def main(argv=None):
         return 1
 
     catalog = load_catalog_dict(a.catalog)
-    clip_index = {int(c["clip_row"]): c for c in _load_csv(a.clip_index)}
+    _, clip_coords = load_hzd_manifest_join(a.manifest, a.clip_index)
+    clip_index = {cr: {"offset": str(off), "a_bytes": str(lgth)}
+                  for cr, (off, lgth) in clip_coords.items()}
     if a.spine_only:
         episode_map = None
     else:

@@ -63,6 +63,18 @@ def load() -> dict:
     return read_json_object(str(path()))
 
 
+def resolve_ds_install(cfg: dict) -> tuple[str | None, str | None]:
+    """``(data_dir, oodle)`` from *cfg*, resolving the ``data/`` subdir and the
+    ``oo2core_7_win64.dll`` fallback. ``(None, None)`` when ``ds_install`` is
+    not configured. Shared helper imported by preview, export, and the CLI
+    instead of each re-deriving the resolution rules."""
+    ds_install = cfg.get("ds_install")
+    data_dir = os.path.join(ds_install, "data") if ds_install else None
+    oodle = cfg.get("oodle_dll") or (
+        os.path.join(ds_install, "oo2core_7_win64.dll") if ds_install else None)
+    return data_dir, oodle
+
+
 def apply_tool_env(cfg: dict | None = None) -> dict:
     """Prepend the configured ``tools_dir`` to ``PATH`` and set each decode tool's override
     env var (``DECIWAVES_VGMSTREAM``/``DECIWAVES_VGAUDIO``) from a copy sitting in it, so the
