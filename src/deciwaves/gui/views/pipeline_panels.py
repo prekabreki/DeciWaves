@@ -109,17 +109,23 @@ class PipelineControls(QWidget):
 
     scan_requested = Signal()
     process_requested = Signal()
+    cancel_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._scan_btn = QPushButton("Scan")
         self._bind_btn = QPushButton("Bind / Process")
+        self._cancel_btn = QPushButton("Cancel")
+        self._cancel_btn.setToolTip("Always safe — terminates then force-kills the job")
+        self._cancel_btn.setVisible(False)
         self._scan_btn.clicked.connect(lambda: self.scan_requested.emit())
         self._bind_btn.clicked.connect(lambda: self.process_requested.emit())
+        self._cancel_btn.clicked.connect(lambda: self.cancel_requested.emit())
         row = QHBoxLayout(self)
         row.setAlignment(Qt.AlignLeft)
         row.addWidget(self._scan_btn)
         row.addWidget(self._bind_btn)
+        row.addWidget(self._cancel_btn)
 
     def set_game_has_gpu(self, has_gpu: bool) -> None:
         self._bind_btn.setVisible(has_gpu)
@@ -127,9 +133,13 @@ class PipelineControls(QWidget):
     def bind_shown(self) -> bool:
         return self._bind_btn.isVisibleTo(self)
 
+    def cancel_shown(self) -> bool:
+        return self._cancel_btn.isVisibleTo(self)
+
     def set_running(self, running: bool) -> None:
         self._scan_btn.setEnabled(not running)
         self._bind_btn.setEnabled(not running)
+        self._cancel_btn.setVisible(running)
 
 
 class CoverageBar(QWidget):
