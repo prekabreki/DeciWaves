@@ -269,14 +269,27 @@ def wav_duration_seconds(path: str | None) -> float | None:
 
 # --- filters / sort (view-only; never mutate selection) --------------------
 
+def compute_search_haystack(row: LineRow) -> str:
+    """Lowercased search haystack for *row* -- subtitle, line_id, name joined."""
+    return " ".join(x for x in (row.subtitle, row.line_id, row.name) if x).lower()
+
+
+def haystacks_for_rows(rows: list[LineRow]) -> list[str]:
+    """Precomputed per-row search haystacks, computed once at load."""
+    return [compute_search_haystack(r) for r in rows]
+
+
 def visible_rows(rows: list[LineRow], *, search: str, speaker: str,
-                 hide_dupes: bool, hide_no_subtitle: bool) -> list[LineRow]:
+                 hide_dupes: bool, hide_no_subtitle: bool,
+                 haystacks: list[str] | None = None) -> list[LineRow]:
     """The rows the table should show under the current filters. Pure -- selection is
-    untouched. ``speaker`` == ``"all"`` (or empty) means no speaker filter."""
+    untouched. ``speaker`` == ``"all"`` (or empty) means no speaker filter. Pass
+    *haystacks* (precomputed via :func:`haystacks_for_rows`) to avoid rebuilding
+    the search string per row per keystroke."""
     needle = (search or "").strip().lower()
     want_speaker = speaker not in (None, "", "all")
     out = []
-    for r in rows:
+    for i, r in enumerate(rows):
         if hide_dupes and r.is_dupe:
             continue
         if hide_no_subtitle and not r.has_subtitle:
@@ -284,7 +297,8 @@ def visible_rows(rows: list[LineRow], *, search: str, speaker: str,
         if want_speaker and r.speaker != speaker:
             continue
         if needle:
-            hay = " ".join(x for x in (r.subtitle, r.line_id, r.name) if x).lower()
+            hay = haystacks[i] if haystacks is not None else \
+                  " ".join(x for x in (r.subtitle, r.line_id, r.name) if x).lower()
             if needle not in hay:
                 continue
         out.append(r)

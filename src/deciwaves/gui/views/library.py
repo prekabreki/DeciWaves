@@ -6,7 +6,7 @@ here ▶ only reflects availability and emits an (as-yet unconnected) ``preview_
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QAbstractTableModel, QEvent, QModelIndex, Qt, Signal
+from PySide6.QtCore import QAbstractTableModel, QEvent, QModelIndex, Qt, QTimer, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -32,6 +32,7 @@ from deciwaves.gui.library_model import (
     check_none,
     distinct_speakers,
     has_known_lengths,
+    haystacks_for_rows,
     is_bind_done,
     load_lines,
     load_selection,
@@ -62,9 +63,20 @@ class _TableModel(QAbstractTableModel):
         self._visible: list[LineRow] = []
 
     def set_rows(self, visible: list[LineRow]) -> None:
-        self.beginResetModel()
+        persistent = self.persistentIndexList()
+        row_of_id = {r.line_id: i for i, r in enumerate(visible)}
+        self.layoutAboutToBeChanged.emit()
+        new_indices = []
+        for old_idx in persistent:
+            if old_idx.isValid():
+                lid = self._visible[old_idx.row()].line_id
+                nr = row_of_id.get(lid)
+                new_indices.append(self.index(nr, old_idx.column()) if nr is not None else QModelIndex())
+            else:
+                new_indices.append(QModelIndex())
+        self.changePersistentIndexList(persistent, new_indices)
         self._visible = visible
-        self.endResetModel()
+        self.layoutChanged.emit()
 
     def row_at(self, r: int) -> LineRow:
         return self._visible[r]
@@ -153,6 +165,7 @@ class LibraryView(QWidget):
         self._game: str | None = None  # no game loaded yet -> first refresh is a game change
         self._workspace = "."
         self._rows: list[LineRow] = []
+        self._haystacks: list[str] = []
         self._visible: list[LineRow] = []
         self._unchecked: set[str] = set()
         self._undo: list[set[str]] = []
@@ -226,7 +239,11 @@ class LibraryView(QWidget):
         layout.addWidget(self.export)
 
         # --- wiring ---
-        self._search.textChanged.connect(self._apply_filters)
+        self._debounce_timer = QTimer(self)
+        self._debounce_timer.setSingleShot(True)
+        self._debounce_timer.setInterval(150)
+        self._debounce_timer.timeout.connect(self._apply_filters)
+        self._search.textChanged.connect(self._debounce_timer.start)
         self._speaker.currentIndexChanged.connect(self._apply_filters)
         self._hide_dupes.toggled.connect(self._apply_filters)
         self._hide_nosub.toggled.connect(self._apply_filters)
@@ -253,6 +270,7 @@ class LibraryView(QWidget):
         self._game = game
         self._workspace = workspace
         self._rows = load_lines(workspace, game)
+        self._haystacks = haystacks_for_rows(self._rows)
         self._unchecked = load_selection(workspace, game)
         self._bind_done = is_bind_done(workspace, game)
         self._available = availability_by_id(self._rows, game, bind_done=self._bind_done)
@@ -298,7 +316,8 @@ class LibraryView(QWidget):
             visible_rows(self._rows, search=self._search.text(),
                          speaker=self._speaker.currentText() or "all",
                          hide_dupes=self._hide_dupes.isChecked(),
-                         hide_no_subtitle=self._hide_nosub.isChecked()),
+                         hide_no_subtitle=self._hide_nosub.isChecked(),
+                         haystacks=self._haystacks),
             self._sort_key, self._sort_desc)
         self._model.set_rows(self._visible)
         self._update_status()
