@@ -75,6 +75,7 @@ def test_thread_hammer_overlapping_ranges(tmp_path):
     payloads = [bytes([i]) * 4096 for i in range(1, 17)]   # 16 chunks x 4 KiB
     full = b"".join(payloads)
     arc = DsarArchive(_write_dsar(tmp_path, [(p, False) for p in payloads]))
+    arc._CACHE_MAX = 2    # force eviction under contention (16 chunks would fit in default 16)
 
     n_threads = 16
     reads_per_thread = 200

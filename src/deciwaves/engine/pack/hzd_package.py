@@ -10,12 +10,13 @@ import os
 from deciwaves.engine.pack.bin_archive import file_hash
 from deciwaves.engine.pack.hzd_locators import HzdLocators, Locator
 from deciwaves.engine.pack.dsar_archive import DsarArchive
+from deciwaves.games.hzd.profile import HZD_LOCATORS_NAME
 
 
 class HzdPackage:
     def __init__(self, package_dir: str):
         self.package_dir = package_dir
-        self._locators = HzdLocators(os.path.join(package_dir, "PackFileLocators.bin"))
+        self._locators = HzdLocators(os.path.join(package_dir, HZD_LOCATORS_NAME))
         self._archives: dict[str, DsarArchive] = {}  # lazily opened by name
 
     def _archive(self, name: str) -> DsarArchive:

@@ -27,8 +27,10 @@ CS_TITLES = {
     "cs71": "Battlefield (cs71)", "cs77": "Battlefield (cs77)", "cs80": "Battlefield (cs80)",
 }
 
-# Order positions (transcript anchor-scale, ~0..1320) for cutscene groups the transcript
-# does NOT anchor. Anchored groups use their real anchor instead. cs11 = finale (after cs10).
+# Order positions for cutscene groups the transcript does NOT anchor. Values use the
+# transcript anchor-scale (~0..1320) EXCEPT cs53 which uses the raw-cs_number scale
+# shared with its cs03/cs04 neighbors (0..10ish) -- see its entry comment below.
+# Anchored groups use their real anchor instead. cs11 = finale (after cs10).
 # CAUTION: if an entry here is removed or typo'd, that group silently falls back to its
 # raw cs_number(group) ordering and can land mid-story instead of at the curated tail --
 # every NON_STORY_CS_GROUPS group must have an entry here (see test_episode_map.py).
