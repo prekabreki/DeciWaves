@@ -60,10 +60,14 @@ def _replace(tmp, dst, attempts=100, delay=0.005):
 
     On Windows two threads replacing the same destination at once can hit a
     transient sharing violation (``PermissionError``/``FileNotFoundError``) even
-    though each owns a distinct tmp file. Because every writer of a given cache
-    path produces identical bytes (the source -> decoded-output mapping is
-    deterministic), a peer that already put a NEW file at `dst` has done our job
-    for us: on failure we can discard our redundant tmp and return.
+    though each owns a distinct tmp file. For the decode-cache callers every
+    writer of a given cache path produces identical bytes (the source ->
+    decoded-output mapping is deterministic), so a peer that already put a NEW
+    file at `dst` has done our job for us: on failure we can discard our
+    redundant tmp and return.  CAUTION: three #51 callers (``config.save``,
+    ``prune_incomplete_rows``, ``write_core_paths_sidecar``) produce DIFFERENT
+    bytes per writer, so a peer's "win" silently last-writer-wins drops our
+    write (the reviewer judged this defensible for those writes).
 
     The catch (finding 7): `dst` existing on failure is not proof a peer won.
     `dst` may be the stale/invalid file the caller is REWRITING (e.g. the

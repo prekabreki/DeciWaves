@@ -34,7 +34,12 @@ def processed_core_paths(processed_path):
     This is the SOLE resume authority (issue #21): a core's sidecar line is written only
     after all of its rows have been appended to the CSV, so "recorded here" is the only
     signal that a core finished cleanly. Callers must run `prune_incomplete_rows()` first
-    so the CSV cannot disagree with it (see that function's docstring)."""
+    so the CSV cannot disagree with it (see that function's docstring).
+
+    IMPORTANT: per-caller failure-recording convention differs.  The ds/hzd catalogs record
+    hard per-core parse FAILURES here (permanent, never recoverable).  ``games.fw.extract``
+    deliberately does NOT record per-line decode failures in the sidecar (they are expected
+    to be transient and retried each run) -- see that module's docstring."""
     if not os.path.isfile(processed_path):
         return set()
     with open(processed_path, "r", encoding="utf-8") as f:

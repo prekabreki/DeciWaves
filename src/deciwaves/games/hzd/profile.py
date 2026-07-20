@@ -92,7 +92,7 @@ def locators_fingerprint(package_dir: str) -> str:
     Raises the same way ``os.stat`` would if *package_dir* doesn't contain the file --
     callers that need an actionable message first check ``hzd_package_error``.
     """
-    st = os.stat(os.path.join(package_dir, "PackFileLocators.bin"))
+    st = os.stat(os.path.join(package_dir, HZD_LOCATORS_NAME))
     return f"{st.st_size}:{st.st_mtime_ns}"
 
 
