@@ -11,6 +11,7 @@ import csv
 import glob
 import os
 
+from deciwaves.cli.config import resolve_ds_install
 from deciwaves.gui.cli_command import default_base
 from deciwaves.gui.export_model import (
     ExportError,
@@ -388,3 +389,23 @@ def test_catalog_source_fw_uses_clip_index(tmp_path):
     os.makedirs(fw_dir, exist_ok=True)
     open(os.path.join(fw_dir, "clip-index.csv"), "w").close()
     assert catalog_source_path(ws, "fw") == os.path.join(fw_dir, "clip-index.csv")
+
+
+# --- resolve_ds_install: shared helper matches CLI's resolution ------------
+
+def test_resolve_ds_install_matches_cli():
+    """The shared helper produces the same (data_dir, oodle) that the CLI's
+    own code path does for a given config (regression guard: the helper and
+    CLI must agree so preview/export don't silently resolve differently)."""
+    cfg = {"ds_install": r"C:\DS"}
+    data_dir, oodle = resolve_ds_install(cfg)
+    assert data_dir == r"C:\DS\data"
+    assert oodle == r"C:\DS\oo2core_7_win64.dll"
+
+    cfg_override = {"ds_install": r"C:\DS", "oodle_dll": r"D:\oo.dll"}
+    data_dir2, oodle2 = resolve_ds_install(cfg_override)
+    assert data_dir2 == r"C:\DS\data"
+    assert oodle2 == r"D:\oo.dll"
+
+    # Unconfigured -> (None, None)
+    assert resolve_ds_install({}) == (None, None)

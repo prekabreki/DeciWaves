@@ -263,5 +263,35 @@ def main(argv=None):
     return 0
 
 
+def load_hzd_manifest_join(manifest_path: str, clip_index_path: str
+                           ) -> tuple[dict[str, str], dict[int, tuple[int, int]]]:
+    """``(line_id -> clip_row, clip_row -> (offset, a_bytes))`` from the HZD
+    ``asr-manifest`` and ``clip-index`` CSVs. Shared helper imported by preview
+    and render instead of each re-implementing the manifest-to-clip-coords join.
+
+    Returns two empty dicts when either file is absent/unreadable, mirroring
+    ``preview_model``'s fail-soft contract so the caller can raise its own
+    domain-specific error."""
+    def _read_csv(path: str) -> list[dict]:
+        try:
+            with open(path, "r", newline="", encoding="utf-8-sig") as f:
+                return list(csv.DictReader(f))
+        except (OSError, ValueError):
+            return []
+
+    line_to_clip: dict[str, str] = {
+        r.get("line_id", ""): r.get("clip_row", "")
+        for r in _read_csv(manifest_path)
+        if r.get("line_id")
+    }
+    clip_coords: dict[int, tuple[int, int]] = {}
+    for r in _read_csv(clip_index_path):
+        try:
+            clip_coords[int(r["clip_row"])] = (int(r["offset"]), int(r["a_bytes"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return line_to_clip, clip_coords
+
+
 if __name__ == "__main__":
     sys.exit(main())

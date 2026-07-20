@@ -30,6 +30,7 @@ from deciwaves.engine.audio_clip import clip_wav
 from deciwaves.engine.pack.bin_index import PackIndex
 from deciwaves.engine.pack.hzd_package import HzdPackage
 from deciwaves.games.hzd.atrac9 import decode_wem_to_wav
+from deciwaves.games.hzd.catalog import load_hzd_manifest_join
 from deciwaves.games.hzd.profile import VOICE_ARCHIVE
 
 # render's own cache paths (engine/render.py --cache default = out/wav-cache, hzd render's
@@ -101,10 +102,7 @@ class PreviewResolver:
     def _resolve_ds(self, stream_path: str | None) -> str:
         if not stream_path:
             raise PreviewError("This line has no audio stream.")
-        ds_install = self._cfg.get("ds_install")
-        data_dir = os.path.join(ds_install, "data") if ds_install else None
-        oodle = self._cfg.get("oodle_dll") or (
-            os.path.join(ds_install, "oo2core_7_win64.dll") if ds_install else None)
+        data_dir, oodle = config.resolve_ds_install(self._cfg)
         if not data_dir or not oodle:
             raise PreviewError("DS install is not configured. Run `deciwaves setup` first.")
         idx = self._ds_pack_index(data_dir, oodle)
@@ -157,20 +155,13 @@ class PreviewResolver:
         return self._hzd_pkg.dsar_for(VOICE_ARCHIVE)
 
     def _load_hzd_maps(self) -> tuple[dict[str, str], dict[int, tuple[int, int]]]:
-        """``(line_id -> clip_row, clip_row -> (offset, a_bytes))`` from the HZD manifests,
-        loaded once and cached. Mirrors ``games/hzd/render.py``'s manifest+clip-index join."""
+        """``(line_id -> clip_row, clip_row -> (offset, a_bytes))`` from the HZD
+        manifests, loaded once and cached. Delegates to the shared
+        ``catalog.load_hzd_manifest_join`` instead of re-implementing the join."""
         if self._hzd_maps is None:
             root = os.path.join(self._workspace, "out", "hzd")
-            line_to_clip = {
-                r.get("line_id", ""): r.get("clip_row", "")
-                for r in _read_csv(os.path.join(root, "asr-manifest.csv"))
-                if r.get("line_id")
-            }
-            clip_coords: dict[int, tuple[int, int]] = {}
-            for r in _read_csv(os.path.join(root, "clip-index.csv")):
-                try:
-                    clip_coords[int(r["clip_row"])] = (int(r["offset"]), int(r["a_bytes"]))
-                except (KeyError, TypeError, ValueError):
-                    continue  # a torn/blank clip-index row carries no usable coordinates
-            self._hzd_maps = (line_to_clip, clip_coords)
+            self._hzd_maps = load_hzd_manifest_join(
+                os.path.join(root, "asr-manifest.csv"),
+                os.path.join(root, "clip-index.csv"),
+            )
         return self._hzd_maps
