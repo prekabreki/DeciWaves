@@ -46,6 +46,15 @@ def test_spine_can_restrict_to_tier1():
     assert [s.line_id for s in spine] == ["c0"]
 
 
+def test_spine_strips_whitespace_tier_before_filter():
+    """A row with a whitespace-padded tier (e.g. ``" 2 "``) must not be dropped by the tier
+    filter -- both ``_fw_tiers`` (which strips) and ``build_spine`` now normalize the same way
+    (issue #102)."""
+    rows = [_row("c0", 1, "Q1", tier=" 2 "), _row("c1", 2, "Q1", tier="1")]
+    spine = render.build_spine(rows, bound_tiers={"1", "2"})
+    assert [s.line_id for s in spine] == ["c0", "c1"]
+
+
 # ---------------------------------------------------------------------------
 # CLI defaults (issue #17): a manual `deciwaves fw render` (no flags) must be
 # usable on its own, not just as the tail of `fw run`'s hand-wired chain.

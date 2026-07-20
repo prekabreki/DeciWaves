@@ -191,6 +191,21 @@ def test_dump_worker_cancel_stops_early(qtbot, tmp_path):
     assert not os.path.exists(dest) or os.listdir(dest) == []
 
 
+def test_dump_worker_disambiguates_colliding_safe_names(qtbot, tmp_path):
+    """Two distinct ``line_id`` values that map to the same ``_safe_name`` output (e.g.
+    ``"foo bar"`` and ``"foo_bar"`` both become ``foo_bar``) must each produce a distinct
+    file on disk, and ``ok`` must reflect both -- no silent overwrite (issue #102)."""
+    resolver = _FakeResolver(tmp_path / "src")
+    dest = tmp_path / "dest"
+    rows = [("foo bar", None), ("foo_bar", None)]
+    signals = _DumpSignals()
+    progress, failures, done = _run_worker(_DumpWorker(resolver, rows, str(dest), signals))
+    assert done == [(2, 0)]
+    assert failures == []
+    files = sorted(os.listdir(dest))
+    assert files == ["foo_bar.wav", "foo_bar_1.wav"]
+
+
 def test_dump_worker_mid_batch_cancel_stops_early(qtbot, tmp_path):
     # The prior cancel test cancels BEFORE run(); here the flag is tripped BETWEEN rows,
     # so the loop's next-iteration guard must stop the batch with rows still unprocessed.

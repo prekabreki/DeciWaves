@@ -187,10 +187,18 @@ class ExportPanel(QWidget):
 
 # --- batch Dump-WAV worker (off the UI thread) -----------------------------
 
-def _safe_name(line_id: str) -> str:
+def _safe_name(line_id: str, used: set[str] | None = None) -> str:
     """A filesystem-safe basename for a line_id (ids can carry ``/`` or other path-hostile
-    characters); non ``[A-Za-z0-9._-]`` chars become ``_``."""
-    return "".join(c if (c.isalnum() or c in "._-") else "_" for c in line_id) or "clip"
+    characters); non ``[A-Za-z0-9._-]`` chars become ``_``. When *used* is given, a name that
+    collides with an existing entry is disambiguated with a ``_N`` suffix."""
+    name = "".join(c if (c.isalnum() or c in "._-") else "_" for c in line_id) or "clip"
+    if used is not None:
+        base = name
+        i = 1
+        while name in used:
+            name = f"{base}_{i}"
+            i += 1
+    return name
 
 
 class _DumpSignals(QObject):
@@ -224,12 +232,15 @@ class _DumpWorker(QRunnable):
         ok = failed = 0
         total = len(self._rows)
         os.makedirs(self._dest, exist_ok=True)
+        used_names: set[str] = set()
         for i, (line_id, audio_path) in enumerate(self._rows):
             if self._cancelled:
                 break
             try:
                 wav = self._resolver.resolve_wav(line_id, audio_path)
-                dst = os.path.join(self._dest, f"{_safe_name(line_id)}.wav")
+                safe = _safe_name(line_id, used_names)
+                used_names.add(safe)
+                dst = os.path.join(self._dest, f"{safe}.wav")
                 if os.path.abspath(wav) != os.path.abspath(dst):
                     shutil.copyfile(wav, dst)
                 ok += 1
