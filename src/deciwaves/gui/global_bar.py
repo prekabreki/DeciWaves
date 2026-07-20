@@ -22,9 +22,14 @@ class GlobalBar(QWidget):
         self._combo = QComboBox()
         for key, label in _GAMES:
             self._combo.addItem(label, key)
+        self._combo.setToolTip("Select the game to extract audio from")
         self._status = QLabel("")
         self._workspace = QLineEdit()
+        self._workspace.setPlaceholderText("Output directory (catalog.csv, playlist.csv, reels)")
+        self._workspace.setToolTip(
+            "Output directory where catalog.csv, playlist.csv, and audio reels are written")
         self._browse = QPushButton("Browse…")
+        self._browse.setToolTip("Browse for the workspace output directory")
         self._chip = QLabel("idle")
 
         layout = QHBoxLayout(self)

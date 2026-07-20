@@ -121,6 +121,34 @@ def test_gpu_label_reflects_cuda_payload(qtbot, tmp_path):
     assert p.gpu_status_text() != ""
 
 
+# --- Tooltips ---------------------------------------------------------------
+
+def test_main_story_toggle_has_tooltip(qtbot):
+    p = GamePanel()
+    qtbot.addWidget(p)
+    p.set_game("ds")
+    assert p._main_story.toolTip(), "Main story toggle should have a non-empty tooltip"
+
+
+def test_transcript_controls_have_tooltips(qtbot):
+    p = GamePanel()
+    qtbot.addWidget(p)
+    p.set_game("ds")
+    assert p._transcript_edit.toolTip(), "Transcript edit should have a non-empty tooltip"
+    assert p._transcript_browse.toolTip(), "Transcript browse button should have a non-empty tooltip"
+    assert p._reorder_btn.toolTip(), "Re-order button should have a non-empty tooltip"
+
+
+def test_fw_pickers_have_tooltips(qtbot):
+    p = GamePanel()
+    qtbot.addWidget(p)
+    p.set_game("fw")
+    assert p._types_edit.toolTip(), "Types edit should have a non-empty tooltip"
+    assert p._types_browse.toolTip(), "Types browse button should have a non-empty tooltip"
+    assert p._gamescript_edit.toolTip(), "Gamescript edit should have a non-empty tooltip"
+    assert p._gamescript_browse.toolTip(), "Gamescript browse button should have a non-empty tooltip"
+
+
 # --- picker intents (monkeypatch QFileDialog) ------------------------------
 
 def test_ds_transcript_reorder_emits_intent(qtbot, tmp_path, monkeypatch):
