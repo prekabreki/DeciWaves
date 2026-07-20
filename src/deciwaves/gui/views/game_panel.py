@@ -36,11 +36,13 @@ from PySide6.QtWidgets import (
 from deciwaves.gui.cuda_probe import cuda_status
 from deciwaves.gui.game_panel_model import (
     FW_TIERS_DEFAULT,
+    FW_TIERS_HINT,
     SAMPLE_CAP_DEFAULT,
     controls_for,
     render_scope_defaults,
     scan_warning,
     types_status,
+    validate_fw_tiers,
 )
 
 # Status colours -- match the global bar / setup panel (green ok, red required-missing,
@@ -93,7 +95,17 @@ class GamePanel(QWidget):
         # --- render scope: FW --tiers ---
         self._tiers_edit = QLineEdit(FW_TIERS_DEFAULT)
         self._tiers_edit.setMaximumWidth(120)
-        tiers_box = self._wrap(self._row(QLabel("Tiers (--tiers):"), self._tiers_edit))
+        self._tiers_hint = QLabel(FW_TIERS_HINT)
+        self._tiers_hint.setStyleSheet(f"color: {_C_NEUTRAL}; font-style: italic;")
+        self._tiers_warning = QLabel("")
+        self._tiers_warning.setStyleSheet(f"color: {_C_ERR};")
+        self._tiers_warning.setVisible(False)
+        tiers_box = QWidget()
+        v = QVBoxLayout(tiers_box)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.addLayout(self._row(QLabel("Tiers (--tiers):"), self._tiers_edit))
+        v.addLayout(self._row(self._tiers_hint))
+        v.addLayout(self._row(self._tiers_warning))
 
         # --- DS transcript picker + re-order affordance (transient, NOT persisted) ---
         self._transcript_edit = QLineEdit()
@@ -156,7 +168,7 @@ class GamePanel(QWidget):
         self._gamescript_browse.clicked.connect(self._on_gamescript_browse)
         self._main_story.toggled.connect(lambda _c: self.render_scope_changed.emit())
         self._spine_only.toggled.connect(lambda _c: self.render_scope_changed.emit())
-        self._tiers_edit.textChanged.connect(lambda _t: self.render_scope_changed.emit())
+        self._tiers_edit.textChanged.connect(self._on_tiers_changed)
 
         self.set_game("ds")
 
@@ -198,6 +210,7 @@ class GamePanel(QWidget):
         self._main_story.setChecked(bool(defaults.get("main_story", False)))
         self._spine_only.setChecked(bool(defaults.get("spine_only", False)))
         self._tiers_edit.setText(defaults.get("tiers", FW_TIERS_DEFAULT))
+        self._tiers_warning.setVisible(False)
         for w in (self._main_story, self._spine_only, self._tiers_edit):
             w.blockSignals(False)
 
@@ -267,6 +280,15 @@ class GamePanel(QWidget):
     def visible_controls(self) -> set[str]:
         """The set of control names currently shown (the others are hidden, not disabled)."""
         return {name for name, w in self._widgets.items() if w.isVisibleTo(self)}
+
+    def _on_tiers_changed(self, text: str) -> None:
+        is_valid, unknown = validate_fw_tiers(text)
+        if not is_valid and unknown:
+            self._tiers_warning.setText(f"Unknown tier(s): {', '.join(unknown)}")
+            self._tiers_warning.setVisible(True)
+        else:
+            self._tiers_warning.setVisible(False)
+        self.render_scope_changed.emit()
 
     def render_scope(self) -> dict:
         """The current render scope for the shell to thread into ``render_selection_argv``:

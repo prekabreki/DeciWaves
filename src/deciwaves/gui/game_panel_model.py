@@ -43,6 +43,24 @@ SAMPLE_CAP_DEFAULT = 300
 # widget stays Qt-only and this constant is the tested source of truth for the panel default.
 FW_TIERS_DEFAULT = "1,2,S"
 
+# The known tier tokens FW understands. Any token outside this set is an input error.
+_FW_VALID_TIERS = {"1", "2", "S", "W", "D"}
+
+# Hint shown near the FW tiers field to warn that scope-narrowing can drop checked rows.
+FW_TIERS_HINT = "Checked rows whose tier is outside the entered tiers will be dropped."
+
+def validate_fw_tiers(text: str) -> tuple[bool, list[str]]:
+    """Return ``(is_valid, unknown_tokens)`` for a comma-separated tiers string.
+
+    Every token in *text* (whitespace-stripped, empty tokens skipped) must be a member of
+    the known tier set ``{1,2,S,W,D}``. An empty *text* (the user cleared the field) is
+    considered valid -- ``render_scope()`` falls back to ``FW_TIERS_DEFAULT`` at access time.
+    """
+    tokens = [t.strip() for t in text.split(",") if t.strip()]
+    unknown = [t for t in tokens if t not in _FW_VALID_TIERS]
+    return len(unknown) == 0, unknown
+
+
 # Scan-warning copy (spec §7 "Scan warning copy" row) -- this text does not exist elsewhere;
 # it is introduced here as the single source. Each names the cost the Scan button incurs.
 _SCAN_WARNINGS = {

@@ -6,6 +6,7 @@ import os
 
 from deciwaves.gui.game_panel_model import (
     FW_TIERS_DEFAULT,
+    FW_TIERS_HINT,
     SAMPLE_CAP_DEFAULT,
     controls_for,
     effective_types_path,
@@ -13,6 +14,7 @@ from deciwaves.gui.game_panel_model import (
     scan_warning,
     transcript_order_argv,
     types_status,
+    validate_fw_tiers,
 )
 
 BASE = ["py", "-m", "deciwaves.cli.main"]
@@ -104,6 +106,63 @@ def test_render_scope_defaults_per_game():
     assert render_scope_defaults("fw") == {"tiers": FW_TIERS_DEFAULT}
     assert FW_TIERS_DEFAULT == "1,2,S"
     assert render_scope_defaults("nope") == {}
+
+
+# --- validate_fw_tiers -----------------------------------------------------
+
+def test_validate_fw_tiers_default_is_valid():
+    is_valid, unknown = validate_fw_tiers("1,2,S")
+    assert is_valid is True
+    assert unknown == []
+
+
+def test_validate_fw_tiers_all_known_tiers_is_valid():
+    is_valid, unknown = validate_fw_tiers("1,2,S,W,D")
+    assert is_valid is True
+    assert unknown == []
+
+
+def test_validate_fw_tiers_single_tier_is_valid():
+    for tier in ("1", "2", "S", "W", "D"):
+        is_valid, unknown = validate_fw_tiers(tier)
+        assert is_valid is True, f"tier {tier!r} should be valid"
+        assert unknown == []
+
+
+def test_validate_fw_tiers_unknown_token_is_flagged():
+    is_valid, unknown = validate_fw_tiers("1,2,Z")
+    assert is_valid is False
+    assert "Z" in unknown
+
+
+def test_validate_fw_tiers_multiple_unknown():
+    is_valid, unknown = validate_fw_tiers("X,Y,1")
+    assert is_valid is False
+    assert set(unknown) == {"X", "Y"}
+
+
+def test_validate_fw_tiers_empty_string_is_valid():
+    is_valid, unknown = validate_fw_tiers("")
+    assert is_valid is True
+    assert unknown == []
+
+
+def test_validate_fw_tiers_whitespace_and_order_agnostic():
+    is_valid, unknown = validate_fw_tiers(" W , 2 , 1 , S ")
+    assert is_valid is True
+    assert unknown == []
+
+
+def test_validate_fw_tiers_subset_finds_no_false_positive():
+    for combo in ("W,D", "1,W", "S,D", "1,2,S,W,D"):
+        is_valid, unknown = validate_fw_tiers(combo)
+        assert is_valid is True, f"combo {combo!r} should be valid"
+        assert unknown == []
+
+
+def test_fw_tiers_hint_is_defined():
+    assert isinstance(FW_TIERS_HINT, str)
+    assert len(FW_TIERS_HINT) > 0
 
 
 # --- transcript_order_argv (standalone DS re-order) ------------------------
