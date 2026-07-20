@@ -335,13 +335,17 @@ class MainWindow(QMainWindow):
     def _sync_running(self) -> None:
         """One job at a time (spec §5.3): a pipeline job, an export render, and a dump batch all
         mutually exclude. Whenever ANY is active, disable the pipeline controls, the stage-strip
-        Re-run affordance, and the export panel; the export panel additionally shows a Cancel
-        while its own dump runs. Inline preview (▷/Enter) is intentionally left alone (§6.5)."""
+        Re-run affordance, the export panel, and the setup action buttons (M6 both ways). The
+        export panel additionally shows a Cancel while its own dump runs. Inline preview (▷/Enter)
+        is intentionally left alone (§6.5)."""
         busy = self.runner.is_running or self.dump.is_running
+        pipeline_busy = busy
+        busy = busy or self.pipeline.setup_doctor.setup.is_busy
         self.pipeline.controls.set_running(busy)
         self.pipeline.strip.set_running(busy)
         self.library.export.set_running(busy)
         self.library.export.set_dumping(self.dump.is_running)
+        self.pipeline.setup_doctor.setup.set_externally_busy(pipeline_busy)
 
     def _report_export_result(self, game: str | None, code: int) -> None:
         if code == 0:
@@ -395,6 +399,13 @@ class MainWindow(QMainWindow):
 
     def _on_dump_progress(self, done: int, total: int) -> None:
         self.library.export.set_dump_progress(done, total)
+
+    def closeEvent(self, event) -> None:
+        self.pipeline.setup_doctor.setup._runner.cancel()
+        self.pipeline.setup_doctor.doctor._runner.cancel()
+        self.runner.cancel()
+        self.dump.cancel()
+        super().closeEvent(event)
 
     def _on_dump_finished(self, ok: int, failed: int) -> None:
         self.pipeline.append_log(f"dump: done — {ok} ok, {failed} failed.\n")

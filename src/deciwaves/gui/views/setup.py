@@ -75,6 +75,7 @@ class DoctorPanel(QWidget):
         # doctor --json must be parsed from clean stdout (merge_stderr=False)
         self._runner = CaptureRunner(self, merge_stderr=False)
         self._runner.finished.connect(self._on_finished)
+        self._runner.started.connect(self._on_doctor_started)
 
         self._recheck_btn = QPushButton("Re-check")
         self._recheck_btn.setToolTip("Re-run Doctor to check system and tool status")
@@ -156,7 +157,16 @@ class DoctorPanel(QWidget):
         h.addWidget(text_label, 1)
         return row
 
+    def _on_doctor_started(self) -> None:
+        self._recheck_btn.setEnabled(False)
+        self._recheck_btn.setText("Checking\u2026")
+        _clear(self._rows_layout)
+        placeholder = QLabel("Checking\u2026")
+        self._rows_layout.addWidget(placeholder)
+
     def _on_finished(self, _code: int, text: str) -> None:
+        self._recheck_btn.setEnabled(True)
+        self._recheck_btn.setText("Re-check")
         payload = load_doctor_payload(text)
         if payload is None:
             payload = {"ok": False, "checks": [
@@ -174,6 +184,7 @@ class SetupScreen(QWidget):
         super().__init__(parent)
         self._base = base or default_base()
         self._busy = False
+        self._externally_busy = False
         self._rows: list = []
         self._warnings: list[str] = []
 
@@ -190,6 +201,9 @@ class SetupScreen(QWidget):
         self._run_btn.clicked.connect(lambda: self.run())
         self._redownload_btn.clicked.connect(lambda: self.run(force=True))
         self._recheck_btn.clicked.connect(lambda: self.run(skip_downloads=True))
+        self._cancel_btn = QPushButton("Cancel")
+        self._cancel_btn.clicked.connect(self.cancel)
+        self._cancel_btn.setVisible(False)
 
         # one fixed row per tool: a spinner while running, a status line after.
         self._tool_status: dict[str, QLabel] = {}
@@ -198,6 +212,9 @@ class SetupScreen(QWidget):
         for tool in _SETUP_TOOLS:
             tools_box.addLayout(self._tool_row(tool))
 
+        self._error_label = QLabel("")
+        self._error_label.setStyleSheet(f"color: {_SEV_STYLE[SEV_ERROR][1]};")
+        self._error_label.setVisible(False)
         self._paths_label = QLabel("")   # ds_install / oodle / hzd / fw summary rows
         self._paths_label.setWordWrap(True)
         self._paths_label.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
@@ -212,8 +229,10 @@ class SetupScreen(QWidget):
         header.addStretch(1)
         for btn in (self._run_btn, self._redownload_btn, self._recheck_btn):
             header.addWidget(btn)
+        header.addWidget(self._cancel_btn)
         layout.addLayout(header)
         layout.addLayout(tools_box)
+        layout.addWidget(self._error_label)
         layout.addWidget(self._paths_label)
         layout.addWidget(self._warnings_label)
 
@@ -239,6 +258,7 @@ class SetupScreen(QWidget):
         if not self._runner.start(argv):
             return False
         self._busy = True
+        self._update_buttons()
         for tool in _SETUP_TOOLS:
             self._tool_spinner[tool].setVisible(True)
             self._tool_status[tool].setVisible(False)
@@ -246,6 +266,18 @@ class SetupScreen(QWidget):
 
     def cancel(self) -> None:
         self._runner.cancel()
+
+    def _update_buttons(self) -> None:
+        disabled = self._busy or self._externally_busy
+        self._run_btn.setEnabled(not disabled)
+        self._redownload_btn.setEnabled(not disabled)
+        self._recheck_btn.setEnabled(not disabled)
+        self._cancel_btn.setVisible(self._busy)
+
+    def set_externally_busy(self, busy: bool) -> None:
+        """Disable setup action buttons when a pipeline/dump job is running (M6 both ways)."""
+        self._externally_busy = busy
+        self._update_buttons()
 
     @property
     def is_busy(self) -> bool:
@@ -278,6 +310,12 @@ class SetupScreen(QWidget):
 
     def _on_finished(self, code: int, text: str) -> None:
         self._busy = False
+        self._update_buttons()
+        self._error_label.setVisible(False)
+        self._error_label.setText("")
+        if code != 0:
+            self._error_label.setText(f"setup exited with code {code}")
+            self._error_label.setVisible(True)
         self._rows = parse_setup_summary(text)
         self._warnings = parse_setup_warnings(text)
         by_label = {r.label: r for r in self._rows}
