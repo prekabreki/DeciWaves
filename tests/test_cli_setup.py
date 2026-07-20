@@ -1,5 +1,7 @@
 import io
 import json
+import os
+import stat
 import urllib.request
 import zipfile
 
@@ -679,3 +681,59 @@ def test_pinned_urls_are_github_release_downloads(url):
     # (issue #39: this caught the ffmpeg URL still pointing at "latest").
     tag = url.split("/releases/download/", 1)[1].split("/", 1)[0]
     assert tag != "latest", f"{url} points at a rolling 'latest' release tag, not a pinned one"
+
+
+def test_download_and_unpack_overwrites_readonly_file(tmp_path, monkeypatch):
+    dest = tmp_path / "tools"
+    dest.mkdir()
+    target = dest / "vgmstream-cli.exe"
+    target.write_bytes(b"old content")
+    os.chmod(str(target), stat.S_IREAD)
+
+    try:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("vgmstream-cli.exe", b"new content from zip")
+        zip_bytes = buf.getvalue()
+        monkeypatch.setattr(urllib.request, "urlopen", lambda url, timeout=None: io.BytesIO(zip_bytes))
+
+        manifest = dest / "vgmstream-cli.exe.files.txt"
+        s._download_and_unpack("https://example.invalid/vgmstream-win64.zip", dest, manifest_path=manifest)
+
+        assert target.read_bytes() == b"new content from zip"
+        assert manifest.is_file()
+        assert "vgmstream-cli.exe" in manifest.read_text()
+        assert not list(dest.glob("*.tmp"))
+    finally:
+        os.chmod(str(target), stat.S_IWRITE)
+
+
+def test_download_and_unpack_mid_extract_failure_cleans_up(tmp_path, monkeypatch):
+    dest = tmp_path / "tools"
+    manifest = dest / "vgmstream-cli.exe.files.txt"
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("bin/vgmstream-cli.exe", b"exe-bytes")
+        zf.writestr("bin/libvgmstream.dll", b"dll-bytes")
+        zf.writestr("README.txt", b"read me")
+    zip_bytes = buf.getvalue()
+    monkeypatch.setattr(urllib.request, "urlopen", lambda url, timeout=None: io.BytesIO(zip_bytes))
+
+    call_count = [0]
+    orig_replace = s._replace_with_retry
+
+    def _failing_replace(temp, target, attempts=3, backoff=0.5):
+        call_count[0] += 1
+        if call_count[0] == 2:
+            raise PermissionError("Simulated locked file -- test")
+        orig_replace(temp, target, attempts, backoff)
+
+    monkeypatch.setattr(s, "_replace_with_retry", _failing_replace)
+
+    with pytest.raises(PermissionError, match="Simulated locked file"):
+        s._download_and_unpack("https://example.invalid/vgmstream-win64.zip", dest, manifest_path=manifest)
+
+    assert not manifest.exists()
+    assert not list(dest.glob("*.tmp"))
+    assert (dest / "vgmstream-cli.exe").read_bytes() == b"exe-bytes"
