@@ -36,6 +36,7 @@ from deciwaves.gui.pipeline_model import (
     stage_states,
 )
 from deciwaves.gui.preview import PreviewPlayer
+from deciwaves.gui.progress_model import probe_progress
 from deciwaves.gui.preview_model import PreviewResolver
 from deciwaves.gui.views import GamePanel, LibraryView, PipelineView
 
@@ -179,7 +180,8 @@ class MainWindow(QMainWindow):
         running = None
         if self.runner.is_running and self._job_game == game:
             running = self._active_stage(game)
-        self.pipeline.refresh_panels(game, self._workspace(), running)
+        progress = probe_progress(self._workspace(), game, running) if running else None
+        self.pipeline.refresh_panels(game, self._workspace(), running, progress=progress)
 
     def _refresh_library(self) -> None:
         """Reload the Library's line list (#70). Cheap enough for game-change / tab-switch /
