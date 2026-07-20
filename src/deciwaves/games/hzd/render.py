@@ -208,6 +208,8 @@ def main(argv=None):
                     help="number of clips to decode concurrently (each spawns one "
                          f"VGAudioCli). Default min(8, cpu_count)={default_jobs()}; "
                          "--jobs 1 forces the old serial decode")
+    ap.add_argument("--target-mb", type=float, default=285.0,
+                    help="Target MB per reel (default 285)")
     a = ap.parse_args(argv)
 
     from deciwaves.games.hzd.profile import hzd_package_error
@@ -288,7 +290,7 @@ def main(argv=None):
         row_of=lambda s, t: [format_ts(t), s.scene, s.speaker, s.subtitle, s.line_id])
     n_files = assemble_reels(
         spine, ep_secs, decoded, out_dir=a.out_dir, cache_dir=a.cache, stem=stem,
-        columns=columns, budget=budget_seconds(), gap_key=lambda s: s.scene)
+        columns=columns, budget=budget_seconds(target_mb=a.target_mb), gap_key=lambda s: s.scene)
     if n_files == 0:
         # Defensive backstop (issue #64): with the `not decoded` guard above,
         # a non-empty decoded always packs >=1 reel, so this is unreachable

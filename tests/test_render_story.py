@@ -76,6 +76,11 @@ def test_budget_seconds_scales_with_bitrate():
     assert secs * (96 * 1000 / 8) * (1 + rs.MP3_OVERHEAD) <= 285_000_000
 
 
+def test_budget_seconds_smaller_target_yields_smaller_budget():
+    assert rs.budget_seconds(target_mb=100) < rs.budget_seconds(target_mb=285)
+    assert rs.budget_seconds(target_mb=50) < rs.budget_seconds(target_mb=100)
+
+
 def test_pack_groups_whole_episodes_under_budget():
     assert rs.pack_episodes([(0, 100), (1, 100), (2, 100)], budget=250) == [[0, 1], [2]]
 

@@ -159,6 +159,8 @@ def main(argv=None):
     ap.add_argument("--uniform-mono", action="store_true",
                     help="clips are all mono/48k/s16 (FW fast-path): skip normalize, "
                          "direct concat (fast + low disk at bulk scale)")
+    ap.add_argument("--target-mb", type=float, default=285.0,
+                    help="Target MB per reel (default 285)")
     a = ap.parse_args(argv)
 
     tiers = {t.strip() for t in a.tiers.split(",") if t.strip()}
@@ -233,7 +235,7 @@ def main(argv=None):
         row_of=lambda s, t: [format_ts(t), s.quest, s.speaker, s.subtitle, s.line_id])
     n_files = assemble_reels(
         spine, ep_secs, durations, out_dir=a.out_dir, cache_dir=a.cache, stem=a.stem,
-        columns=columns, budget=budget_seconds(), gap_key=lambda s: s.quest,
+        columns=columns, budget=budget_seconds(target_mb=a.target_mb), gap_key=lambda s: s.quest,
         concat_fn=_concat_uniform if a.uniform_mono else None,
         silence_fn=mono_silence_wav if a.uniform_mono else None)
     if n_files == 0:
