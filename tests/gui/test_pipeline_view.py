@@ -99,6 +99,19 @@ def test_controls_disable_while_running(qtbot):
     assert c._scan_btn.isEnabled()
 
 
+def test_cancel_button_shows_while_running_emits_signal(qtbot):
+    c = PipelineControls()
+    qtbot.addWidget(c)
+    assert not c.cancel_shown()
+    c.set_running(True)
+    assert c.cancel_shown()
+    assert c._cancel_btn.text() == "Cancel"
+    with qtbot.waitSignal(c.cancel_requested):
+        c._cancel_btn.click()
+    c.set_running(False)
+    assert not c.cancel_shown()
+
+
 # --- CoverageBar -----------------------------------------------------------
 
 def _write_coverage(ws, obj):
