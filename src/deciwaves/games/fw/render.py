@@ -20,8 +20,8 @@ from dataclasses import dataclass
 import subprocess
 
 from deciwaves.engine.render import (
-    SR, accumulate_episode_seconds, assemble_reels, budget_seconds, format_ts,
-    ReelColumns,
+    SR, DEFAULT_BITRATE_KBPS, accumulate_episode_seconds, assemble_reels,
+    budget_seconds, format_ts, ReelColumns,
 )
 
 # Default --manifest: the full-reel stage (story_full.py)'s own default --out.
@@ -57,7 +57,7 @@ def _is_mono(wav):
         return False
 
 
-def _concat_uniform(wav_list, out_mp3, list_path, norm_dir):
+def _concat_uniform(wav_list, out_mp3, list_path, norm_dir, kbps=DEFAULT_BITRATE_KBPS):
     """Concat clips that are already uniform mono/48k/s16 with NO per-file re-encode.
 
     Skips the normalize step that would copy tens of GB at bulk scale; only the rare
@@ -79,7 +79,7 @@ def _concat_uniform(wav_list, out_mp3, list_path, norm_dir):
             f.write(f"file '{os.path.abspath(use)}'\n")
     proc = subprocess.run(
         ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", list_path,
-         "-b:a", "128k", "-ac", "1", "-ar", str(SR), out_mp3],
+         "-b:a", f"{kbps}k", "-ac", "1", "-ar", str(SR), out_mp3],
         capture_output=True, text=True)
     if proc.returncode != 0:
         raise RuntimeError(f"ffmpeg concat failed: {proc.stderr[-500:]}")
@@ -156,6 +156,9 @@ def main(argv=None):
     ap.add_argument("--tiers", default=DEFAULT_TIERS,
                     help="comma-separated tiers to ship (e.g. '1' confident-only, 'D' for DLC)")
     ap.add_argument("--stem", default="fw_story_reel", help="output MP3 filename stem")
+    ap.add_argument("--bitrate", type=int, default=DEFAULT_BITRATE_KBPS,
+                    help="MP3 CBR bitrate in kbps (drives both encode and the "
+                         "byte-budget packing math). Default %(default)s")
     ap.add_argument("--uniform-mono", action="store_true",
                     help="clips are all mono/48k/s16 (FW fast-path): skip normalize, "
                          "direct concat (fast + low disk at bulk scale)")
@@ -233,9 +236,10 @@ def main(argv=None):
         row_of=lambda s, t: [format_ts(t), s.quest, s.speaker, s.subtitle, s.line_id])
     n_files = assemble_reels(
         spine, ep_secs, durations, out_dir=a.out_dir, cache_dir=a.cache, stem=a.stem,
-        columns=columns, budget=budget_seconds(), gap_key=lambda s: s.quest,
+        columns=columns, budget=budget_seconds(kbps=a.bitrate), gap_key=lambda s: s.quest,
         concat_fn=_concat_uniform if a.uniform_mono else None,
-        silence_fn=mono_silence_wav if a.uniform_mono else None)
+        silence_fn=mono_silence_wav if a.uniform_mono else None,
+        concat_kwargs={"kbps": a.bitrate})
     if n_files == 0:
         # Defensive backstop (issue #64): with the `not durations` guard above,
         # a non-empty durations always packs >=1 reel, so this is unreachable

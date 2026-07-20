@@ -362,6 +362,29 @@ def test_hzd_render_main_empty_spine_drops_stale_errors_log(tmp_path, monkeypatc
     assert not stale.exists()   # gone, not silently attributed to this no-op
 
 
+def test_hzd_render_bitrate_affects_budget_and_concat_kwargs(tmp_path, monkeypatch):
+    """HZD render --bitrate changes both the packing budget and the ffmpeg encode arg."""
+    from deciwaves.engine.render import budget_seconds as bs
+    argv = _main_fixture(tmp_path, [{"clip_row": "10", "line_id": "MQ04_a", "tier": "S"}])
+    argv += ["--bitrate", "96"]
+    monkeypatch.setattr(render, "HzdPackage", _MainFakePackage())
+    monkeypatch.setattr(render, "decode_spine_clips",
+                        lambda *a, **k: ({"MQ04_a": ("wav", 1.0)}, {0: 1.0}, 0))
+
+    calls = []
+    def track_assemble(*args, **kwargs):
+        calls.append((args, kwargs))
+        return 1
+    monkeypatch.setattr(render, "assemble_reels", track_assemble)
+
+    rc = render.main(argv)
+    assert rc == 0
+    assert len(calls) == 1
+    _, kwargs = calls[0]
+    assert kwargs["budget"] == bs(kbps=96)
+    assert kwargs["concat_kwargs"] == {"kbps": 96}
+
+
 def test_hzd_render_main_empty_input_manifest_is_upstream_error(tmp_path, monkeypatch, capsys):
     """A header-only manifest (0 rows) means an upstream stage (bind) produced
     nothing -- a broken/empty pipeline, NOT a deliberate selection. It must fail
