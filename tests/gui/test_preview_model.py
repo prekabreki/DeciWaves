@@ -224,3 +224,73 @@ def test_hzd_missing_coords_raises(tmp_path, monkeypatch):
     r = PreviewResolver("hzd", ws, cfg={"hzd_package": "PKG"})
     with pytest.raises(PreviewError):
         r.resolve_wav("h1", None)
+
+
+# --- thread safety ---------------------------------------------------------
+
+def test_threaded_resolve_does_not_double_build(tmp_path, monkeypatch):
+    """Two threads resolving different HZD line_ids on one shared PreviewResolver.
+    The lock must ensure lazy caches are built exactly once (AC #2)."""
+    import threading
+    ws = str(tmp_path)
+    _write_csv(os.path.join(ws, "out", "hzd", "asr-manifest.csv"), HZD_MANIFEST,
+               [{"clip_row": "5", "offset": "1000", "line_id": "h1", "speaker_name": "Aloy",
+                 "subtitle_en": "Hi", "scene": "mq01", "tier": "S", "score": "9",
+                 "transcript": "hi"},
+                {"clip_row": "7", "offset": "2000", "line_id": "h2", "speaker_name": "Aloy",
+                 "subtitle_en": "Bye", "scene": "mq01", "tier": "S", "score": "9",
+                 "transcript": "bye"}])
+    _write_csv(os.path.join(ws, "out", "hzd", "clip-index.csv"), HZD_CLIPIDX,
+               [{"clip_row": "5", "offset": "1000", "a_bytes": "2048", "b_samples": "48000"},
+                {"clip_row": "7", "offset": "2000", "a_bytes": "1024", "b_samples": "48000"}])
+
+    state = {"construct_count": 0, "decode_args": []}
+    state_lock = threading.Lock()
+
+    class _CountingDsar:
+        def read(self, offset, length):
+            return f"wem:{offset}:{length}".encode()
+
+    class _CountingPkg:
+        def __init__(self, package_dir):
+            with state_lock:
+                state["construct_count"] += 1
+            self.package_dir = package_dir
+
+        def dsar_for(self, archive):
+            return _CountingDsar()
+
+    def _fake_decode(wem_bytes, wav_path):
+        with state_lock:
+            state["decode_args"].append((wem_bytes, wav_path))
+        os.makedirs(os.path.dirname(wav_path), exist_ok=True)
+        with open(wav_path, "wb") as f:
+            f.write(b"\x00" * 64)
+
+    monkeypatch.setattr(preview_model, "HzdPackage", _CountingPkg)
+    monkeypatch.setattr(preview_model, "decode_wem_to_wav", _fake_decode)
+
+    r = PreviewResolver("hzd", ws, cfg={"hzd_package": "PKG"})
+    results = []
+    errors = []
+
+    def resolve(lid):
+        try:
+            results.append(r.resolve_wav(lid, None))
+        except Exception as exc:
+            errors.append((lid, exc))
+
+    t1 = threading.Thread(target=resolve, args=("h1",))
+    t2 = threading.Thread(target=resolve, args=("h2",))
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    assert state["construct_count"] == 1
+    assert len(errors) == 0, f"resolve errors: {errors}"
+    assert len(results) == 2
+    assert results[0] != results[1]
+    wem_set = {d[0] for d in state["decode_args"]}
+    assert b"wem:1000:2048" in wem_set
+    assert b"wem:2000:1024" in wem_set

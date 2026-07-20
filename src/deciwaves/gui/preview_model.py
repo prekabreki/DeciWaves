@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import csv
 import os
+import threading
 
 from deciwaves.cli import config
 from deciwaves.engine.audio_clip import clip_wav
@@ -70,6 +71,7 @@ class PreviewResolver:
         self._game = game
         self._workspace = workspace
         self._cfg = cfg if cfg is not None else config.load()
+        self._lock = threading.Lock()
         self._ds_index: PackIndex | None = None
         self._ds_index_key: tuple[str, str] | None = None
         self._hzd_pkg: HzdPackage | None = None
@@ -116,11 +118,12 @@ class PreviewResolver:
         return wav_path
 
     def _ds_pack_index(self, data_dir: str, oodle: str) -> PackIndex:
-        key = (data_dir, oodle)
-        if self._ds_index is None or self._ds_index_key != key:
-            self._ds_index = PackIndex(data_dir, oodle)  # expensive: globs+hashes every .bin
-            self._ds_index_key = key
-        return self._ds_index
+        with self._lock:
+            key = (data_dir, oodle)
+            if self._ds_index is None or self._ds_index_key != key:
+                self._ds_index = PackIndex(data_dir, oodle)  # expensive: globs+hashes every .bin
+                self._ds_index_key = key
+            return self._ds_index
 
     # --- HZD ---------------------------------------------------------------
 
@@ -152,14 +155,17 @@ class PreviewResolver:
         return wav_path
 
     def _hzd_dsar(self, package: str):
-        if self._hzd_pkg is None:
-            self._hzd_pkg = HzdPackage(package)
-        return self._hzd_pkg.dsar_for(VOICE_ARCHIVE)
+        with self._lock:
+            if self._hzd_pkg is None:
+                self._hzd_pkg = HzdPackage(package)
+            return self._hzd_pkg.dsar_for(VOICE_ARCHIVE)
 
     def _load_hzd_maps(self) -> tuple[dict[str, str], dict[int, tuple[int, int]]]:
         """``(line_id -> clip_row, clip_row -> (offset, a_bytes))`` from the HZD manifests,
         loaded once and cached. Mirrors ``games/hzd/render.py``'s manifest+clip-index join."""
-        if self._hzd_maps is None:
+        with self._lock:
+            if self._hzd_maps is not None:
+                return self._hzd_maps
             root = os.path.join(self._workspace, "out", "hzd")
             line_to_clip = {
                 r.get("line_id", ""): r.get("clip_row", "")
