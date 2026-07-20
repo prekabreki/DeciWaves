@@ -143,6 +143,13 @@ class MainWindow(QMainWindow):
         self.bar.game_changed.connect(lambda _g: self._refresh_panels())
         # reload the Library's line list for the selected game (#70, spec §6)
         self.bar.game_changed.connect(lambda _g: self._refresh_library())
+
+        self.bar.workspace_changed.connect(lambda _ws: self._refresh_status())
+        self.bar.workspace_changed.connect(lambda _ws: self._refresh_panels())
+        self.bar.workspace_changed.connect(lambda _ws: self._refresh_library())
+        self.bar.workspace_changed.connect(lambda _ws: self._refresh_game_panel())
+        self.bar.workspace_changed.connect(lambda _ws: setattr(self, '_resolver', None))
+
         self.bar.select_game("ds")   # DS is the built-first vertical slice
         # select_game("ds") leaves the combo on its existing index 0, so game_changed does
         # not fire -- prime the status line and panels for the initial game explicitly.

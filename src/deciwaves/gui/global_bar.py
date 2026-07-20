@@ -3,7 +3,7 @@ line, workspace picker, and the single job chip. Visible everywhere because the 
 job may belong to a game other than the one currently selected."""
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QTimer, Signal
 from PySide6.QtWidgets import (
     QComboBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidget,
 )
@@ -16,6 +16,7 @@ _GAMES = [("ds", "Death Stranding"),
 
 class GlobalBar(QWidget):
     game_changed = Signal(str)
+    workspace_changed = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -44,6 +45,7 @@ class GlobalBar(QWidget):
         self._combo.currentIndexChanged.connect(
             lambda _i: self.game_changed.emit(self.current_game()))
         self._browse.clicked.connect(self._pick_workspace)
+        self._workspace.editingFinished.connect(self._on_workspace_edited)
 
     def current_game(self) -> str:
         return self._combo.currentData()
@@ -59,15 +61,25 @@ class GlobalBar(QWidget):
     def set_workspace(self, path: str) -> None:
         self._workspace.setText(path)
 
+    def _on_workspace_edited(self) -> None:
+        if not getattr(self, '_workspace_accept', False):
+            self.workspace_changed.emit(self._workspace.text())
+
+    def _pick_workspace(self) -> None:
+        chosen = QFileDialog.getExistingDirectory(
+            self, "Choose workspace", self._workspace.text() or ".")
+        if chosen:
+            self._workspace_accept = True
+            self._workspace.setText(chosen)
+            self.workspace_changed.emit(chosen)
+            QTimer.singleShot(0, self._clear_workspace_accept)
+
+    def _clear_workspace_accept(self) -> None:
+        self._workspace_accept = False
+
     def set_install_status(self, text: str, ok: bool) -> None:
         self._status.setText(text)
         self._status.setStyleSheet("color: #167f3b;" if ok else "color: #b00020;")
 
     def set_job_chip(self, text: str) -> None:
         self._chip.setText(text)
-
-    def _pick_workspace(self) -> None:
-        chosen = QFileDialog.getExistingDirectory(
-            self, "Choose workspace", self._workspace.text() or ".")
-        if chosen:
-            self._workspace.setText(chosen)
