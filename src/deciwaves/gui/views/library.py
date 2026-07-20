@@ -1,8 +1,8 @@
 """Library view (#70, spec §6): the line list. All parsing/filter/selection logic lives in
 the Qt-free :mod:`deciwaves.gui.library_model`; this is the thin widget that renders it into
 a virtualized QTableView, wires the filter/selection controls, keeps the status line, and
-persists checkbox state. Playback on ▷ (#71) and filtered export (#72) are separate issues --
-here ▷ only reflects availability and emits an (as-yet unconnected) ``preview_requested``.
+persists checkbox state. Playback on ▶ (#71) and filtered export (#72) are separate issues --
+here ▶ only reflects availability and emits an (as-yet unconnected) ``preview_requested``.
 """
 from __future__ import annotations
 
@@ -43,7 +43,7 @@ from deciwaves.gui.library_model import (
     visible_rows,
 )
 
-# Gray foreground for a pending/unavailable ▷ (spec §6.2/§6.5). A value type -- safe to build
+# Gray foreground for a pending/unavailable ▶ (spec §6.2/§6.5). A value type -- safe to build
 # at import time without a running QApplication.
 _PREVIEW_PENDING_FG = QColor(0x88, 0x88, 0x88)
 
@@ -53,7 +53,7 @@ class _TableModel(QAbstractTableModel):
     view's unchecked set (checked is the default), so a bulk selection command only needs a
     ``dataChanged`` over the checkbox column -- never a full model rebuild."""
 
-    COLS = ["▷", "✓", "id / name", "length", "speaker", "subtitle"]
+    COLS = ["▶", "✓", "id / name", "length", "speaker", "subtitle"]
     COL_PREVIEW, COL_CHECK, COL_ID, COL_LEN, COL_SPEAKER, COL_SUB = range(6)
 
     def __init__(self, view: LibraryView):
@@ -104,7 +104,7 @@ class _TableModel(QAbstractTableModel):
             return Qt.Checked if checked else Qt.Unchecked
         if role == Qt.DisplayRole:
             if col == self.COL_PREVIEW:
-                return "▷"
+                return "▶"
             if col == self.COL_ID:
                 return row.name or row.line_id
             if col == self.COL_LEN:
@@ -117,6 +117,8 @@ class _TableModel(QAbstractTableModel):
         # an unavailable preview is dimmed and carries a "why" tooltip (spec §6.2/§6.5).
         if col == self.COL_PREVIEW and role in (Qt.ForegroundRole, Qt.ToolTipRole):
             if self._view._available.get(row.line_id, False):
+                if role == Qt.ToolTipRole:
+                    return "Play preview"
                 return None
             if role == Qt.ForegroundRole:
                 return _PREVIEW_PENDING_FG
@@ -134,7 +136,7 @@ class _TableModel(QAbstractTableModel):
 
 class LibraryView(QWidget):
     """The line list with search/speaker/dupe/no-subtitle filters, undoable selection
-    commands, a persisted checkbox column, and an availability-aware ▷ preview column."""
+    commands, a persisted checkbox column, and an availability-aware ▶ preview column."""
 
     preview_requested = Signal(str)  # line_id -- wired to playback in #71
 
@@ -208,6 +210,7 @@ class LibraryView(QWidget):
         header.setSectionsClickable(True)
         header.setSectionResizeMode(_TableModel.COL_SUB, QHeaderView.Stretch)
         header.sectionClicked.connect(self._on_header_clicked)
+        self._table.setColumnWidth(_TableModel.COL_PREVIEW, 36)
 
         self._status = QLabel("")
 
@@ -356,7 +359,7 @@ class LibraryView(QWidget):
         if index.column() != _TableModel.COL_PREVIEW:
             return
         row = self._model.row_at(index.row())
-        if self._available.get(row.line_id, False):  # unavailable ▷ is a no-op
+        if self._available.get(row.line_id, False):  # unavailable ▶ is a no-op
             self.preview_requested.emit(row.line_id)
 
     def eventFilter(self, obj, event):
