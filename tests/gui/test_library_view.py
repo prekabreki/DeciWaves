@@ -217,7 +217,7 @@ def test_space_key_toggles_current_row_checkbox(qtbot, tmp_path):
 
 
 def test_preview_column_availability_hzd_prebind_dimmed(qtbot, tmp_path):
-    """HZD catalog-only (pre-bind): ▷ shows pending -- dimmed foreground + an
+    """HZD catalog-only (pre-bind): ▶ shows pending -- dimmed foreground + an
     'available after bind' tooltip (spec §6.2/§6.5) -- and clicking it is a no-op."""
     ws = str(tmp_path)
     _write_csv(os.path.join(ws, "out", "hzd", "catalog.csv"), DS_CAT,
@@ -226,7 +226,7 @@ def test_preview_column_availability_hzd_prebind_dimmed(qtbot, tmp_path):
     qtbot.addWidget(v)
     v.refresh("hzd", ws)
     idx = v._model.index(0, v._model.COL_PREVIEW)
-    assert v._model.data(idx, Qt.DisplayRole) == "▷"
+    assert v._model.data(idx, Qt.DisplayRole) == "▶"
     assert v._model.data(idx, Qt.ForegroundRole) is not None  # dimmed = unavailable
     assert v._model.data(idx, Qt.ToolTipRole) == "Preview available after bind"
     # clicking an unavailable ▷ never emits (playback is #71)
@@ -235,8 +235,8 @@ def test_preview_column_availability_hzd_prebind_dimmed(qtbot, tmp_path):
 
 
 def test_preview_column_availability_ds_and_fw_available(qtbot, tmp_path):
-    """DS is always available; FW is available once a row has a WAV path -- available ▷ has
-    no dim color and no tooltip."""
+    """DS is always available; FW is available once a row has a WAV path -- available ▶ has
+    no dim color and a 'Play preview' tooltip."""
     ws = str(tmp_path)
     _write_ds_catalog(ws, [_cat_row(line_id="a")])
     v = LibraryView()
@@ -244,7 +244,7 @@ def test_preview_column_availability_ds_and_fw_available(qtbot, tmp_path):
     v.refresh("ds", ws)
     idx = v._model.index(0, v._model.COL_PREVIEW)
     assert v._model.data(idx, Qt.ForegroundRole) is None
-    assert v._model.data(idx, Qt.ToolTipRole) is None
+    assert v._model.data(idx, Qt.ToolTipRole) == "Play preview"
 
     _write_wav(os.path.join(ws, "out", "fw", "audio", "f1.wav"), seconds=1.0)
     _write_csv(os.path.join(ws, "out", "fw", "full-reel-manifest.csv"), FW_FULL,
@@ -254,7 +254,7 @@ def test_preview_column_availability_ds_and_fw_available(qtbot, tmp_path):
     v.refresh("fw", ws)
     idx = v._model.index(0, v._model.COL_PREVIEW)
     assert v._model.data(idx, Qt.ForegroundRole) is None
-    assert v._model.data(idx, Qt.ToolTipRole) is None
+    assert v._model.data(idx, Qt.ToolTipRole) == "Play preview"
 
 
 def test_filter_state_resets_on_game_change_but_persists_same_game(qtbot, tmp_path):
