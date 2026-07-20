@@ -27,6 +27,7 @@ from deciwaves.gui.global_bar import GlobalBar
 from deciwaves.gui.gpu_gate import confirm_gpu
 from deciwaves.gui.jobs import JobRunner
 from deciwaves.gui.pipeline_model import (
+    _marker_path,
     escalate_bind_argv,
     process_argv,
     rerun_from_argv,
@@ -102,7 +103,7 @@ class MainWindow(QMainWindow):
         # preview_requested(line_id); play it through one app-wide player, off the UI thread.
         self.player = PreviewPlayer(self)
         self._resolver: PreviewResolver | None = None
-        self._resolver_key: tuple[str, str] | None = None
+        self._resolver_key: tuple[str, str, float | None] | None = None
         self.library.preview_requested.connect(self._on_preview_requested)
         # decode/config failures are surfaced in the same log console job output uses, so a
         # missing decoder or unconfigured install is visible rather than swallowed.
@@ -193,12 +194,20 @@ class MainWindow(QMainWindow):
     # --- inline preview (#71) ----------------------------------------------
 
     def _preview_resolver(self) -> PreviewResolver:
-        """The resolver for the current (game, workspace), rebuilt only when either changes --
-        a rebuild drops the prior game's stale manifests/heavy handles, while repeated previews
-        of the same game reuse its cached PackIndex/HzdPackage."""
-        key = (self.bar.current_game(), self._workspace())
+        """The resolver for the current (game, workspace), rebuilt only when either changes or
+        when the bind stage re-runs (``out/<game>/.done-bind`` mtime bumps) -- a rebuild drops
+        the prior game's stale manifests/heavy handles, while repeated previews of the same
+        game reuse its cached PackIndex/HzdPackage."""
+        game = self.bar.current_game()
+        workspace = self._workspace()
+        marker = _marker_path(workspace, game, "bind")
+        try:
+            bind_mtime = os.path.getmtime(marker)
+        except OSError:
+            bind_mtime = None
+        key = (game, workspace, bind_mtime)
         if self._resolver is None or self._resolver_key != key:
-            self._resolver = PreviewResolver(key[0], key[1])
+            self._resolver = PreviewResolver(game, workspace)
             self._resolver_key = key
         return self._resolver
 

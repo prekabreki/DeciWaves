@@ -124,6 +124,41 @@ def test_shell_surfaces_preview_failure_in_log(qtbot):
     assert "boom-message" in w.pipeline.log_text()
 
 
+def test_preview_resolver_rebuilds_on_rebind(qtbot, tmp_path):
+    """After a re-bind bumps ``.done-bind`` mtime, ``_preview_resolver`` returns a fresh
+    instance; with no change it returns the same instance (no rebuild on poll ticks)."""
+    import time
+
+    from deciwaves.gui.shell import MainWindow
+
+    w = MainWindow()
+    qtbot.addWidget(w)
+    w.bar.set_workspace(str(tmp_path))
+    w.bar.select_game("hzd")
+    out_dir = tmp_path / "out" / "hzd"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    marker = out_dir / ".done-bind"
+
+    # before the marker exists, build resolves without crashing
+    r1 = w._preview_resolver()
+    assert r1 is not None
+    assert w._preview_resolver() is r1  # no change -> same instance
+
+    # create the marker and bump: a re-bind should cause a rebuild
+    marker.write_text("")
+    time.sleep(0.01)  # ensure mtime moves past filesystem resolution
+    marker.touch()
+    r2 = w._preview_resolver()
+    assert r2 is not r1, "re-bind must rebuild the resolver"
+    assert w._preview_resolver() is r2  # no further change -> same instance
+
+    # when only game/workspace change (no re-bind), invalidation still works
+    w.bar.select_game("ds")
+    r3 = w._preview_resolver()
+    assert r3 is not r2
+    assert w._preview_resolver() is r3
+
+
 # --- config env applied on the GUI launch path (bypasses cli.main) ---------
 
 def test_launch_applies_decoder_env_from_config(tmp_path, monkeypatch):
