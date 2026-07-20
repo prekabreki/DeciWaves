@@ -5,9 +5,10 @@ view's intent signals (scan/process/rerun/escalate) into pipeline jobs."""
 from __future__ import annotations
 
 from PySide6.QtGui import QTextCursor
-from PySide6.QtWidgets import QFrame, QPlainTextEdit, QToolButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QLabel, QPlainTextEdit, QToolButton, QVBoxLayout, QWidget
 
 from deciwaves.gui.pipeline_model import has_gpu_stage
+from deciwaves.gui.progress_model import StageProgress
 from deciwaves.gui.views.pipeline_panels import (
     CoverageBar,
     IssuesPanel,
@@ -30,6 +31,9 @@ class PipelineView(QWidget):
         self.coverage = CoverageBar()
         self.issues = IssuesPanel()
 
+        self._progress_label = QLabel("")
+        self._progress_label.setVisible(False)
+
         self._toggle = QToolButton()
         self._toggle.setCheckable(True)
         self._toggle.setChecked(True)
@@ -44,21 +48,31 @@ class PipelineView(QWidget):
         layout.addWidget(self.controls)
         layout.addWidget(self.coverage)
         layout.addWidget(self.issues)
+        layout.addWidget(self._progress_label)
         layout.addWidget(self._toggle)
         layout.addWidget(self._log, 1)
         self._toggle.toggled.connect(self._on_toggle)
 
-    def refresh_panels(self, game: str, workspace: str, running_stage: str | None = None) -> None:
+    def refresh_panels(self, game: str, workspace: str, running_stage: str | None = None,
+                       progress: list[StageProgress] | None = None) -> None:
         """Re-read markers/coverage/issues for ``game`` and update the strip, controls,
         coverage bar, and issues panel. Cheap enough to poll during a running job."""
         self.strip.refresh(game, workspace, running_stage)
         self.controls.set_game_has_gpu(has_gpu_stage(game))
         self.coverage.refresh(game, workspace)
         self.issues.refresh(game, workspace)
+        self.show_progress(progress)
 
     def _on_toggle(self, shown: bool) -> None:
         self._log.setVisible(shown)
         self._toggle.setText(("▾ " if shown else "▸ ") + "Log console")
+
+    def show_progress(self, progress: list[StageProgress] | None) -> None:
+        shown = progress is not None and len(progress) > 0
+        self._progress_label.setVisible(shown)
+        if shown:
+            parts = " · ".join(p.label for p in progress)
+            self._progress_label.setText(f"<b>Progress:</b> {parts}")
 
     def append_log(self, text: str) -> None:
         """Append a raw stdout/stderr chunk without inserting extra newlines, keeping
