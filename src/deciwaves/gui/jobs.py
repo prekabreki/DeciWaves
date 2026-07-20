@@ -39,6 +39,7 @@ class JobRunner(QObject):
             p.setWorkingDirectory(cwd)
         p.readyReadStandardOutput.connect(self._drain)
         p.finished.connect(self._on_finished)
+        p.errorOccurred.connect(self._on_error)
         self._proc = p
         p.start(argv[0], argv[1:])
         self.started.emit()
@@ -73,3 +74,8 @@ class JobRunner(QObject):
         self._proc = None
         self.finished.emit(int(code))
         self._was_cancelled = False
+
+    def _on_error(self, error) -> None:
+        if error == QProcess.FailedToStart and self._proc is not None:
+            self._proc = None
+            self.finished.emit(-1)
