@@ -208,6 +208,9 @@ def main(argv=None):
     ap.add_argument("--bitrate", type=int, default=DEFAULT_BITRATE_KBPS,
                     help="MP3 CBR bitrate in kbps (drives both encode and the "
                          "byte-budget packing math). Default %(default)s")
+    ap.add_argument("--target-mb", type=float, default=285.0,
+                    help="Target MB per reel file (default 285; output stays safely "
+                         "under the 290 MB buffer)")
     ap.add_argument("--jobs", type=int, default=default_jobs(),
                     help="number of clips to decode concurrently (each spawns one "
                          f"VGAudioCli). Default min(8, cpu_count)={default_jobs()}; "
@@ -294,7 +297,7 @@ def main(argv=None):
         row_of=lambda s, t: [format_ts(t), s.scene, s.speaker, s.subtitle, s.line_id])
     n_files = assemble_reels(
         spine, ep_secs, decoded, out_dir=a.out_dir, cache_dir=a.cache, stem=stem,
-        columns=columns, budget=budget_seconds(kbps=a.bitrate), gap_key=lambda s: s.scene,
+        columns=columns, budget=budget_seconds(target_mb=a.target_mb, kbps=a.bitrate), gap_key=lambda s: s.scene,
         concat_kwargs={"kbps": a.bitrate})
     if n_files == 0:
         # Defensive backstop (issue #64): with the `not decoded` guard above,
