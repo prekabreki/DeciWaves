@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 import shutil
 
-from PySide6.QtCore import QThreadPool, QTimer, QRunnable
+from PySide6.QtCore import QProcess, QThreadPool, QTimer
 from PySide6.QtWidgets import QMainWindow, QMessageBox, QStackedWidget, QTabBar, QVBoxLayout, QWidget
 
 from deciwaves.cli import config, doctor
@@ -160,6 +160,32 @@ class MainWindow(QMainWindow):
         self._refresh_panels()
         self._refresh_library()
         self._refresh_game_panel()
+
+    # --- close -------------------------------------------------------------
+
+    def closeEvent(self, event):
+        if self.runner.is_running or self.dump.is_running:
+            reply = QMessageBox.question(
+                self, "Quit?",
+                "A job is running — quit anyway?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if reply != QMessageBox.Yes:
+                event.ignore()
+                return
+
+        self.runner.cancel()
+        p = self.runner._proc
+        if p is not None and p.state() != QProcess.NotRunning:
+            p.kill()
+            p.waitForFinished(3000)
+
+        self.dump.cancel()
+        QThreadPool.globalInstance().waitForDone(5000)
+
+        self.pipeline.setup_doctor.setup.cancel()
+        self.pipeline.setup_doctor.doctor.cancel()
+
+        event.accept()
 
     # --- status + panels ---------------------------------------------------
 

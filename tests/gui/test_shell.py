@@ -4,6 +4,7 @@ import sys
 import pytest
 
 pytest.importorskip("PySide6")
+from PySide6.QtGui import QCloseEvent  # noqa: E402
 from deciwaves.gui.shell import MainWindow  # noqa: E402
 
 _SLOW = "import time\nfor i in range(200):\n print(i, flush=True); time.sleep(0.02)"
@@ -71,3 +72,42 @@ def test_cancel_from_shell_stops_the_job_and_resets_chip(qtbot):
         w.runner.cancel()
     assert w.runner.is_running is False
     assert w.bar._chip.text() == "idle"
+
+
+# --- closeEvent (issue #116) -----------------------------------------------
+
+
+def test_close_event_no_job_accepts(qtbot):
+    w = MainWindow(); qtbot.addWidget(w)
+    event = QCloseEvent()
+    w.closeEvent(event)
+    assert event.isAccepted()
+
+
+def test_close_event_with_job_confirm_no_ignores(qtbot):
+    from unittest.mock import patch
+    from PySide6.QtWidgets import QMessageBox
+
+    w = MainWindow(); qtbot.addWidget(w)
+    w.runner.start([sys.executable, "-c", _SLOW])
+    with patch("deciwaves.gui.shell.QMessageBox.question", return_value=QMessageBox.No):
+        event = QCloseEvent()
+        w.closeEvent(event)
+        assert not event.isAccepted()
+    assert w.runner.is_running
+    w.runner.cancel()
+    with qtbot.waitSignal(w.runner.finished, timeout=5000):
+        pass
+
+
+def test_close_event_with_job_confirm_yes_cancels(qtbot):
+    from unittest.mock import patch
+    from PySide6.QtWidgets import QMessageBox
+
+    w = MainWindow(); qtbot.addWidget(w)
+    w.runner.start([sys.executable, "-c", _SLOW])
+    with patch("deciwaves.gui.shell.QMessageBox.question", return_value=QMessageBox.Yes):
+        event = QCloseEvent()
+        w.closeEvent(event)
+        assert event.isAccepted()
+    assert not w.runner.is_running
