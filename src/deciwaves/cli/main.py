@@ -1,4 +1,4 @@
-"""DeciWaves — voice-audio extraction for Decima-engine games you own."""
+"""DeciWaves -- voice-audio extraction for Decima-engine games you own."""
 import argparse
 import importlib
 import sys
