@@ -68,19 +68,28 @@ class ExportPanel(QWidget):
         self._progress.setVisible(False)
         self._status = QLabel("")
 
-        row = QHBoxLayout()
-        row.addWidget(self._mp3_btn)
-        row.addWidget(QLabel("Bitrate:"))
-        row.addWidget(self._bitrate)
-        row.addWidget(self._bitrate_label)
-        row.addWidget(QLabel(_SPLIT_LABEL))
-        row.addWidget(self._dump_btn)
-        row.addWidget(self._catalog_btn)
-        row.addStretch(1)
+        self._split_label = QLabel(_SPLIT_LABEL)
+        self._split_label.setWordWrap(True)
+
+        row1 = QHBoxLayout()
+        row1.addWidget(self._mp3_btn)
+        row1.addWidget(QLabel("Bitrate:"))
+        row1.addWidget(self._bitrate)
+        row1.addWidget(self._bitrate_label)
+        row1.addWidget(self._split_label, 1)
+        row1.addStretch(1)
+
+        row2 = QHBoxLayout()
+        row2.addWidget(self._dump_btn)
+        row2.addWidget(self._catalog_btn)
+        row2.addStretch(1)
+
+        self._status.setWordWrap(True)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addLayout(row)
+        layout.addLayout(row1)
+        layout.addLayout(row2)
         layout.addWidget(self._progress)
         layout.addWidget(self._status)
 
