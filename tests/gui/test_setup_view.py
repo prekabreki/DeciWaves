@@ -215,3 +215,26 @@ def test_setup_doctor_view_reconciles_rows_when_doctor_refreshes(qtbot, monkeypa
         {"name": "ffmpeg", "ok": True, "status": "ok", "message": "ffmpeg: x", "fix": ""}]}))
     txt = v.setup._tool_status["ffmpeg"].text()
     assert "FAILED" not in txt and "existing" in txt.lower()
+
+
+# --- Label text-selectability (#108) ---------------------------------------
+
+def test_labels_are_selectable(qtbot):
+    from PySide6.QtWidgets import QLabel
+    from PySide6.QtCore import Qt
+
+    p = DoctorPanel()
+    qtbot.addWidget(p)
+    p.set_game("hzd")
+    p.render_payload(_DOCTOR_PAYLOAD)
+    for i in range(p._rows_layout.count()):
+        row = p._rows_layout.itemAt(i).widget()
+        for child in row.findChildren(QLabel):
+            assert child.textInteractionFlags() & Qt.TextSelectableByMouse
+
+    s = SetupScreen(base=[sys.executable, "-c", "pass"])
+    qtbot.addWidget(s)
+    assert s._paths_label.textInteractionFlags() & Qt.TextSelectableByMouse
+    assert s._warnings_label.textInteractionFlags() & Qt.TextSelectableByMouse
+    for tool in ("vgmstream", "VGAudio", "ffmpeg"):
+        assert s._tool_status[tool].textInteractionFlags() & Qt.TextSelectableByMouse
