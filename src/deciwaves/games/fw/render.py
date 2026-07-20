@@ -102,7 +102,7 @@ def build_spine(manifest_rows, bound_tiers=BOUND_TIERS) -> list[RenderItem]:
     Each distinct quest becomes a dense episode index (the packing unit), assigned
     in gamescript order. Lines whose tier is not in ``bound_tiers`` are dropped.
     """
-    rows = [r for r in manifest_rows if r["tier"] in bound_tiers]
+    rows = [r for r in manifest_rows if r["tier"].strip() in bound_tiers]
     rows.sort(key=lambda r: int(r["gamescript_index"]))
     ep_of: dict[str, int] = {}
     spine = []
