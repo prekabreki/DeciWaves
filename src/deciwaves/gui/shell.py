@@ -119,6 +119,7 @@ class MainWindow(QMainWindow):
         # pipeline controls -> jobs on the single runner
         self.pipeline.controls.scan_requested.connect(self._on_scan)
         self.pipeline.controls.process_requested.connect(self._on_process)
+        self.pipeline.controls.cancel_requested.connect(self.runner.cancel)
         self.pipeline.strip.rerun_requested.connect(self._on_rerun)
         self.pipeline.coverage.escalate_requested.connect(self._on_escalate)
 
