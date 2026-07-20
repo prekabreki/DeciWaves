@@ -37,7 +37,7 @@ from typing import Callable
 
 from deciwaves import data
 from deciwaves.cli.main import STAGES, _import_stage  # noqa: F401 -- re-exported for monkeypatching
-from deciwaves.engine.coverage import clear_stage_coverage, default_coverage_path
+from deciwaves.engine.coverage import clear_sections, clear_stage_coverage, default_coverage_path
 from deciwaves.games.hzd import asr_bind
 
 
@@ -114,8 +114,14 @@ def _invalidate_downstream_markers(game: str, full_chain: list[Stage], stage_nam
     """
     names = [s.name for s in full_chain]
     idx = names.index(stage_name)
-    for later_name in names[idx + 1:]:
-        _remove_marker(game, later_name)
+    later_names = names[idx + 1:]
+    for later_name in later_names:
+        try:
+            os.remove(_done_marker(game, later_name))
+        except FileNotFoundError:
+            pass
+    if later_names:
+        clear_sections(default_coverage_path(game), later_names)
 
 
 def _blocking_gpu_stage(game: str, chain: list[Stage],

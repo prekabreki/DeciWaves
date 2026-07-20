@@ -38,18 +38,16 @@ def default_coverage_path(game: str) -> str:
     return os.path.join("out", game, "coverage.json")
 
 
-def _load_object(path: str) -> dict:
-    """The artifact's current sections, or ``{}`` (with a warning for anything
-    but a simply-missing file). ``ValueError`` covers both ``JSONDecodeError``
-    and ``UnicodeDecodeError`` -- a torn write or a tool re-saving the file as
-    UTF-16 (this is a Windows-only project) must mean "treat the derived file as
-    empty", never a crash on every subsequent run (issue #81).
+def read_json_object(path: str) -> dict:
+    """Shared corrupt-tolerant JSON-object read.
 
-    The warning says "ignoring it", NOT "rebuilding it": whether a rebuild
-    follows is the CALLER's business -- ``write_stage_coverage`` overwrites (so
-    it rebuilds), but ``clear_stage_coverage`` returns without a write once the
-    section is absent from the empty load, leaving the corrupt bytes in place
-    (issue #87 finding 6 -- the old "rebuilding it" lied on the clear path)."""
+    Returns the parsed dict, or ``{}`` (with a warning) for a missing file,
+    corrupt/UTF-16 bytes, or a JSON value that is not an object (issue #81).
+    Never raises -- a corrupt derived file must not crash the running stage.
+
+    Single home of this contract (issue #91): both ``coverage``'s own load and
+    ``cli.config.load()`` use this, so there is exactly one implementation of
+    the corrupt-tolerant read to get right."""
     try:
         existing = json.loads(Path(path).read_text(encoding="utf-8"))
     except FileNotFoundError:
@@ -62,6 +60,12 @@ def _load_object(path: str) -> dict:
               f"object; ignoring it")
         return {}
     return existing
+
+
+def _load_object(path: str) -> dict:
+    """Thin wrapper around ``read_json_object`` for callers that still want
+    the ``_``-prefixed name (internal coverage users)."""
+    return read_json_object(path)
 
 
 def _write_object(path: str, obj: dict) -> None:
@@ -106,11 +110,27 @@ def clear_stage_coverage(path: str, stage: str) -> None:
     declares a stage not-done (cli/run.py deleting its marker, or a stage
     about to rewrite its own output) calls this so the artifact stops
     asserting completeness the workspace no longer has.
-    """
-    if not os.path.isfile(path):
-        return
+
+    The leading ``os.path.isfile`` guard was removed in issue #91 (item 9):
+    ``_load_object`` (via ``read_json_object``) already returns ``{}`` for a
+    missing file, and the ``stage not in existing`` check below is the genuine
+    early-exit."""
     existing = _load_object(path)
     if stage not in existing:
         return
     del existing[stage]
     _write_object(path, existing)
+
+
+def clear_sections(path: str, stages: list[str]) -> None:
+    """Drop *multiple* sections from the artifact at ``path`` in a single
+    read-modify-write. No-op when the file (or all named sections) don't
+    exist.
+
+    Added in issue #91 (item 10) so cascade invalidation
+    (``cli.run._invalidate_downstream_markers``) does one coverage.json
+    read-modify-write instead of one per downstream stage."""
+    existing = _load_object(path)
+    remaining = {k: v for k, v in existing.items() if k not in stages}
+    if len(remaining) < len(existing):
+        _write_object(path, remaining)

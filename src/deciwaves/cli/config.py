@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import NamedTuple, Optional
 
 from deciwaves.engine.atomic_io import atomic_write
+from deciwaves.engine.coverage import read_json_object
 
 KEYS = ("tools_dir", "ds_install", "hzd_package", "fw_package", "oodle_dll", "fw_gamescript", "fw_types")
 
@@ -55,29 +56,11 @@ def path() -> Path:
         os.environ.get("LOCALAPPDATA", str(Path.home())), "DeciWaves")
     return Path(root) / "config.json"
 
-def _warn_corrupted(cfg_path: Path, reason) -> None:
-    print(
-        f"warning: config file {cfg_path} is corrupted ({reason}); "
-        "ignoring it and starting fresh -- run `deciwaves setup` to repair."
-    )
-
 def load() -> dict:
-    cfg_path = path()
-    try:
-        cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return {}
-    except (ValueError, OSError) as exc:
-        # ValueError covers json.JSONDecodeError AND UnicodeDecodeError: a
-        # torn write or a tool re-saving the file as UTF-16 (Windows-only
-        # project) is corruption too, and must warn-and-start-fresh rather
-        # than crash every command until the file is hand-deleted (issue #81).
-        _warn_corrupted(cfg_path, exc)
-        return {}
-    if not isinstance(cfg, dict):
-        _warn_corrupted(cfg_path, f"expected a JSON object, got {type(cfg).__name__}")
-        return {}
-    return cfg
+    """Config file contents, or ``{}`` (with a warning) for a missing/corrupt/
+    UTF-16 file.  Delegates to ``engine.coverage.read_json_object`` (issue #91
+    item 7) so the corrupt-tolerant contract lives in a single place."""
+    return read_json_object(str(path()))
 
 
 def apply_tool_env(cfg: dict | None = None) -> dict:
