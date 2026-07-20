@@ -143,9 +143,18 @@ class MainWindow(QMainWindow):
         self.bar.game_changed.connect(lambda _g: self._refresh_panels())
         # reload the Library's line list for the selected game (#70, spec §6)
         self.bar.game_changed.connect(lambda _g: self._refresh_library())
-        self.bar.select_game("ds")   # DS is the built-first vertical slice
-        # select_game("ds") leaves the combo on its existing index 0, so game_changed does
-        # not fire -- prime the status line and panels for the initial game explicitly.
+        # Default to last-used / first-owned rather than always DS (#122).
+        # Coordinate with #128 persistence for the full last-used mechanism.
+        cfg = config.load()
+        first_owned = next(
+            (gk for ck, gk in [("ds_install", "ds"), ("hzd_package", "hzd"), ("fw_package", "fw")]
+             if cfg.get(ck)),
+            "ds",
+        )
+        self.bar.select_game(first_owned)
+        # select_game(first_owned) leaves the combo on its existing index 0 when DS is
+        # already the default, so game_changed does not fire -- prime the status line
+        # and panels for the initial game explicitly.
         self._refresh_status()
         self._refresh_panels()
         self._refresh_library()
@@ -159,7 +168,7 @@ class MainWindow(QMainWindow):
     def _refresh_status(self) -> None:
         cfg = config.load()
         check = _CHECKS[self.bar.current_game()](cfg)
-        self.bar.set_install_status(check.detail, check.status is doctor.Availability.OK)
+        self.bar.set_install_status(check.detail, check.status.value)
 
     def _active_stage(self, game: str) -> str | None:
         for st in stage_states(game, self._workspace()):

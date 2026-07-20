@@ -4,6 +4,8 @@ job may belong to a game other than the one currently selected."""
 from __future__ import annotations
 
 from PySide6.QtCore import Signal
+
+from deciwaves.gui.doctor_model import install_styling
 from PySide6.QtWidgets import (
     QComboBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidget,
 )
@@ -59,9 +61,10 @@ class GlobalBar(QWidget):
     def set_workspace(self, path: str) -> None:
         self._workspace.setText(path)
 
-    def set_install_status(self, text: str, ok: bool) -> None:
-        self._status.setText(text)
-        self._status.setStyleSheet("color: #167f3b;" if ok else "color: #b00020;")
+    def set_install_status(self, text: str, status: str) -> None:
+        color, glyph = install_styling(status)
+        self._status.setText(f"{glyph} {text}")
+        self._status.setStyleSheet(f"color: {color};")
 
     def set_job_chip(self, text: str) -> None:
         self._chip.setText(text)

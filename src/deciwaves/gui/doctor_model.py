@@ -81,6 +81,19 @@ def overall_ok(payload: dict) -> bool:
     return bool(payload.get("ok", False))
 
 
+def install_styling(status: str) -> tuple[str, str]:
+    """Qt-free mapping from Availability status to (CSS color hex, glyph).
+
+    Mirrors the Doctor panel's principle that NOT_CONFIGURED (unowned) reads
+    neutral, never failure (doctor_model.py:88-89).
+    """
+    if status == STATUS_OK:
+        return ("#167f3b", "\u2713")   # green check mark
+    if status == STATUS_NOT_CONFIGURED:
+        return ("#888888", "\u2014")   # neutral grey em dash
+    return ("#b00020", "\u2717")       # red ballot X
+
+
 def severity(item: DoctorItem, game: str) -> str:
     """How this check should read for the currently selected ``game``."""
     if item.status == STATUS_BROKEN:
