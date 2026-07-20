@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 import shutil
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QSettings, QTimer
 from PySide6.QtWidgets import QMainWindow, QMessageBox, QStackedWidget, QTabBar, QVBoxLayout, QWidget
 
 from deciwaves.cli import config, doctor
@@ -48,9 +48,10 @@ _CHECKS = {
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, settings: QSettings | None = None):
         super().__init__(parent)
         self.setWindowTitle("DeciWaves")
+        self._settings = settings  # None -> _settings_property() creates the default scope
 
         self.bar = GlobalBar()
         # The adaptive per-game panel (#73, spec §7): one frame between the global bar and the
@@ -150,13 +151,58 @@ class MainWindow(QMainWindow):
         self.bar.workspace_changed.connect(lambda _ws: self._refresh_game_panel())
         self.bar.workspace_changed.connect(lambda _ws: setattr(self, '_resolver', None))
 
-        self.bar.select_game("ds")   # DS is the built-first vertical slice
-        # select_game("ds") leaves the combo on its existing index 0, so game_changed does
-        # not fire -- prime the status line and panels for the initial game explicitly.
+        self._restore_state()
+
+    # --- QSettings persistence (#128) --------------------------------------
+
+    def _settings_obj(self) -> QSettings:
+        if self._settings is not None:
+            return self._settings
+        return QSettings("DeciWaves", "gui")
+
+    def _restore_state(self) -> None:
+        """Restore window geometry, column widths/sort, last workspace, and last game.
+        Tolerates missing keys (first run)."""
+        s = self._settings_obj()
+
+        geo = s.value("window/geometry")
+        if geo is not None:
+            self.restoreGeometry(geo)
+
+        ws_path = s.value("workspace/last", "")
+        if ws_path:
+            self.bar.set_workspace(ws_path)
+
+        game = s.value("game/last", "ds")
+        self.bar.select_game(game)
         self._refresh_status()
         self._refresh_panels()
         self._refresh_library()
         self._refresh_game_panel()
+
+        hdr_state = s.value("header/state")
+        if hdr_state is not None:
+            self.library.horizontalHeader().restoreState(hdr_state)
+
+        sk = s.value("sort/key")
+        sd = s.value("sort/desc", type=bool)
+        if sk is not None:
+            self.library.restore_sort(sk, sd if sd is not None else False)
+
+    def _save_state(self) -> None:
+        """Save window geometry, column widths/sort, last workspace, and last game."""
+        s = self._settings_obj()
+        s.setValue("window/geometry", self.saveGeometry())
+        s.setValue("header/state", self.library.horizontalHeader().saveState())
+        s.setValue("sort/key", self.library.sort_key())
+        s.setValue("sort/desc", self.library.sort_desc())
+        s.setValue("game/last", self.bar.current_game())
+        s.setValue("workspace/last", self.bar.workspace())
+        s.sync()
+
+    def closeEvent(self, event):
+        self._save_state()
+        super().closeEvent(event)
 
     # --- status + panels ---------------------------------------------------
 

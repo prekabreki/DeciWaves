@@ -71,3 +71,59 @@ def test_cancel_from_shell_stops_the_job_and_resets_chip(qtbot):
         w.runner.cancel()
     assert w.runner.is_running is False
     assert w.bar._chip.text() == "idle"
+
+
+# --- QSettings persistence (#128) ------------------------------------------
+
+def test_settings_persist_and_restore(qtbot, tmp_path):
+    """Write settings, reconstruct, assert restored. Uses a temp QSettings scope
+    so the test never touches the real registry/ini file."""
+    from PySide6.QtCore import QSettings, QByteArray
+
+    ini = tmp_path / "gui.ini"
+    test_settings = QSettings(str(ini), QSettings.IniFormat)
+
+    # --- first window: set state and save ---
+    w1 = MainWindow(settings=test_settings)
+    qtbot.addWidget(w1)
+
+    w1.bar.set_workspace(r"C:\test\workspace")
+    w1.bar.select_game("hzd")
+
+    header1 = w1.library.horizontalHeader()
+    header1.resizeSection(0, 40)
+    header1.resizeSection(1, 30)
+    header1.resizeSection(2, 180)
+
+    w1.library.restore_sort("speaker", True)
+
+    w1._save_state()
+
+    # --- second window: should restore saved state ---
+    w2 = MainWindow(settings=test_settings)
+    qtbot.addWidget(w2)
+
+    assert w2.bar.current_game() == "hzd"
+    assert w2.bar.workspace() == r"C:\test\workspace"
+    assert w2.library.sort_key() == "speaker"
+    assert w2.library.sort_desc() is True
+    # column widths (sectionCount may be 0 on an unpopulated model; skip if so)
+    if w2.library.horizontalHeader().count() > 2:
+        assert w2.library.horizontalHeader().sectionSize(0) == 40
+        assert w2.library.horizontalHeader().sectionSize(1) == 30
+        assert w2.library.horizontalHeader().sectionSize(2) == 180
+
+
+def test_settings_first_run_no_crash(qtbot, tmp_path):
+    """A fresh QSettings with no saved keys should not crash and should
+    produce sensible defaults (DS game, empty workspace)."""
+    from PySide6.QtCore import QSettings
+
+    ini = tmp_path / "fresh.ini"
+    fresh_settings = QSettings(str(ini), QSettings.IniFormat)
+
+    w = MainWindow(settings=fresh_settings)
+    qtbot.addWidget(w)
+
+    assert w.bar.current_game() == "ds"
+    assert w.bar.workspace() == ""

@@ -23,6 +23,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from PySide6.QtWidgets import QHeaderView
+
 from deciwaves.gui.export import ExportPanel
 from deciwaves.gui.export_model import can_export_mp3, catalog_source_path
 from deciwaves.gui.library_model import (
@@ -447,3 +449,21 @@ class LibraryView(QWidget):
 
     def status_text(self) -> str:
         return f"{self.checked_count()} checked · {self.visible_count()} visible · {self.total_count()} total"
+
+    # --- QHeaderView state accessors (shell's QSettings persistence) --------
+
+    def horizontalHeader(self) -> QHeaderView:
+        """Expose the table's horizontal header for save/restore of column geometry."""
+        return self._table.horizontalHeader()
+
+    def sort_key(self) -> str | None:
+        return self._sort_key
+
+    def sort_desc(self) -> bool:
+        return self._sort_desc
+
+    def restore_sort(self, key: str | None, desc: bool) -> None:
+        """Restore sort state and re-apply filters so the model reflects it."""
+        self._sort_key = key
+        self._sort_desc = desc
+        self._apply_filters()
