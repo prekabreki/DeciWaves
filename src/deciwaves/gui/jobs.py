@@ -22,6 +22,7 @@ class JobRunner(QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._proc: QProcess | None = None
+        self._was_cancelled: bool = False
 
     @property
     def is_running(self) -> bool:
@@ -43,15 +44,22 @@ class JobRunner(QObject):
         self.started.emit()
         return True
 
+    @property
+    def was_cancelled(self) -> bool:
+        return self._was_cancelled
+
     def cancel(self) -> None:
         """Terminate the running job (then force-kill after a short grace). Safe: the
         CLI resumes from where it stopped."""
         p = self._proc
         if p is None or p.state() == QProcess.NotRunning:
             return
+        self._was_cancelled = True
         p.terminate()
         QTimer.singleShot(_KILL_GRACE_MS,
                           lambda: p.kill() if p.state() != QProcess.NotRunning else None)
+
+
 
     def _drain(self) -> None:
         if self._proc is None:
@@ -64,3 +72,4 @@ class JobRunner(QObject):
         self._drain()          # flush any trailing output before signaling done
         self._proc = None
         self.finished.emit(int(code))
+        self._was_cancelled = False

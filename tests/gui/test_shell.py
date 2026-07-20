@@ -35,6 +35,15 @@ def test_job_chip_reflects_running_then_idle(qtbot):
     assert w.bar._chip.text() == "idle"
 
 
+def test_pipeline_job_failure_shows_failed_chip_and_message(qtbot):
+    w = MainWindow(); qtbot.addWidget(w)
+    w.runner.started.emit()
+    assert w.bar._chip.text() != "idle"
+    w.runner.finished.emit(1)
+    assert w.bar._chip.text() == "failed"
+    assert "failed (rc 1)" in w.pipeline.log_text()
+
+
 def test_pipeline_log_console_is_collapsible(qtbot):
     # isHidden() reflects an explicit hide, independent of whether the window is shown.
     w = MainWindow(); qtbot.addWidget(w)
