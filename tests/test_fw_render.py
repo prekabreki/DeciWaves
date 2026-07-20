@@ -266,3 +266,33 @@ def test_fw_render_main_surfaces_partial_measure_failures(tmp_path, monkeypatch,
     # the exact surfaced line, not a substring the always-printed header
     # already satisfies (review of #64: `"1" in out` was vacuously true)
     assert "measure: 1 clip(s) failed" in out
+
+
+def test_fw_render_bitrate_affects_budget_and_concat_kwargs(tmp_path, monkeypatch):
+    """FW render --bitrate changes both the packing budget and the ffmpeg encode arg."""
+    import wave as wave_mod
+    from deciwaves.engine.render import budget_seconds as bs
+    manifest = tmp_path / "full-reel-manifest.csv"
+    _write_manifest(manifest, [_row("c0", 1, "Q1")])
+    audio_dir = tmp_path / "audio"
+    audio_dir.mkdir(exist_ok=True)
+    with wave_mod.open(str(audio_dir / "c0.wav"), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(48000)
+        w.writeframes(b"\x00\x00" * 4800)
+
+    argv = _render_argv(tmp_path, manifest) + ["--bitrate", "96"]
+
+    calls = []
+    def track_assemble(*args, **kwargs):
+        calls.append((args, kwargs))
+        return 1
+    monkeypatch.setattr(render, "assemble_reels", track_assemble)
+
+    rc = render.main(argv)
+    assert rc == 0
+    assert len(calls) == 1
+    _, kwargs = calls[0]
+    assert kwargs["budget"] == bs(kbps=96)
+    assert kwargs["concat_kwargs"] == {"kbps": 96}

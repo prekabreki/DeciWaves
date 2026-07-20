@@ -28,6 +28,7 @@ from dataclasses import dataclass
 
 from deciwaves.engine.render import (
     accumulate_episode_seconds, assemble_reels, budget_seconds, format_ts, ReelColumns,
+    DEFAULT_BITRATE_KBPS,
 )
 from deciwaves.engine.parallel import KeyedLocks, default_jobs
 from deciwaves.engine.pack.hzd_package import HzdPackage
@@ -204,6 +205,9 @@ def main(argv=None):
     ap.add_argument("--errors", default="out/hzd/render-errors.log")
     ap.add_argument("--spine-only", action="store_true",
                     help="render only the main-quest spine (skip side/DLC interleaving)")
+    ap.add_argument("--bitrate", type=int, default=DEFAULT_BITRATE_KBPS,
+                    help="MP3 CBR bitrate in kbps (drives both encode and the "
+                         "byte-budget packing math). Default %(default)s")
     ap.add_argument("--jobs", type=int, default=default_jobs(),
                     help="number of clips to decode concurrently (each spawns one "
                          f"VGAudioCli). Default min(8, cpu_count)={default_jobs()}; "
@@ -288,7 +292,8 @@ def main(argv=None):
         row_of=lambda s, t: [format_ts(t), s.scene, s.speaker, s.subtitle, s.line_id])
     n_files = assemble_reels(
         spine, ep_secs, decoded, out_dir=a.out_dir, cache_dir=a.cache, stem=stem,
-        columns=columns, budget=budget_seconds(), gap_key=lambda s: s.scene)
+        columns=columns, budget=budget_seconds(kbps=a.bitrate), gap_key=lambda s: s.scene,
+        concat_kwargs={"kbps": a.bitrate})
     if n_files == 0:
         # Defensive backstop (issue #64): with the `not decoded` guard above,
         # a non-empty decoded always packs >=1 reel, so this is unreachable
