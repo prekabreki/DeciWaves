@@ -78,8 +78,9 @@ def test_ds_writes_exactly_checked_rows_and_is_bom_free(tmp_path):
     ws = str(tmp_path)
     _make_ds_playlist(ws, ["a", "b", "c"])
 
-    out = write_render_selection(ws, "ds", unchecked={"b"})
+    out, fw_tiers = write_render_selection(ws, "ds", unchecked={"b"})
 
+    assert fw_tiers is None   # non-FW game
     assert out == os.path.join(ws, "out", "ds", "gui", "render-selection.csv")
     # BOM-free bytes: a fused BOM would KeyError the first column in read_playlist (#84).
     raw = open(out, "rb").read()
@@ -96,14 +97,14 @@ def test_ds_writes_exactly_checked_rows_and_is_bom_free(tmp_path):
 def test_ds_all_checked_keeps_every_row(tmp_path):
     ws = str(tmp_path)
     _make_ds_playlist(ws, ["a", "b", "c"])
-    out = write_render_selection(ws, "ds", unchecked=set())
+    out, _ = write_render_selection(ws, "ds", unchecked=set())
     assert [s.line_id for s in story_order.read_playlist(out)] == ["a", "b", "c"]
 
 
 def test_hzd_filters_and_is_bom_free(tmp_path):
     ws = str(tmp_path)
     _make_hzd_manifest(ws, ["x", "y", "z"])
-    out = write_render_selection(ws, "hzd", unchecked={"x", "z"})
+    out, _ = write_render_selection(ws, "hzd", unchecked={"x", "z"})
     assert out == os.path.join(ws, "out", "hzd", "gui", "render-selection.csv")
     assert not open(out, "rb").read().startswith(BOM)
     with open(out, newline="", encoding="utf-8") as f:   # utf-8 (BOM-intolerant), like hzd render
@@ -119,7 +120,7 @@ def test_fw_prefers_full_reel_over_subtitle_manifest(tmp_path):
                [_fw_row("full1"), _fw_row("full2")])
     _write_csv(os.path.join(root, "subtitle-manifest-full.csv"), FW_COLS,
                [_fw_row("sub1")])
-    out = write_render_selection(ws, "fw", unchecked=set())
+    out, _ = write_render_selection(ws, "fw", unchecked=set())
     with open(out, newline="", encoding="utf-8") as f:
         assert [r["line_id"] for r in csv.DictReader(f)] == ["full1", "full2"]
 
@@ -129,7 +130,7 @@ def test_fw_falls_back_to_subtitle_manifest(tmp_path):
     root = os.path.join(ws, "out", "fw")
     _write_csv(os.path.join(root, "subtitle-manifest-full.csv"), FW_COLS,
                [_fw_row("sub1"), _fw_row("sub2")])
-    out = write_render_selection(ws, "fw", unchecked={"sub2"})
+    out, _ = write_render_selection(ws, "fw", unchecked={"sub2"})
     with open(out, newline="", encoding="utf-8") as f:
         assert [r["line_id"] for r in csv.DictReader(f)] == ["sub1"]
 
@@ -163,7 +164,7 @@ def test_source_bom_is_stripped_on_rewrite(tmp_path):
         w.writeheader()
         w.writerow(_hzd_row("y"))
     assert open(path, "rb").read().startswith(BOM)   # sanity: source really has a BOM
-    out = write_render_selection(ws, "hzd", unchecked=set())
+    out, _ = write_render_selection(ws, "hzd", unchecked=set())
     assert not open(out, "rb").read().startswith(BOM)
     with open(out, newline="", encoding="utf-8") as f:
         assert csv.DictReader(f).fieldnames == HZD_COLS   # not "﻿clip_row"
@@ -198,7 +199,7 @@ def test_ds_argv_carries_required_install_flags_and_bitrate(tmp_path, parsed_sta
     from deciwaves.engine import render as ds_render
     ws = str(tmp_path)
     _make_ds_playlist(ws, ["a"])
-    csv_path = write_render_selection(ws, "ds", unchecked=set())
+    csv_path, _ = write_render_selection(ws, "ds", unchecked=set())
     cfg = {"ds_install": r"C:\DS"}
     argv = render_selection_argv(default_base(), ws, "ds", csv_path, bitrate=192, cfg=cfg)
 
@@ -215,7 +216,7 @@ def test_ds_argv_uses_explicit_oodle_dll_override(tmp_path, parsed_stage_args):
     from deciwaves.engine import render as ds_render
     ws = str(tmp_path)
     _make_ds_playlist(ws, ["a"])
-    csv_path = write_render_selection(ws, "ds", unchecked=set())
+    csv_path, _ = write_render_selection(ws, "ds", unchecked=set())
     cfg = {"ds_install": r"C:\DS", "oodle_dll": r"C:\custom\oo.dll"}
     argv = render_selection_argv(default_base(), ws, "ds", csv_path, bitrate=128, cfg=cfg)
     ns = parsed_stage_args(ds_render.main, _stage_tokens(argv))
@@ -225,7 +226,7 @@ def test_ds_argv_uses_explicit_oodle_dll_override(tmp_path, parsed_stage_args):
 def test_ds_argv_unconfigured_install_raises(tmp_path):
     ws = str(tmp_path)
     _make_ds_playlist(ws, ["a"])
-    csv_path = write_render_selection(ws, "ds", unchecked=set())
+    csv_path, _ = write_render_selection(ws, "ds", unchecked=set())
     try:
         render_selection_argv(default_base(), ws, "ds", csv_path, bitrate=128, cfg={})
     except ExportError:
@@ -237,7 +238,7 @@ def test_hzd_argv_requires_package_no_spine_only(tmp_path, parsed_stage_args):
     from deciwaves.games.hzd import render as hzd_render
     ws = str(tmp_path)
     _make_hzd_manifest(ws, ["x"])
-    csv_path = write_render_selection(ws, "hzd", unchecked=set())
+    csv_path, _ = write_render_selection(ws, "hzd", unchecked=set())
     argv = render_selection_argv(default_base(), ws, "hzd", csv_path, bitrate=128,
                                  cfg={"hzd_package": "PKG"})
     assert "--spine-only" not in argv     # keep every checked row, not just the mq spine
@@ -250,7 +251,7 @@ def test_hzd_argv_requires_package_no_spine_only(tmp_path, parsed_stage_args):
 def test_hzd_argv_unconfigured_package_raises(tmp_path):
     ws = str(tmp_path)
     _make_hzd_manifest(ws, ["x"])
-    csv_path = write_render_selection(ws, "hzd", unchecked=set())
+    csv_path, _ = write_render_selection(ws, "hzd", unchecked=set())
     try:
         render_selection_argv(default_base(), ws, "hzd", csv_path, bitrate=128, cfg={})
     except ExportError:
@@ -267,8 +268,10 @@ def test_fw_argv_tiers_cover_every_tier_present(tmp_path, parsed_stage_args):
         _fw_row("a", tier="1"), _fw_row("b", tier="2"),
         _fw_row("c", tier="S"), _fw_row("d", tier="W"), _fw_row("e", tier="D"),
     ])
-    csv_path = write_render_selection(ws, "fw", unchecked=set())
-    argv = render_selection_argv(default_base(), ws, "fw", csv_path, bitrate=128, cfg={})
+    csv_path, fw_tiers = write_render_selection(ws, "fw", unchecked=set())
+    assert fw_tiers == "1,2,S,W,D"
+    argv = render_selection_argv(default_base(), ws, "fw", csv_path, bitrate=128, cfg={},
+                                 tiers=fw_tiers)
     assert "--spine-only" not in argv and "--main-story" not in argv
 
     ns = parsed_stage_args(fw_render.main, _stage_tokens(argv))
@@ -293,7 +296,7 @@ def test_ds_main_story_kwarg_appends_flag(tmp_path, parsed_stage_args):
     from deciwaves.engine import render as ds_render
     ws = str(tmp_path)
     _make_ds_playlist(ws, ["a"])
-    csv_path = write_render_selection(ws, "ds", unchecked=set())
+    csv_path, _ = write_render_selection(ws, "ds", unchecked=set())
     cfg = {"ds_install": r"C:\DS"}
     argv = render_selection_argv(default_base(), ws, "ds", csv_path, bitrate=128, cfg=cfg,
                                  main_story=True)
@@ -309,7 +312,7 @@ def test_hzd_spine_only_kwarg_appends_flag(tmp_path, parsed_stage_args):
     from deciwaves.games.hzd import render as hzd_render
     ws = str(tmp_path)
     _make_hzd_manifest(ws, ["x"])
-    csv_path = write_render_selection(ws, "hzd", unchecked=set())
+    csv_path, _ = write_render_selection(ws, "hzd", unchecked=set())
     cfg = {"hzd_package": "PKG"}
     argv = render_selection_argv(default_base(), ws, "hzd", csv_path, bitrate=128, cfg=cfg,
                                  spine_only=True)
@@ -329,8 +332,10 @@ def test_fw_default_tiers_keep_w_and_d_rows(tmp_path, parsed_stage_args):
     _write_csv(os.path.join(root, "full-reel-manifest.csv"), FW_COLS, [
         _fw_row("wav1", tier="W"), _fw_row("wav2", tier="D"),
     ])
-    csv_path = write_render_selection(ws, "fw", unchecked=set())
-    argv = render_selection_argv(default_base(), ws, "fw", csv_path, bitrate=128, cfg={})
+    csv_path, fw_tiers = write_render_selection(ws, "fw", unchecked=set())
+    assert fw_tiers == "W,D"
+    argv = render_selection_argv(default_base(), ws, "fw", csv_path, bitrate=128, cfg={},
+                                 tiers=fw_tiers)
     ns = parsed_stage_args(fw_render.main, _stage_tokens(argv))
     passed_tiers = {t.strip() for t in ns.tiers.split(",") if t.strip()}
     assert passed_tiers == {"W", "D"}
@@ -348,7 +353,8 @@ def test_fw_explicit_tiers_replace_union_and_can_drop_a_row(tmp_path, parsed_sta
     _write_csv(os.path.join(root, "full-reel-manifest.csv"), FW_COLS, [
         _fw_row("a", tier="1"), _fw_row("w", tier="W"),
     ])
-    csv_path = write_render_selection(ws, "fw", unchecked=set())
+    csv_path, fw_tiers = write_render_selection(ws, "fw", unchecked=set())
+    assert fw_tiers == "1,W"
     # explicit tiers REPLACE the present-tier union -- the W row is intentionally dropped.
     argv = render_selection_argv(default_base(), ws, "fw", csv_path, bitrate=128, cfg={},
                                  tiers="1,2,S")
@@ -360,7 +366,8 @@ def test_fw_explicit_tiers_replace_union_and_can_drop_a_row(tmp_path, parsed_sta
         bound_tiers={"1", "2", "S"})
     assert {i.line_id for i in kept} == {"a"}   # the W-tier row is scope-narrowed out
     # regression guard: with no explicit tiers, the union covers every present tier (#72).
-    unscoped = render_selection_argv(default_base(), ws, "fw", csv_path, bitrate=128, cfg={})
+    unscoped = render_selection_argv(default_base(), ws, "fw", csv_path, bitrate=128, cfg={},
+                                     tiers=fw_tiers)
     ns2 = parsed_stage_args(fw_render.main, _stage_tokens(unscoped))
     assert {t.strip() for t in ns2.tiers.split(",")} == {"1", "W"}
 

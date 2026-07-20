@@ -40,7 +40,11 @@ def test_export_threads_ds_main_story_scope(qtbot, tmp_path, monkeypatch):
     pl = os.path.join(ws, "out", "playlist.csv")
     os.makedirs(os.path.dirname(pl), exist_ok=True)
     with open(pl, "w", newline="", encoding="utf-8") as f:
-        csv.DictWriter(f, fieldnames=PLAYLIST_COLUMNS).writeheader()
+        w = csv.DictWriter(f, fieldnames=PLAYLIST_COLUMNS)
+        w.writeheader()
+        w.writerow(dict(episode="0", is_side="0", pos="0.0", section="0", scene="s",
+                        line_index="0", track_index="0", category="cutscene", speaker="Sam",
+                        subtitle="Hi.", stream_path="loc/a.wem.english.core.stream", line_id="a"))
     monkeypatch.setattr(shell_mod.config, "load", lambda: {"ds_install": r"C:\DS"})
     w = MainWindow()
     qtbot.addWidget(w)

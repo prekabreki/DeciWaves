@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 import shutil
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QThreadPool, QTimer, QRunnable
 from PySide6.QtWidgets import QMainWindow, QMessageBox, QStackedWidget, QTabBar, QVBoxLayout, QWidget
 
 from deciwaves.cli import config, doctor
@@ -362,15 +362,22 @@ class MainWindow(QMainWindow):
             return   # mirror _on_dump_wav: mutually exclude with the runner AND the dump (§5.3)
         game = self.bar.current_game()
         ws = self._workspace()
+        if self.library.checked_count() == 0:
+            self.pipeline.append_log("export: nothing selected.\n")
+            return   # M7: empty-selection guard (like Dump at :390)
         try:
-            csv_path = write_render_selection(ws, game, self.library.unchecked_ids())
+            csv_path, fw_tiers = write_render_selection(ws, game, self.library.unchecked_ids())
             # thread the per-game panel's render scope (#73): DS {main_story}, HZD {spine_only},
             # FW {tiers}. An explicit scope NARROWS (a checked row outside it is dropped);
             # empty defaults reproduce #72's "exactly the checked rows" (render_selection_argv's
             # kwargs default to today's behavior).
+            # M8: inject the pre-computed FW tier union so _fw_tiers no longer re-reads the CSV.
+            scope = self.game_panel.render_scope()
+            if fw_tiers is not None and "tiers" not in scope:
+                scope["tiers"] = fw_tiers
             argv = render_selection_argv(default_base(), ws, game, csv_path,
                                          bitrate=bitrate, cfg=config.load(),
-                                         **self.game_panel.render_scope())
+                                         **scope)
         except ExportError as exc:
             self.pipeline.append_log(f"export: {exc}\n")
             return
@@ -409,8 +416,23 @@ class MainWindow(QMainWindow):
             return
         try:
             os.makedirs(os.path.dirname(os.path.abspath(dest)), exist_ok=True)
-            shutil.copyfile(src, dest)
         except OSError as exc:
             self.pipeline.append_log(f"export: could not write catalog: {exc}\n")
             return
-        self.pipeline.append_log(f"export: catalog copied to {dest}\n")
+
+        class _CatalogCopyWorker(QRunnable):
+            def __init__(self, src, dest, log_fn):
+                super().__init__()
+                self._src = src
+                self._dest = dest
+                self._log = log_fn
+
+            def run(self):
+                try:
+                    shutil.copyfile(self._src, self._dest)
+                    self._log(f"export: catalog copied to {self._dest}\n")
+                except OSError as exc:
+                    self._log(f"export: could not write catalog: {exc}\n")
+
+        QThreadPool.globalInstance().start(
+            _CatalogCopyWorker(src, dest, self.pipeline.append_log))

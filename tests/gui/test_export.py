@@ -332,6 +332,8 @@ def test_shell_catalog_copy(qtbot, tmp_path):
     w = _mainwindow(qtbot, tmp_path, "ds")
     dest = os.path.join(ws, "exported-catalog.csv")
     w.library.export.export_catalog_requested.emit(dest)
+    from PySide6.QtCore import QThreadPool
+    QThreadPool.globalInstance().waitForDone()
     assert os.path.isfile(dest)
     assert open(dest, encoding="utf-8").read() == "line_id\na\n"
 
