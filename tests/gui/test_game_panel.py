@@ -84,6 +84,62 @@ def test_render_scope_fw_tiers_default(qtbot):
     assert p.render_scope() == {"tiers": "1,2,S"}
 
 
+def test_fw_tiers_hint_label_is_visible(qtbot):
+    p = GamePanel()
+    qtbot.addWidget(p)
+    p.set_game("fw")
+    assert p._tiers_hint.isVisibleTo(p)
+    assert "dropped" in p._tiers_hint.text()
+
+
+def test_fw_tiers_hint_hidden_for_non_fw_games(qtbot):
+    p = GamePanel()
+    qtbot.addWidget(p)
+    p.set_game("ds")
+    assert not p._tiers_hint.isVisibleTo(p)
+    p.set_game("hzd")
+    assert not p._tiers_hint.isVisibleTo(p)
+
+
+def test_fw_tiers_warning_on_unknown_token(qtbot):
+    p = GamePanel()
+    qtbot.addWidget(p)
+    p.set_game("fw")
+    assert not p._tiers_warning.isVisibleTo(p)
+    p._tiers_edit.setText("1,2,Z")
+    assert p._tiers_warning.isVisibleTo(p)
+    assert "Z" in p._tiers_warning.text()
+    assert "Unknown tier" in p._tiers_warning.text()
+
+
+def test_fw_tiers_warning_hidden_for_valid_input(qtbot):
+    p = GamePanel()
+    qtbot.addWidget(p)
+    p.set_game("fw")
+    p._tiers_edit.setText("1,2,Z")
+    assert p._tiers_warning.isVisibleTo(p)
+    p._tiers_edit.setText("1,2,S")
+    assert not p._tiers_warning.isVisibleTo(p)
+
+
+def test_fw_tiers_warning_hidden_for_valid_subset_wd(qtbot):
+    p = GamePanel()
+    qtbot.addWidget(p)
+    p.set_game("fw")
+    p._tiers_edit.setText("W,D")
+    assert not p._tiers_warning.isVisibleTo(p)
+
+
+def test_fw_tiers_warning_cleared_on_game_reset(qtbot):
+    p = GamePanel()
+    qtbot.addWidget(p)
+    p.set_game("fw")
+    p._tiers_edit.setText("1,2,Z")
+    assert p._tiers_warning.isVisibleTo(p)
+    p.set_game("fw")
+    assert not p._tiers_warning.isVisibleTo(p)
+
+
 # --- sample cap (HZD) ------------------------------------------------------
 
 def test_sample_cap_default_300_for_hzd_none_otherwise(qtbot):
