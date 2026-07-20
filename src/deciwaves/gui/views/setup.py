@@ -147,9 +147,12 @@ class DoctorPanel(QWidget):
         h.setContentsMargins(0, 0, 0, 0)
         marker = QLabel(glyph)
         marker.setStyleSheet(f"color: {colour};")
+        marker.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
         h.addWidget(marker)
         text = item.message if not item.fix else f"{item.message}  —  Fix: {item.fix}"
-        h.addWidget(QLabel(text), 1)
+        text_label = QLabel(text)
+        text_label.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
+        h.addWidget(text_label, 1)
         return row
 
     def _on_finished(self, _code: int, text: str) -> None:
@@ -193,8 +196,10 @@ class SetupScreen(QWidget):
 
         self._paths_label = QLabel("")   # ds_install / oodle / hzd / fw summary rows
         self._paths_label.setWordWrap(True)
+        self._paths_label.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
         self._warnings_label = QLabel("")
         self._warnings_label.setWordWrap(True)
+        self._warnings_label.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
         self._warnings_label.setStyleSheet(f"color: {_SEV_STYLE[SEV_WARN][1]};")
 
         layout = QVBoxLayout(self)
@@ -216,6 +221,7 @@ class SetupScreen(QWidget):
         spinner.setVisible(False)
         spinner.setMaximumWidth(120)
         status = QLabel("—")
+        status.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
         self._tool_spinner[tool] = spinner
         self._tool_status[tool] = status
         h.addStretch(1)
