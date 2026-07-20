@@ -320,6 +320,27 @@ def test_hzd_spine_only_kwarg_appends_flag(tmp_path, parsed_stage_args):
     assert "--spine-only" not in unscoped
 
 
+def test_fw_default_tiers_keep_w_and_d_rows(tmp_path, parsed_stage_args):
+    """Regression lock (#72/#106): default --tiers preserves every present tier
+    (W and D specifically) so no checked row is dropped."""
+    from deciwaves.games.fw import render as fw_render
+    ws = str(tmp_path)
+    root = os.path.join(ws, "out", "fw")
+    _write_csv(os.path.join(root, "full-reel-manifest.csv"), FW_COLS, [
+        _fw_row("wav1", tier="W"), _fw_row("wav2", tier="D"),
+    ])
+    csv_path = write_render_selection(ws, "fw", unchecked=set())
+    argv = render_selection_argv(default_base(), ws, "fw", csv_path, bitrate=128, cfg={})
+    ns = parsed_stage_args(fw_render.main, _stage_tokens(argv))
+    passed_tiers = {t.strip() for t in ns.tiers.split(",") if t.strip()}
+    assert passed_tiers == {"W", "D"}
+    kept = fw_render.build_spine(
+        [_fw_row("wav1", tier="W", gamescript_index="0"),
+         _fw_row("wav2", tier="D", gamescript_index="1")],
+        bound_tiers=passed_tiers)
+    assert {i.line_id for i in kept} == {"wav1", "wav2"}
+
+
 def test_fw_explicit_tiers_replace_union_and_can_drop_a_row(tmp_path, parsed_stage_args):
     from deciwaves.games.fw import render as fw_render
     ws = str(tmp_path)
