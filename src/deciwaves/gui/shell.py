@@ -136,6 +136,11 @@ class MainWindow(QMainWindow):
             lambda p: self.pipeline.setup_doctor.setup.run(fw_gamescript=p, skip_downloads=True))
         self.game_panel.types_picked.connect(
             lambda p: self.pipeline.setup_doctor.setup.run(fw_types=p, skip_downloads=True))
+        # setup started/finished triggers _sync_running so pipeline controls disable while
+        # setup is busy AND setup buttons disable while a pipeline job runs (#129/M6).
+        self.pipeline.setup_doctor.setup.started.connect(self._sync_running)
+        self.pipeline.setup_doctor.setup.finished.connect(lambda _c: self._sync_running())
+
         # a finished doctor run (incl. the one setup triggers) re-grades the panel's types.json
         # + GPU/CUDA readiness from the fresh payload.
         self.pipeline.setup_doctor.doctor.refreshed.connect(self._refresh_game_panel)
@@ -363,14 +368,17 @@ class MainWindow(QMainWindow):
         self._refresh_game_panel()   # a bind/extract may have produced/consumed types.json
 
     def _sync_running(self) -> None:
-        """One job at a time (spec §5.3): a pipeline job, an export render, and a dump batch all
-        mutually exclude. Whenever ANY is active, disable the pipeline controls, the stage-strip
-        Re-run affordance, and the export panel; the export panel additionally shows a Cancel
-        while its own dump runs. Inline preview (▷/Enter) is intentionally left alone (§6.5)."""
+        """One job at a time (spec §5.3): a pipeline job, an export render, a dump batch, and
+        setup all mutually exclude. Whenever ANY is active, disable the pipeline controls, the
+        stage-strip Re-run affordance, and the setup/export buttons. The export panel additionally
+        shows a Cancel while its own dump runs. Inline preview is left alone (§6.5)."""
         busy = self.runner.is_running or self.dump.is_running
-        self.pipeline.controls.set_running(busy)
-        self.pipeline.strip.set_running(busy)
-        self.library.export.set_running(busy)
+        setup_busy = self.pipeline.setup_doctor.setup.is_busy
+        pipeline_busy = busy or setup_busy
+        self.pipeline.controls.set_running(pipeline_busy)
+        self.pipeline.strip.set_running(pipeline_busy)
+        self.pipeline.setup_doctor.setup.set_running(busy)
+        self.library.export.set_running(pipeline_busy)
         self.library.export.set_dumping(self.dump.is_running)
 
     def _report_export_result(self, game: str | None, code: int) -> None:

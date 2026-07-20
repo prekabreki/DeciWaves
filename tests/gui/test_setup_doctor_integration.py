@@ -45,3 +45,53 @@ def test_setup_output_streams_into_the_log_console(qtbot):
     qtbot.addWidget(w)
     w.pipeline.setup_doctor.setup._runner.output.emit("setup-live\n")
     assert "setup-live" in w.pipeline.log_text()
+
+
+# --- M6: mutual exclusion both ways -----------------------------------------
+
+def test_setup_busy_disables_pipeline_controls(qtbot):
+    """setup→pipeline: when setup is running, Scan/Bind must be disabled."""
+    w = MainWindow()
+    qtbot.addWidget(w)
+    controls = w.pipeline.controls
+    setup = w.pipeline.setup_doctor.setup
+
+    assert controls._scan_btn.isEnabled() is True
+    # Simulate setup running
+    setup._busy = True
+    setup._sync_buttons()
+    w._sync_running()
+    assert controls._scan_btn.isEnabled() is False
+    assert controls._bind_btn.isEnabled() is False
+    # Clear busy
+    setup._busy = False
+    setup._sync_buttons()
+    w._sync_running()
+    assert controls._scan_btn.isEnabled() is True
+
+
+def test_pipeline_busy_disables_setup_buttons(qtbot):
+    """pipeline→setup: when a pipeline job is running, setup buttons must be disabled."""
+    from unittest.mock import PropertyMock, patch
+
+    w = MainWindow()
+    qtbot.addWidget(w)
+    setup = w.pipeline.setup_doctor.setup
+
+    assert setup._run_btn.isEnabled() is True
+    assert setup._redownload_btn.isEnabled() is True
+    assert setup._recheck_btn.isEnabled() is True
+
+    # Simulate a pipeline job running by patching is_running
+    with patch.object(type(w.runner), "is_running", PropertyMock(return_value=True)):
+        w._sync_running()
+    assert setup._run_btn.isEnabled() is False
+    assert setup._redownload_btn.isEnabled() is False
+    assert setup._recheck_btn.isEnabled() is False
+
+    # Job done
+    with patch.object(type(w.runner), "is_running", PropertyMock(return_value=False)):
+        w._sync_running()
+    assert setup._run_btn.isEnabled() is True
+    assert setup._redownload_btn.isEnabled() is True
+    assert setup._recheck_btn.isEnabled() is True

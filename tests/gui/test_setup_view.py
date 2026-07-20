@@ -141,6 +141,37 @@ def test_setup_screen_is_busy_while_running_then_clears(qtbot):
     assert s.is_busy is False
 
 
+# --- M3: error row on non-zero exit / buttons disabled while busy -----------
+
+def test_setup_shows_error_row_on_failure(qtbot):
+    s = SetupScreen(base=[sys.executable, "-c", "exit(1)"])
+    qtbot.addWidget(s)
+    with qtbot.waitSignal(s.finished, timeout=8000):
+        assert s.run() is True
+    assert "exited with code 1" in s._paths_label.text()
+    assert s._run_btn.isEnabled() is True              # re-enabled after failure
+    assert s._redownload_btn.isEnabled() is True
+    assert s._recheck_btn.isEnabled() is True
+
+
+def test_setup_buttons_disabled_while_running_then_re_enabled(qtbot):
+    s = SetupScreen(base=[sys.executable, "-c", "import time; time.sleep(0.3)"])
+    qtbot.addWidget(s)
+    assert s.run() is True
+    assert s._busy is True
+    assert s._run_btn.isEnabled() is False
+    assert s._redownload_btn.isEnabled() is False
+    assert s._recheck_btn.isEnabled() is False
+    assert not s._cancel_btn.isHidden()     # shown while busy
+    with qtbot.waitSignal(s.finished, timeout=8000):
+        pass
+    assert s._busy is False
+    assert s._run_btn.isEnabled() is True
+    assert s._redownload_btn.isEnabled() is True
+    assert s._recheck_btn.isEnabled() is True
+    assert s._cancel_btn.isHidden()          # hidden after finish
+
+
 # --- Tooltips ---------------------------------------------------------------
 
 def test_doctor_recheck_button_has_tooltip(qtbot):
