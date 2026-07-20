@@ -24,6 +24,7 @@ from __future__ import annotations
 import csv
 import os
 
+from deciwaves.cli.config import resolve_ds_install
 from deciwaves.engine.atomic_io import atomic_write
 from deciwaves.gui.cli_command import build_cli_command
 
@@ -196,10 +197,7 @@ def _ds_install(cfg: dict) -> tuple[str, str]:
     """``(data_dir, oodle)`` from *cfg*, mirroring cli/run.py's DS resolution (data-dir under
     the install; oodle explicit, else the install's bundled dll). Raises :class:`ExportError`
     if the DS install isn't configured -- render REQUIRES both flags."""
-    ds_install = cfg.get("ds_install")
-    data_dir = os.path.join(ds_install, "data") if ds_install else None
-    oodle = cfg.get("oodle_dll") or (
-        os.path.join(ds_install, "oo2core_7_win64.dll") if ds_install else None)
+    data_dir, oodle = resolve_ds_install(cfg)
     if not data_dir or not oodle:
         raise ExportError("DS install is not configured. Run `deciwaves setup` first.")
     return data_dir, oodle

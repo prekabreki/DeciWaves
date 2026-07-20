@@ -36,6 +36,7 @@ from pathlib import Path
 from typing import Callable
 
 from deciwaves import data
+from deciwaves.cli.config import resolve_ds_install
 from deciwaves.cli.main import STAGES, _import_stage  # noqa: F401 -- re-exported for monkeypatching
 from deciwaves.engine.coverage import clear_sections, clear_stage_coverage, default_coverage_path
 from deciwaves.games.hzd import asr_bind
@@ -334,10 +335,9 @@ def _run_ds(cfg: dict, extra_argv: list) -> int:
     if isinstance(ns, int):
         return ns
 
-    ds_install = cfg.get("ds_install")
-    data_dir = ns.data_dir or (os.path.join(ds_install, "data") if ds_install else None)
-    oodle = (ns.oodle or cfg.get("oodle_dll")
-             or (os.path.join(ds_install, "oo2core_7_win64.dll") if ds_install else None))
+    data_dir, oodle = resolve_ds_install(cfg)
+    data_dir = ns.data_dir or data_dir
+    oodle = ns.oodle or oodle
     if not data_dir or not oodle:
         return _missing_config("ds", "DS install (ds_install)", "--data-dir/--oodle")
 
