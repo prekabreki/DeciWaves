@@ -51,6 +51,7 @@ class MainWindow(QMainWindow):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("DeciWaves")
+        self.setMinimumSize(900, 600)
 
         self.bar = GlobalBar()
         # The adaptive per-game panel (#73, spec §7): one frame between the global bar and the
