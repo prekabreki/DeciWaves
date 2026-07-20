@@ -147,6 +147,10 @@ def test_short_controls_enabled_with_fw_wav_lengths(qtbot, tmp_path):
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("fw", ws)
+    # Lengths start None (lazy fill); controls disabled until fill completes.
+    assert v._uncheck_short_btn.isEnabled() is False
+    # Wait for background fill to complete and enable controls.
+    qtbot.wait(5000)
     assert v._uncheck_short_btn.isEnabled() is True
 
 

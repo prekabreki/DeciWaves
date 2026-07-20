@@ -6,7 +6,9 @@ here ▶ only reflects availability and emits an (as-yet unconnected) ``preview_
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QAbstractTableModel, QEvent, QModelIndex, Qt, Signal
+from dataclasses import replace
+
+from PySide6.QtCore import QAbstractTableModel, QEvent, QModelIndex, QObject, Qt, QThread, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -31,6 +33,7 @@ from deciwaves.gui.library_model import (
     check_all,
     check_none,
     distinct_speakers,
+    fill_wav_lengths,
     has_known_lengths,
     is_bind_done,
     load_lines,
@@ -46,6 +49,22 @@ from deciwaves.gui.library_model import (
 # Gray foreground for a pending/unavailable ▶ (spec §6.2/§6.5). A value type -- safe to build
 # at import time without a running QApplication.
 _PREVIEW_PENDING_FG = QColor(0x88, 0x88, 0x88)
+
+
+class _LengthFillWorker(QObject):
+    """Background worker: probes WAV headers to fill ``length_s`` for FW rows,
+    then delivers the updated rows via signal to the GUI thread."""
+
+    finished = Signal(object)  # (list[LineRow], int) — rows, generation
+
+    def __init__(self, rows: list[LineRow], gen: int):
+        super().__init__()
+        self._rows = rows
+        self.gen = gen
+
+    def run(self) -> None:
+        new_rows = fill_wav_lengths(self._rows)
+        self.finished.emit((new_rows, self.gen))
 
 
 class _TableModel(QAbstractTableModel):
@@ -161,6 +180,9 @@ class LibraryView(QWidget):
         self._unavailable_tooltip = ""
         self._sort_key: str | None = None
         self._sort_desc = False
+        self._fill_gen: int = 0
+        self._fill_thread: QThread | None = None
+        self._fill_worker: _LengthFillWorker | None = None
 
         # --- filter row ---
         self._search = QLineEdit()
@@ -249,6 +271,7 @@ class LibraryView(QWidget):
         key/dir, both hide toggles, speaker) -- the list is per-game. A **same-game** refresh
         (e.g. a job finished for the current game) preserves all filter/sort state so an
         in-progress curation survives a background reload."""
+        self._cancel_fill()
         game_changed = game != self._game
         self._game = game
         self._workspace = workspace
@@ -279,6 +302,61 @@ class LibraryView(QWidget):
         self._uncheck_short_btn.setEnabled(has_len)
 
         self._apply_filters()
+        self._start_length_fill()
+
+    def _start_length_fill(self) -> None:
+        """Start a background thread to probe WAV headers for duration. The list
+        is already shown (all lengths ``None`` / "—"); the fill emits
+        ``dataChanged`` for the length column when done."""
+        if not self._rows:
+            return
+        # Only FW rows with audio_path have lengths to fill; skip if none qualify.
+        if not any(r.audio_path and r.length_s is None for r in self._rows):
+            return
+        self._fill_gen += 1
+        gen = self._fill_gen
+        self._fill_worker = _LengthFillWorker(self._rows, gen)
+        self._fill_thread = QThread(self)
+        self._fill_worker.moveToThread(self._fill_thread)
+        self._fill_worker.finished.connect(lambda payload: self._on_lengths_filled(*payload))
+        self._fill_thread.started.connect(self._fill_worker.run)
+        self._fill_thread.start()
+
+    def _cancel_fill(self) -> None:
+        """Cancel any in-flight fill. The thread is allowed to finish (we don't
+        call ``terminate``) but its result will be ignored via generation check."""
+        if self._fill_thread is not None:
+            self._fill_thread.quit()
+            self._fill_thread.wait(1000)
+            self._fill_thread = None
+            self._fill_worker = None
+
+    def _on_lengths_filled(self, new_rows: list[LineRow], gen: int) -> None:
+        if gen != self._fill_gen:
+            return
+        if self._fill_thread is not None:
+            self._fill_thread.quit()
+            self._fill_thread.wait(500)
+            self._fill_thread = None
+            self._fill_worker = None
+        self._rows = new_rows
+        # Update lengths in visible rows and emit dataChanged for the length column
+        # only (no model reset), so the table updates in place.
+        length_by_id = {r.line_id: r.length_s for r in new_rows}
+        changed = False
+        for vi, vr in enumerate(self._visible):
+            new_len = length_by_id.get(vr.line_id)
+            if new_len is not None and new_len != vr.length_s:
+                self._visible[vi] = replace(vr, length_s=new_len)
+                idx = self._model.index(vi, self._model.COL_LEN)
+                self._model.dataChanged.emit(idx, idx, [Qt.DisplayRole])
+                changed = True
+        # Short controls may now be usable even if they weren't before.
+        has_len = has_known_lengths(self._rows)
+        self._short_secs.setEnabled(has_len)
+        self._uncheck_short_btn.setEnabled(has_len)
+        if changed:
+            self._update_status()
 
     def _reset_filter_state(self) -> None:
         """Clear search text, sort key/dir, and both hide toggles to defaults (called on a

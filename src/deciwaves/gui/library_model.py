@@ -183,7 +183,7 @@ def _load_fw(workspace: str) -> list[LineRow]:
         audio = _fw_audio_path(root, r.get("wav"))
         out.append(LineRow(
             line_id=r.get("line_id", ""), audio_path=audio,
-            length_s=wav_duration_seconds(audio), has_subtitle=False, order_index=i))
+            length_s=None, has_subtitle=False, order_index=i))
     return out
 
 
@@ -197,7 +197,7 @@ def _load_fw_manifest(root: str, path: str) -> list[LineRow]:
         out.append(LineRow(
             line_id=r.get("line_id", ""), speaker=r.get("speaker") or None,
             subtitle=sub, scene=r.get("quest") or None, tier=r.get("tier") or None,
-            audio_path=audio, length_s=wav_duration_seconds(audio),
+            audio_path=audio, length_s=None,
             has_subtitle=_has_subtitle(sub), order_index=i))
     return out
 
@@ -221,6 +221,44 @@ def _mark_dupes(rows: list[LineRow]) -> list[LineRow]:
             dupe = key in seen
             seen.add(key)
         out.append(replace(r, is_dupe=dupe) if dupe != r.is_dupe else r)
+    return out
+
+
+# --- WAV-header duration cache (path+mtime keyed, never re-probes on repeat refresh) ---
+
+_duration_cache: dict[str, tuple[float, float | None]] = {}
+
+
+def _cached_wav_duration(path: str) -> float | None:
+    """``wav_duration_seconds`` with memoisation keyed by path+mtime so repeat
+    refreshes don't re-probe every file."""
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        return None
+    cached = _duration_cache.get(path)
+    if cached is not None and cached[0] == mtime:
+        return cached[1]
+    dur = wav_duration_seconds(path)
+    _duration_cache[path] = (mtime, dur)
+    return dur
+
+
+def fill_wav_lengths(rows: list[LineRow]) -> list[LineRow]:
+    """Probe WAV headers for every row that carries an ``audio_path`` but has no
+    ``length_s`` yet (FW post-extract rows), using the path+mtime cache.  Returns
+    new rows with durations filled where possible.  Does NOT probe synchronously
+    on the calling thread -- call from a ``QThread`` worker or similar."""
+    out = []
+    for r in rows:
+        if r.length_s is not None or not r.audio_path:
+            out.append(r)
+        else:
+            dur = _cached_wav_duration(r.audio_path)
+            if dur is not None:
+                out.append(replace(r, length_s=dur))
+            else:
+                out.append(r)
     return out
 
 

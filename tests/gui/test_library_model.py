@@ -10,12 +10,15 @@ import wave
 
 from conftest import catalog_row
 
+import deciwaves.gui.library_model as _lm
+
 from deciwaves.gui.library_model import (
     LineRow,
     availability_by_id,
     check_all,
     check_none,
     distinct_speakers,
+    fill_wav_lengths,
     has_known_lengths,
     load_lines,
     load_selection,
@@ -141,6 +144,9 @@ def test_fw_under_game_dir_full_reel_preferred_and_wav_length(tmp_path):
     rows = load_lines(ws, "fw")
     assert [r.line_id for r in rows] == ["f1"]
     assert rows[0].has_subtitle is False  # clip-index carries no subtitle
+    assert rows[0].length_s is None  # no sync WAV probe (lazy fill)
+
+    rows = fill_wav_lengths(rows)
     assert abs(rows[0].length_s - 2.0) < 0.05
 
     # full-reel manifest wins; carries speaker/subtitle/tier
@@ -151,6 +157,9 @@ def test_fw_under_game_dir_full_reel_preferred_and_wav_length(tmp_path):
     rows = load_lines(ws, "fw")
     assert rows[0].speaker == "Varl" and rows[0].subtitle == "Hello Aloy"
     assert rows[0].has_subtitle is True and rows[0].tier == "S"
+    assert rows[0].length_s is None  # no sync WAV probe (lazy fill)
+
+    rows = fill_wav_lengths(rows)
     assert abs(rows[0].length_s - 2.0) < 0.05
 
 
@@ -174,6 +183,9 @@ def test_fw_subtitle_manifest_used_when_no_full_reel(tmp_path):
     assert [r.line_id for r in rows] == ["f1"]
     assert rows[0].speaker == "Varl" and rows[0].subtitle == "Hello Aloy"
     assert rows[0].has_subtitle is True and rows[0].tier == "S"
+    assert rows[0].length_s is None  # no sync WAV probe (lazy fill)
+
+    rows = fill_wav_lengths(rows)
     assert abs(rows[0].length_s - 2.0) < 0.05
 
 
@@ -232,6 +244,58 @@ def test_wav_duration_seconds_none_on_missing_or_garbage(tmp_path):
     with open(bad, "wb") as f:
         f.write(b"not a wav file at all, no RIFF here")
     assert wav_duration_seconds(bad) is None
+
+
+# --- lazy WAV length fill + cache ------------------------------------------
+
+def test_fill_wav_lengths_probes_only_none_lengths(tmp_path):
+    ws = str(tmp_path)
+    p1 = os.path.join(ws, "audio", "a.wav")
+    _write_wav(p1, seconds=1.5)
+    rows = [
+        LineRow(line_id="a", audio_path=p1, length_s=None),
+        LineRow(line_id="b", audio_path=p1, length_s=3.0),   # already known -> skip
+        LineRow(line_id="c", audio_path=None, length_s=None), # no path -> skip
+        LineRow(line_id="d"),   # no audio_path at all -> skip
+    ]
+    filled = fill_wav_lengths(rows)
+    assert abs(filled[0].length_s - 1.5) < 0.01
+    assert filled[1].length_s == 3.0
+    assert filled[2].length_s is None
+    assert filled[3].length_s is None
+
+
+def test_fill_wav_lengths_returns_none_for_missing_wav(tmp_path):
+    ws = str(tmp_path)
+    rows = [LineRow(line_id="a", audio_path=os.path.join(ws, "missing.wav"), length_s=None)]
+    filled = fill_wav_lengths(rows)
+    assert filled[0].length_s is None
+
+
+def test_fill_wav_lengths_caches_by_path_mtime(tmp_path):
+    _lm._duration_cache.clear()
+    ws = str(tmp_path)
+    p = os.path.join(ws, "x.wav")
+    _write_wav(p, seconds=2.0)
+    rows = [LineRow(line_id="a", audio_path=p, length_s=None)]
+    filled1 = fill_wav_lengths(list(rows))
+    assert abs(filled1[0].length_s - 2.0) < 0.01
+    # second call uses cache (no file re-open); result unchanged
+    filled2 = fill_wav_lengths(list(rows))
+    assert abs(filled2[0].length_s - 2.0) < 0.01
+
+
+def test_fill_wav_lengths_reprobes_after_mtime_change(tmp_path):
+    _lm._duration_cache.clear()
+    ws = str(tmp_path)
+    p = os.path.join(ws, "x.wav")
+    _write_wav(p, seconds=2.0)
+    rows = [LineRow(line_id="a", audio_path=p, length_s=None)]
+    fill_wav_lengths(list(rows))
+    # overwrite with a different-length WAV (same path, new mtime)
+    _write_wav(p, seconds=5.0)
+    filled = fill_wav_lengths(list(rows))
+    assert abs(filled[0].length_s - 5.0) < 0.01
 
 
 # --- dupe / subtitle marking -----------------------------------------------
