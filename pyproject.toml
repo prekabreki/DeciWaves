@@ -41,6 +41,18 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Prepend THIS checkout's src/ to sys.path at collection time. Every install of
+# this package is an editable install backed by a single, interpreter-global
+# `__editable__.deciwaves.pth` that names exactly one src dir. When several git
+# worktrees exist at once (foreman executors under .foreman-worktrees/, Claude
+# Code subagents under .claude/worktrees/), they race over that one .pth on
+# `pip install -e .` — last writer wins — so a bare `import deciwaves` in any
+# other worktree silently resolves to the wrong tree and the suite tests code
+# that isn't the diff under review. Pinning src/ per-rootdir here makes each
+# worktree import its own source regardless of the shared .pth. Env-independent:
+# .venv is affected too, so "use the venv" does NOT fix it on its own.
+# See .memories/worktree-editable-install-contamination.md.
+pythonpath = ["src"]
 
 [tool.ruff]
 line-length = 120

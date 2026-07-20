@@ -36,6 +36,14 @@ pip install -e ".[asr]"       # + optional GPU ASR extra (WhisperX; needs a CUDA
 pytest -q
 ```
 
+On this Windows dev machine the working interpreter is the repo `.venv`; the
+canonical verify invocation is **`./.venv/Scripts/python.exe -m pytest -q`**. Use
+that exact form in every issue's **How to verify** block and in foreman executor
+runs — a bare `pytest` may resolve to a system interpreter without the `[test]`
+extra installed. (Test-source isolation across parallel worktrees is handled by
+`pythonpath = ["src"]` in `pyproject.toml`, not by the interpreter choice — see
+`.memories/worktree-editable-install-contamination.md`.)
+
 Tests that need a real game install, a regenerated fixture, or a Wwise/ATRAC9 decoder binary
 skip cleanly (`pytest.skip(...)`) when the dependency is absent, so the suite runs green on
 any machine with just the base install. Point tests at real resources with environment
@@ -142,3 +150,19 @@ plugin's `foreman-init` skill (locate via the plugin, not a saved path).
   `.foreman-worktrees/`, logs at repo root as `foreman-issue-<N>.log` — all
   local-excluded, never commit them.
 <!-- foreman:end -->
+
+### Foreman: repo-specific reconciliation checks
+
+(Outside the managed block above, which `foreman-init` overwrites.)
+
+- **Silent-executor detection.** An executor that dies before opening its PR
+  leaves the issue `in-progress` with a `foreman/issue-<N>` branch but **zero
+  commits and no PR** — indistinguishable from "still running" at a glance. When
+  reconciling a wave, treat `in-progress` + branch exists +
+  `git rev-list --count origin/main..foreman/issue-<N>` == 0 + no open PR as
+  **failed silently** (re-dispatch/hand off), not stalled. Seen with #74 on
+  2026-07-20: its verify correctly failed and it exited without a PR.
+- **Don't trust self-reported greens.** Re-run each PR's verify in a clean
+  single-worktree checkout via `./.venv/Scripts/python.exe -m pytest` before
+  merging — especially any PR produced before `pythonpath=["src"]` landed. See
+  `.memories/worktree-editable-install-contamination.md`.
