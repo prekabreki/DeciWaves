@@ -280,16 +280,19 @@ class MainWindow(QMainWindow):
         self._poll.start()
 
     def _on_job_finished(self, code: int) -> None:
-        self.bar.set_job_chip("idle")
         self._poll.stop()
         kind, game = self._job_kind, self._job_game
         self._job_kind = None
         self._job_game = None
-        # Export renders run through this same runner: surface the render rc as success/error
-        # (this is where the empty-input / missing-decoder non-zero exits become a visible
-        # error, never a silent green -- spec §8.2). Pipeline jobs keep the existing behavior.
         if kind == "export":
             self._report_export_result(game, code)
+            self.bar.set_job_chip("idle")
+        elif code == 0 or self.runner.was_cancelled:
+            self.bar.set_job_chip("idle")
+        else:
+            self.bar.set_job_chip("failed")
+            self.pipeline.append_log(
+                f"pipeline job failed (rc {code}) — see the log above.\n")
         self._sync_running()
         self._refresh_panels()
         self._refresh_library()   # surface catalog/asr-manifest rows written by Scan/Bind
