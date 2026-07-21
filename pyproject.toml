@@ -53,6 +53,9 @@ testpaths = ["tests"]
 # .venv is affected too, so "use the venv" does NOT fix it on its own.
 # See .memories/worktree-editable-install-contamination.md.
 pythonpath = ["src"]
+markers = [
+    "allow_dialogs: permit modal dialogs (QMessageBox, QDialog.exec/exec_) in this test without failing; patched methods return QMessageBox.Yes",
+]
 
 [tool.ruff]
 line-length = 120
