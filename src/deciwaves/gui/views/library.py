@@ -494,6 +494,16 @@ class LibraryView(QWidget):
         for bulk commands)."""
         save_selection(self._workspace, self._game, self._unchecked)
 
+    def flush_pending_selection(self) -> None:
+        """Flush any pending selection save to disk immediately.
+
+        If the debounce timer is active, stop it and persist the current unchecked set
+        to disk. Strict no-op when nothing is pending — guards against gratuitous disk
+        writes during every pytest-qt teardown ``close()``."""
+        if self._selection_timer.isActive():
+            self._selection_timer.stop()
+            self._flush_selection()
+
     def _apply_selection(self, new_unchecked: set[str]) -> None:
         """Apply a bulk selection command — flush immediately, not debounced."""
         self._selection_timer.stop()
