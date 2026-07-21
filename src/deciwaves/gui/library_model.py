@@ -59,6 +59,7 @@ class LineRow:
     is_dupe: bool = False
     has_subtitle: bool = False
     order_index: int = 0
+    search_haystack: str = ""
 
 
 # --- artifact reading ------------------------------------------------------
@@ -91,6 +92,11 @@ def _out_dir(workspace: str, game: str) -> str:
     return os.path.join(workspace, "out") if game == "ds" else os.path.join(workspace, "out", game)
 
 
+def _precompute_haystack(r: LineRow) -> LineRow:
+    hay = " ".join(x for x in (r.subtitle, r.line_id, r.name) if x).lower()
+    return replace(r, search_haystack=hay)
+
+
 def load_lines(workspace: str, game: str) -> list[LineRow]:
     """Load the game's list artifact (story-order if present, else catalog) into
     normalized ``LineRow``s, with dupe/has-subtitle marking applied. Missing artifact -> []."""
@@ -102,7 +108,8 @@ def load_lines(workspace: str, game: str) -> list[LineRow]:
         rows = _load_fw(workspace)
     else:
         rows = []
-    return _mark_dupes(rows)
+    rows = _mark_dupes(rows)
+    return [_precompute_haystack(r) for r in rows]
 
 
 def _load_ds(workspace: str) -> list[LineRow]:
@@ -284,7 +291,8 @@ def visible_rows(rows: list[LineRow], *, search: str, speaker: str,
         if want_speaker and r.speaker != speaker:
             continue
         if needle:
-            hay = " ".join(x for x in (r.subtitle, r.line_id, r.name) if x).lower()
+            hay = r.search_haystack if r.search_haystack else " ".join(
+                x for x in (r.subtitle, r.line_id, r.name) if x).lower()
             if needle not in hay:
                 continue
         out.append(r)
