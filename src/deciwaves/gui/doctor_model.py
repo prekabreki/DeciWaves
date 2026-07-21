@@ -5,11 +5,17 @@ child process, then this module turns the payload into rows and decides how each
 read in the UI. The one GUI-specific rule the CLI can't express: the ASR extra and CUDA
 are *informational* to the CLI (never fail its exit code), but the GUI **promotes** them
 to first-class readiness items for the GPU games (HZD/FW). Branch on ``status`` here, the
-same contract the shell's install-status line already uses -- never on message text."""
+same contract the shell's install-status line already uses -- never on message text.
+
+The module also provides the Qt-free helper ``install_status_attrs`` for the global-bar's
+install-status line (issue #122): maps a doctor ``Availability`` to a (glyph, colour)
+pair, so the widget never has to know about the enum."""
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+
+from deciwaves.cli.doctor import Availability
 
 # doctor.Availability.value strings, as they appear in each check's "status" field.
 STATUS_OK = "ok"
@@ -22,6 +28,30 @@ SEV_OK = "ok"
 SEV_ERROR = "error"
 SEV_WARN = "warn"
 SEV_NEUTRAL = "neutral"
+
+# Glyph + colour for each Availability, used by the global-bar install-status line.
+_GLYPH_OK = "✓"
+_GLYPH_NEUTRAL = "—"
+_GLYPH_ERROR = "✗"
+
+# Colour hex values (mirror theme.py; kept here so the helper is Qt-free).
+_COLOR_OK = "#167f3b"
+_COLOR_NEUTRAL = "#666666"
+_COLOR_ERROR = "#b00020"
+
+def install_status_attrs(status: Availability) -> tuple[str, str]:
+    """Map a doctor ``Availability`` to (glyph, hex-colour) for the global bar.
+
+    Mirrors the Doctor panel's severity rule (``NOT_CONFIGURED`` → neutral grey,
+    never red) so an unowned game doesn't read as broken (issue #122)."""
+    if status is Availability.OK:
+        return (_GLYPH_OK, _COLOR_OK)
+    if status is Availability.NOT_CONFIGURED:
+        return (_GLYPH_NEUTRAL, _COLOR_NEUTRAL)
+    if status is Availability.BROKEN:
+        return (_GLYPH_ERROR, _COLOR_ERROR)
+    return (_GLYPH_NEUTRAL, _COLOR_NEUTRAL)
+
 
 # Checks the GUI promotes to first-class readiness for the GPU games (spec §3).
 _GPU_READINESS = frozenset({"asr_extra", "cuda"})
