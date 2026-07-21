@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from PySide6.QtCore import QObject, QProcess, QTimer, Signal
 
+from deciwaves.gui._env import utf8_environment
+
 _KILL_GRACE_MS = 2000  # after terminate(), force-kill if still alive (Windows consoles
 # ignore the WM_CLOSE that terminate() sends, so the kill is what actually stops them)
 
@@ -35,6 +37,7 @@ class JobRunner(QObject):
             return False
         p = QProcess(self)
         p.setProcessChannelMode(QProcess.MergedChannels)  # stderr -> stdout, one stream
+        p.setProcessEnvironment(utf8_environment())
         if cwd:
             p.setWorkingDirectory(cwd)
         p.readyReadStandardOutput.connect(self._drain)
