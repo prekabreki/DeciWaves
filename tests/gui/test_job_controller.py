@@ -377,23 +377,25 @@ def test_on_dump_finished_emits_log_and_status(qtbot):
 
 # -- export catalog ---------------------------------------------------------
 
-def test_export_catalog_copies_file(qtbot, tmp_path):
+def test_start_catalog_copy_copies_file(qtbot, tmp_path):
     src = os.path.join(str(tmp_path), "out", "catalog.csv")
     os.makedirs(os.path.dirname(src), exist_ok=True)
     with open(src, "w", encoding="utf-8") as f:
         f.write("line_id\na\n")
     ctrl = JobController()
     dest = os.path.join(str(tmp_path), "exported.csv")
-    err = ctrl.export_catalog("ds", str(tmp_path), dest)
-    assert err is None
+    with qtbot.waitSignal(ctrl.log_message, timeout=5000) as blocker:
+        ctrl.start_catalog_copy("ds", str(tmp_path), dest)
+    assert "copied" in blocker.args[0].lower()
     assert os.path.isfile(dest)
     assert open(dest, encoding="utf-8").read() == "line_id\na\n"
 
 
-def test_export_catalog_missing_source_returns_error(qtbot, tmp_path):
+def test_start_catalog_copy_missing_source_reports_error(qtbot, tmp_path):
     ctrl = JobController()
-    err = ctrl.export_catalog("fw", str(tmp_path), os.path.join(str(tmp_path), "x.csv"))
-    assert err == "export: no catalog artifact yet for this game.\n"
+    with qtbot.waitSignal(ctrl.log_message, timeout=5000) as blocker:
+        ctrl.start_catalog_copy("fw", str(tmp_path), os.path.join(str(tmp_path), "x.csv"))
+    assert "no catalog artifact" in blocker.args[0].lower()
 
 
 # -- _report_export_result --------------------------------------------------

@@ -4,9 +4,6 @@ Owns the single pipeline runner + dump runner + GPU gate + dispatch / mutual-exc
 so orchestration can be unit-tested without constructing a MainWindow."""
 from __future__ import annotations
 
-import os
-import shutil
-
 from PySide6.QtCore import QObject, QThreadPool, Signal
 from PySide6.QtWidgets import QMessageBox
 
@@ -15,7 +12,6 @@ from deciwaves.gui.cli_command import default_base
 from deciwaves.gui.export import DumpRunner, _CatalogCopySignals, _CatalogCopyWorker
 from deciwaves.gui.export_model import (
     ExportError,
-    catalog_source_path,
     render_selection_argv,
     write_render_selection_with_tiers,
 )
@@ -150,17 +146,6 @@ class JobController(QObject):
             return "dump: no checked rows to dump.\n"
         self.dump.start(resolver, rows, dest)
         self._sync_running()
-        return None
-
-    def export_catalog(self, game: str, workspace: str, dest: str) -> str | None:
-        src = catalog_source_path(workspace, game)
-        if src is None:
-            return "export: no catalog artifact yet for this game.\n"
-        try:
-            os.makedirs(os.path.dirname(os.path.abspath(dest)), exist_ok=True)
-            shutil.copyfile(src, dest)
-        except OSError as exc:
-            return f"export: could not write catalog: {exc}\n"
         return None
 
     def start_catalog_copy(self, game: str, workspace: str, dest: str) -> None:
