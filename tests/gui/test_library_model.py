@@ -6,11 +6,15 @@ the HZD b_samples length join, all selection commands, and the selection.json ro
 """
 import csv
 import os
+import sys
+import threading
 import wave
 
 from conftest import catalog_row
 
 from deciwaves.gui.library_model import (
+    _DURATION_CACHE,
+    _cached_wav_duration,
     LineRow,
     availability_by_id,
     check_all,
@@ -281,6 +285,58 @@ def test_wav_duration_cache_hit_avoids_reprobe(tmp_path, monkeypatch):
     os.remove(wav_path)
     resolved2 = resolve_wav_durations(rows)
     assert abs(resolved2["f1"] - 2.0) < 0.01  # cached, not re-probed
+
+def test_cached_wav_duration_cache_is_thread_safe(tmp_path):
+    """Multiple concurrent threads calling _cached_wav_duration against a mix of existing
+    and missing WAV files must not raise RuntimeError (dictionary changed size during
+    iteration). The _DURATION_CACHE_LOCK must protect the full read-check-iterate-write
+    sequence so insertions and the missing-file iteration fallback never race."""
+    existing = []
+    for i in range(10):
+        p = os.path.join(str(tmp_path), f"exist_{i}.wav")
+        _write_wav(p, seconds=1.0)
+        existing.append(p)
+
+    missing = [os.path.join(str(tmp_path), f"missing_{i}.wav") for i in range(10)]
+
+    errors: list[Exception] = []
+
+    def insert_worker(path):
+        try:
+            _cached_wav_duration(path)
+        except Exception as e:
+            errors.append(e)
+
+    def iterate_worker(path):
+        try:
+            _cached_wav_duration(path)
+        except Exception as e:
+            errors.append(e)
+
+    orig_switchinterval = sys.getswitchinterval()
+    try:
+        sys.setswitchinterval(0.0001)
+        for _ in range(20):
+            _DURATION_CACHE.clear()
+
+            threads: list[threading.Thread] = []
+            for p in existing[:6]:
+                threads.append(threading.Thread(target=insert_worker, args=(p,)))
+            for p in missing[:6]:
+                threads.append(threading.Thread(target=iterate_worker, args=(p,)))
+
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+
+            if errors:
+                break
+    finally:
+        sys.setswitchinterval(orig_switchinterval)
+
+    assert errors == [], f"concurrent _cached_wav_duration hit errors: {errors}"
+
 
 def test_wav_duration_seconds_reads_header(tmp_path):
     p = os.path.join(str(tmp_path), "x.wav")

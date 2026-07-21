@@ -29,6 +29,7 @@ import csv
 import json
 import os
 import struct
+import threading
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -238,6 +239,7 @@ def _mark_dupes(rows: list[LineRow]) -> list[LineRow]:
 # modification time must have the same header -> reusing it avoids tens of thousands of
 # opens across repeated refreshes. None values are also cached (absent / unparseable files).
 _DURATION_CACHE: dict[tuple[str, float], float | None] = {}
+_DURATION_CACHE_LOCK = threading.Lock()
 
 
 def _cached_wav_duration(path: str | None) -> float | None:
@@ -253,24 +255,18 @@ def _cached_wav_duration(path: str | None) -> float | None:
     except OSError:
         current_mtime = 0.0
 
-    # Exact (path, mtime) hit.
-    key = (resolved, current_mtime)
-    if key in _DURATION_CACHE:
+    with _DURATION_CACHE_LOCK:
+        key = (resolved, current_mtime)
+        if key in _DURATION_CACHE:
+            return _DURATION_CACHE[key]
+        if current_mtime == 0.0:
+            for (p, _), dur in _DURATION_CACHE.items():
+                if p == resolved:
+                    return dur
+        if current_mtime == 0.0 or not os.path.isfile(path):
+            return None
+        _DURATION_CACHE[key] = wav_duration_seconds(path)
         return _DURATION_CACHE[key]
-
-    # Same path but file gone or mtime changed — check for a stale-cached
-    # entry (any mtime for this resolved path). Useful when the file was
-    # probed then deleted before the next refresh re-asks.
-    if current_mtime == 0.0:
-        for (p, _), dur in _DURATION_CACHE.items():
-            if p == resolved:
-                return dur
-
-    if current_mtime == 0.0 or not os.path.isfile(path):
-        return None
-
-    _DURATION_CACHE[key] = wav_duration_seconds(path)
-    return _DURATION_CACHE[key]
 
 
 def resolve_wav_durations(rows: list[LineRow]) -> dict[str, float | None]:
