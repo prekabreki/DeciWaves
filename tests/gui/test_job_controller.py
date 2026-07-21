@@ -431,3 +431,22 @@ def test_runner_finished_cleans_state_and_emits_chip(qtbot):
     assert chips == ["idle"]
     assert ctrl._job_game is None
     assert ctrl._job_kind is None
+
+
+# -- export MP3 empty-selection guard (M7) ----------------------------------
+
+def test_export_mp3_empty_selection_returns_message(qtbot, tmp_path):
+    ctrl = JobController()
+    calls = _capture_jobs(ctrl)
+    err = ctrl.start_export_mp3("ds", str(tmp_path), 128, [], checked_count=0)
+    assert err == "export: nothing selected — check some rows first.\n"
+    assert not calls
+
+
+def test_export_mp3_proceeds_with_checked_rows(qtbot, tmp_path):
+    ctrl = JobController()
+    calls = _capture_jobs(ctrl)
+    err = ctrl.start_export_mp3("ds", str(tmp_path), 128, [], checked_count=1)
+    assert err != "export: nothing selected — check some rows first.\n"
+    assert err is not None
+    assert not calls

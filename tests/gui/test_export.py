@@ -12,7 +12,11 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from deciwaves.gui.export import DumpRunner, ExportPanel, _DumpSignals, _DumpWorker  # noqa: E402
+from deciwaves.gui.export import (  # noqa: E402
+    DumpRunner, ExportPanel,
+    _CatalogCopySignals, _CatalogCopyWorker,
+    _DumpSignals, _DumpWorker,
+)
 from deciwaves.gui.preview_model import PreviewError  # noqa: E402
 
 
@@ -324,6 +328,8 @@ def test_shell_export_finish_reports_success_vs_failure(qtbot, tmp_path):
 
 
 def test_shell_catalog_copy(qtbot, tmp_path):
+    from PySide6.QtCore import QThreadPool
+    from PySide6.QtWidgets import QApplication
     ws = str(tmp_path)
     src = os.path.join(ws, "out", "catalog.csv")
     os.makedirs(os.path.dirname(src), exist_ok=True)
@@ -332,13 +338,19 @@ def test_shell_catalog_copy(qtbot, tmp_path):
     w = _mainwindow(qtbot, tmp_path, "ds")
     dest = os.path.join(ws, "exported-catalog.csv")
     w.library.export.export_catalog_requested.emit(dest)
+    QThreadPool.globalInstance().waitForDone()
+    QApplication.processEvents()
     assert os.path.isfile(dest)
     assert open(dest, encoding="utf-8").read() == "line_id\na\n"
 
 
 def test_shell_catalog_missing_source_messages(qtbot, tmp_path):
+    from PySide6.QtCore import QThreadPool
+    from PySide6.QtWidgets import QApplication
     w = _mainwindow(qtbot, tmp_path, "fw")
     w.library.export.export_catalog_requested.emit(os.path.join(str(tmp_path), "x.csv"))
+    QThreadPool.globalInstance().waitForDone()
+    QApplication.processEvents()
     assert "catalog" in w.pipeline.log_text().lower()
 
 
@@ -396,3 +408,40 @@ def test_shell_dump_disables_then_reenables_pipeline_and_strip(qtbot, tmp_path):
     w._on_dump_finished(2, 0)
     assert w.pipeline.controls._scan_btn.isEnabled() is True
     assert w.pipeline.strip.rerun_enabled() is True
+
+
+# --- async Catalog-copy worker ---------------------------------------------
+
+def test_catalog_copy_worker_copies_file_and_signals(qtbot, tmp_path):
+    ws = str(tmp_path)
+    src = os.path.join(ws, "out", "catalog.csv")
+    os.makedirs(os.path.dirname(src), exist_ok=True)
+    with open(src, "w", encoding="utf-8") as f:
+        f.write("line_id\na\n")
+
+    signals = _CatalogCopySignals()
+    results = []
+    signals.finished.connect(lambda msg: results.append(msg))
+
+    dest = os.path.join(ws, "exported.csv")
+    worker = _CatalogCopyWorker("ds", ws, dest, signals)
+    worker.run()
+
+    assert len(results) == 1
+    assert "catalog copied" in results[0]
+    assert os.path.isfile(dest)
+    assert open(dest, encoding="utf-8").read() == "line_id\na\n"
+
+
+def test_catalog_copy_worker_missing_source_signals_error(qtbot, tmp_path):
+    ws = str(tmp_path)
+    signals = _CatalogCopySignals()
+    results = []
+    signals.finished.connect(lambda msg: results.append(msg))
+
+    dest = os.path.join(ws, "x.csv")
+    worker = _CatalogCopyWorker("fw", ws, dest, signals)
+    worker.run()
+
+    assert len(results) == 1
+    assert "no catalog artifact" in results[0]
