@@ -13,6 +13,7 @@ STAGES = {
         "cutscenes": ("deciwaves.games.ds.cutscene_audio",  "Resolve cutscene voice tracks"),
         "trim":      ("deciwaves.games.ds.cutscene_trim",   "[GPU] Rebuild the speech-trim manifest"),
         "order":     ("deciwaves.games.ds.story_order",     "Build the story-ordered playlist"),
+        "dump":      ("deciwaves.games.ds.dump",             "Decode selected line ids to WAV"),
         "render":    ("deciwaves.engine.render",             "Render MP3 reels + tracklists"),
     },
     "hzd": {
@@ -20,6 +21,7 @@ STAGES = {
         "clip-index":   ("deciwaves.games.hzd.clip_index",   "Fingerprint audio clips"),
         "wem-metadata": ("deciwaves.games.hzd.wem_metadata", "Extract wem metadata + coverage"),
         "bind":         ("deciwaves.games.hzd.asr_bind",     "[GPU] Bind clips to lines"),
+        "dump":         ("deciwaves.games.hzd.dump",          "Decode selected line ids to WAV"),
         "render":       ("deciwaves.games.hzd.render",       "Render MP3 reels + tracklists"),
     },
     "fw": {
@@ -31,6 +33,7 @@ STAGES = {
         "weave":         ("deciwaves.games.fw.weave",          "Woven story manifest"),
         "dlc":           ("deciwaves.games.fw.dlc",            "Burning Shores manifest"),
         "assemble":      ("deciwaves.games.fw.assemble",       "Concatenate manifests"),
+        "dump":          ("deciwaves.games.fw.dump",            "Copy selected line ids to WAV"),
         "render":        ("deciwaves.games.fw.render",         "Render MP3 reels + tracklists"),
     },
 }
