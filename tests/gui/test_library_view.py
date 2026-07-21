@@ -257,6 +257,27 @@ def test_preview_column_availability_ds_and_fw_available(qtbot, tmp_path):
     assert v._model.data(idx, Qt.ToolTipRole) == "Play preview"
 
 
+def test_empty_state_overlay(qtbot, tmp_path):
+    """No catalog yet → overlay says 'No catalog yet'."""
+    v = LibraryView()
+    qtbot.addWidget(v)
+    assert v._table.overlay_text == "No catalog yet — run Scan on the Pipeline tab"
+
+
+def test_no_results_overlay_disappears_with_rows(qtbot, tmp_path):
+    """Overlay is None when rows are visible, 'No lines match' when filtered out."""
+    ws = str(tmp_path)
+    _write_ds_catalog(ws, [_cat_row(line_id="a", subtitle_en="hello")])
+    v = LibraryView()
+    qtbot.addWidget(v)
+    v.refresh("ds", ws)
+    assert v._table.overlay_text is None
+
+    v._search.setText("zzz_nonexistent")
+    assert v.visible_count() == 0
+    assert v._table.overlay_text == "No lines match — [Clear filters]"
+
+
 def test_filter_state_resets_on_game_change_but_persists_same_game(qtbot, tmp_path):
     """Switching games drops the prior game's stray search/sort/toggles (spec §6 -- the list
     is per-game); a same-game refresh (job-finished) preserves all filter/sort state."""
