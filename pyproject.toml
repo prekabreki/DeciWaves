@@ -54,6 +54,9 @@ testpaths = ["tests"]
 # See .memories/worktree-editable-install-contamination.md.
 addopts = "--timeout=60 --timeout-method=thread"
 pythonpath = ["src"]
+markers = [
+    "allow_dialogs: permit modal dialogs (QMessageBox, QDialog.exec/exec_) in this test without failing; patched methods return QMessageBox.Yes",
+]
 
 [tool.ruff]
 line-length = 120
