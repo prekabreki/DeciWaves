@@ -7,7 +7,7 @@ here ▶ only reflects availability and emits an (as-yet unconnected) ``preview_
 from __future__ import annotations
 
 from PySide6.QtCore import QAbstractTableModel, QEvent, QModelIndex, Qt, QTimer, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -145,6 +145,49 @@ class _TableModel(QAbstractTableModel):
         return False
 
 
+class _LibraryTableView(QTableView):
+    """QTableView subclass that paints a viewport overlay when no rows are visible.
+
+    Two distinct messages:
+    * ``total == 0`` → "No catalog yet — run Scan on the Pipeline tab"
+    * ``total > 0`` and ``visible == 0`` → "No lines match — [Clear filters]"
+
+    The overlay disappears once rows are present/visible.
+    """
+
+    def __init__(self, view: LibraryView):
+        super().__init__()
+        self._view = view
+
+    @property
+    def overlay_text(self) -> str | None:
+        if not self._view._rows:
+            return "No catalog yet — run Scan on the Pipeline tab"
+        if not self._view._visible:
+            return "No lines match — [Clear filters]"
+        return None
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        text = self.overlay_text
+        if text is None:
+            return
+        color = QColor(0x88, 0x88, 0x88) if not self._view._rows else QColor(0xCC, 0x88, 0x00)
+        p = QPainter(self.viewport())
+        p.setPen(color)
+        font = p.font()
+        font.setPointSize(font.pointSize() + 4)
+        p.setFont(font)
+        p.drawText(self.viewport().rect(), Qt.AlignCenter, text)
+        p.end()
+
+    def mouseReleaseEvent(self, event):
+        if self._view.total_count() > 0 and self._view.visible_count() == 0:
+            self._view._search.clear()
+            return
+        super().mouseReleaseEvent(event)
+
+
 class LibraryView(QWidget):
     """The line list with search/speaker/dupe/no-subtitle filters, undoable selection
     commands, a persisted checkbox column, and an availability-aware ▶ preview column."""
@@ -212,7 +255,7 @@ class LibraryView(QWidget):
 
         # --- table ---
         self._model = _TableModel(self)
-        self._table = QTableView()
+        self._table = _LibraryTableView(self)
         self._table.setModel(self._model)
         self._table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self._table.setEditTriggers(QAbstractItemView.NoEditTriggers)
