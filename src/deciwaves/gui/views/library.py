@@ -264,8 +264,8 @@ class LibraryView(QWidget):
         self._search.setPlaceholderText("Search subtitle / id")
         self._speaker = QComboBox()
         self._speaker.addItem("all")
-        self._hide_dupes = QCheckBox("Hide duplicates (dropped at render by the pipeline)")
-        self._hide_nosub = QCheckBox("Hide no-subtitle (dropped at render by the pipeline)")
+        self._hide_dupes = QCheckBox("Hide duplicates")
+        self._hide_nosub = QCheckBox("Hide no-subtitle")
 
         filters = QHBoxLayout()
         filters.addWidget(QLabel("Search:"))
@@ -305,9 +305,15 @@ class LibraryView(QWidget):
         self._table.setSortingEnabled(False)  # we sort the model ourselves (None-last)
         header = self._table.horizontalHeader()
         header.setSectionsClickable(True)
+        header.setStretchLastSection(False)
         header.setSectionResizeMode(_TableModel.COL_SUB, QHeaderView.Stretch)
+        header.setSectionResizeMode(_TableModel.COL_PREVIEW, QHeaderView.Fixed)
         header.sectionClicked.connect(self._on_header_clicked)
         self._table.setColumnWidth(_TableModel.COL_PREVIEW, 36)
+        self._table.setColumnWidth(_TableModel.COL_CHECK, 30)
+        self._table.setColumnWidth(_TableModel.COL_ID, 140)
+        self._table.setColumnWidth(_TableModel.COL_LEN, 65)
+        self._table.setColumnWidth(_TableModel.COL_SPEAKER, 110)
 
         self._status = QLabel("")
 
