@@ -56,3 +56,14 @@ def test_failed_to_start_finishes_instead_of_hanging(qtbot):
     (code,) = blocker.args
     assert code == -1
     assert r.is_running is False
+
+
+def test_sets_utf8_unbuffered_environment(qtbot):
+    r = JobRunner()
+    assert r.start([sys.executable, "-c", "pass"]) is True
+    env = r._proc.processEnvironment()
+    assert env.value("PYTHONUTF8") == "1"
+    assert env.value("PYTHONIOENCODING") == "utf-8"
+    assert env.value("PYTHONUNBUFFERED") == "1"
+    with qtbot.waitSignal(r.finished, timeout=5000):
+        pass
