@@ -60,9 +60,17 @@ def test_scan_is_live_step_once_setup_and_workspace_done(tmp_path):
     assert "catalog" in j.next_hint.lower()
 
 
-def test_export_done_detects_mp3_in_reels(tmp_path):
-    reels = tmp_path / "out" / "ds" / "reels"
-    reels.mkdir(parents=True)
-    (reels / "reel_01.mp3").write_bytes(b"x")
+def test_export_done_detects_mp3_in_game_output_dir(tmp_path):
+    ds_audio = tmp_path / "out" / "audio"
+    ds_audio.mkdir(parents=True)
+    (ds_audio / "reel_01.mp3").write_bytes(b"x")
     assert export_done(str(tmp_path), "ds") is True
     assert export_done(str(tmp_path), "hzd") is False
+
+
+def test_export_done_detects_mp3_for_hzd(tmp_path):
+    hzd_audio = tmp_path / "out" / "hzd" / "audio"
+    hzd_audio.mkdir(parents=True)
+    (hzd_audio / "reel_01.mp3").write_bytes(b"x")
+    assert export_done(str(tmp_path), "hzd") is True
+    assert export_done(str(tmp_path), "ds") is False

@@ -141,6 +141,12 @@ class PipelineControls(QWidget):
         self._bind_btn.setEnabled(not running)
         self._cancel_btn.setVisible(running)
 
+    def focus_scan(self) -> None:
+        self._scan_btn.setFocus()
+
+    def focus_bind(self) -> None:
+        self._bind_btn.setFocus()
+
 
 class CoverageBar(QWidget):
     """"X / Y bound · Z%", cap-aware, with a one-click "Transcribe all" escalation when a

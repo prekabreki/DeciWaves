@@ -14,12 +14,14 @@ from PySide6.QtWidgets import QMainWindow, QStackedWidget, QTabBar, QVBoxLayout,
 
 from deciwaves.cli import config, doctor
 from deciwaves.gui.global_bar import GlobalBar
+from deciwaves.gui.guide_model import ActionTarget, build_journey
 from deciwaves.gui.job_controller import JobController
 from deciwaves.gui.pipeline_model import _marker_path, stage_states
 from deciwaves.gui.preview import PreviewPlayer
 from deciwaves.gui.progress_model import probe_progress
 from deciwaves.gui.preview_model import PreviewResolver
 from deciwaves.gui.views import GamePanel, LibraryView, PipelineView
+from deciwaves.gui.views.guide_rail import GuideRail
 
 # game key -> its doctor install/config check (reused from the CLI, issue #67 / spec §3).
 _CHECKS = {
@@ -61,10 +63,14 @@ class MainWindow(QMainWindow):
         self._tabs.addTab("Library")
         self._tabs.currentChanged.connect(self._on_tab_changed)
 
+        self.guide = GuideRail()
+        self.guide.action_requested.connect(self._on_guide_action)
+
         central = QWidget()
         layout = QVBoxLayout(central)
         layout.addWidget(self.bar)
         layout.addWidget(self.game_panel)
+        layout.addWidget(self.guide)
         layout.addWidget(self._tabs)
         layout.addWidget(self.views, 1)
         self.setCentralWidget(central)
@@ -133,6 +139,9 @@ class MainWindow(QMainWindow):
         self.bar.game_changed.connect(lambda _g: self._refresh_panels())
         # reload the Library's line list for the selected game (#70, spec §6)
         self.bar.game_changed.connect(lambda _g: self._refresh_library())
+        self.bar.game_changed.connect(lambda _g: self._refresh_guide())
+        self.bar.workspace_changed.connect(lambda _ws: self._refresh_guide())
+        self.pipeline.setup_doctor.doctor.refreshed.connect(self._refresh_guide)
 
         self.bar.workspace_changed.connect(lambda _ws: self._refresh_status())
         self.bar.workspace_changed.connect(lambda _ws: self._refresh_panels())
@@ -163,6 +172,7 @@ class MainWindow(QMainWindow):
                 self._refresh_panels()
                 self._refresh_library()
                 self._refresh_game_panel()
+                self._refresh_guide()
         else:
             cfg = config.load()
             default = _first_owned_game(cfg)
@@ -171,6 +181,7 @@ class MainWindow(QMainWindow):
             self._refresh_panels()
             self._refresh_library()
             self._refresh_game_panel()
+            self._refresh_guide()
 
         saved_header = self._settings.value("library/header_state")
         if saved_header is not None:
@@ -212,6 +223,35 @@ class MainWindow(QMainWindow):
         self.game_panel.set_context(
             self._workspace(), config.load(),
             self.pipeline.setup_doctor.doctor.last_payload())
+
+    def _refresh_guide(self) -> None:
+        """Recompute the onboarding journey for the current game/workspace from the
+        install status + last doctor payload, and hand it to the rail (#112)."""
+        game = self.bar.current_game()
+        cfg = config.load()
+        status = _CHECKS[game](cfg).status
+        self.guide.set_journey(build_journey(
+            doctor_payload=self.pipeline.setup_doctor.doctor.last_payload(),
+            game=game,
+            game_label=self.bar.current_game_label(),
+            game_status=status,
+            workspace=self.bar.workspace()))
+
+    def _on_guide_action(self, target) -> None:
+        """Navigate to the live step's control -- tab-switch + focus only, never a
+        job launch (#112). The user still clicks the real Scan/Bind/etc. button."""
+        if target is ActionTarget.CURATE:
+            self._tabs.setCurrentIndex(1)  # Library
+            return
+        self._tabs.setCurrentIndex(0)      # Pipeline for the rest
+        if target is ActionTarget.SETUP:
+            self.pipeline.setup_doctor.setup.focus_run()
+        elif target is ActionTarget.WORKSPACE:
+            self.bar.focus_workspace()
+        elif target is ActionTarget.SCAN:
+            self.pipeline.controls.focus_scan()
+        elif target is ActionTarget.BIND:
+            self.pipeline.controls.focus_bind()
 
     def _on_tab_changed(self, index: int) -> None:
         self.views.setCurrentIndex(index)
@@ -313,6 +353,7 @@ class MainWindow(QMainWindow):
         self._refresh_panels()
         self._refresh_library()
         self._refresh_game_panel()
+        self._refresh_guide()
 
     # -- delegate for tests that call _on_job_finished directly ---------------
 
