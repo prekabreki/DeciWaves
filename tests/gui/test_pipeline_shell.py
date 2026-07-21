@@ -87,7 +87,7 @@ def test_escalate_uncaps_without_gpu_dialog_when_gpu_present(qtbot, tmp_path, mo
     w.bar.set_workspace(str(tmp_path))
     w.bar.select_game("hzd")
     w.pipeline.setup_doctor.doctor.render_payload(_CUDA_OK)
-    monkeypatch.setattr("deciwaves.gui.shell.MainWindow._confirm_escalate",
+    monkeypatch.setattr("deciwaves.gui.job_controller.JobController._confirm_escalate",
                         lambda self: True)   # accept destructive confirm
     calls = _capture_jobs(w)
     w.pipeline.coverage.escalate_requested.emit()
@@ -100,7 +100,7 @@ def test_escalate_rejected_does_not_start_job(qtbot, tmp_path, monkeypatch):
     qtbot.addWidget(w)
     w.bar.set_workspace(str(tmp_path))
     w.bar.select_game("hzd")
-    monkeypatch.setattr("deciwaves.gui.shell.MainWindow._confirm_escalate",
+    monkeypatch.setattr("deciwaves.gui.job_controller.JobController._confirm_escalate",
                         lambda self: False)
     calls = _capture_jobs(w)
     w.pipeline.coverage.escalate_requested.emit()
@@ -116,7 +116,7 @@ def test_rerun_invalidates_completed_rejected_does_nothing(qtbot, tmp_path, monk
     os.makedirs(hzd_out, exist_ok=True)
     for stage in ["bind", "render"]:
         open(os.path.join(hzd_out, f".done-{stage}"), "w").close()
-    monkeypatch.setattr("deciwaves.gui.shell.MainWindow._confirm_rerun",
+    monkeypatch.setattr("deciwaves.gui.job_controller.JobController._confirm_rerun",
                         lambda self, stage: False)
     calls = _capture_jobs(w)
     w.pipeline.strip.request_rerun("catalog")
@@ -131,7 +131,7 @@ def test_rerun_invalidates_completed_accepted_starts_job(qtbot, tmp_path, monkey
     ds_out = os.path.join(str(tmp_path), "out", "ds")
     os.makedirs(ds_out, exist_ok=True)
     open(os.path.join(ds_out, ".done-render"), "w").close()
-    monkeypatch.setattr("deciwaves.gui.shell.MainWindow._confirm_rerun",
+    monkeypatch.setattr("deciwaves.gui.job_controller.JobController._confirm_rerun",
                         lambda self, stage: True)
     calls = _capture_jobs(w)
     w.pipeline.strip.request_rerun("catalog")
