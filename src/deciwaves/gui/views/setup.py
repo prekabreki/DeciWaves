@@ -292,6 +292,9 @@ class SetupScreen(QWidget):
         self._pipeline_busy = running
         self._update_buttons()
 
+    def focus_run(self) -> None:
+        self._run_btn.setFocus()
+
     @property
     def is_busy(self) -> bool:
         return self._busy

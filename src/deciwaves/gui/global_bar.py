@@ -66,6 +66,13 @@ class GlobalBar(QWidget):
     def set_workspace(self, path: str) -> None:
         self._workspace.setText(path)
 
+    def current_game_label(self) -> str:
+        return self._combo.currentText()
+
+    def focus_workspace(self) -> None:
+        self._workspace.setFocus()
+        self._workspace.selectAll()
+
     def _on_workspace_edited(self) -> None:
         if not getattr(self, '_workspace_accept', False):
             self.workspace_changed.emit(self._workspace.text())

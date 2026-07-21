@@ -63,23 +63,31 @@ def tools_ready(payload: dict | None) -> bool:
     return all(t in ok for t in REQUIRED_TOOLS)
 
 
+_EXPORT_DIRS = {
+    "ds": "out/audio",
+    "hzd": "out/hzd/audio",
+    "fw": "out/fw/reels",
+}
+
+
 def _game_out_root(workspace: str, game: str) -> str:
-    return os.path.join(workspace, "out", game)
+    return os.path.join(workspace, _EXPORT_DIRS.get(game, f"out/{game}"))
 
 
 def export_done(workspace: str, game: str) -> bool:
-    """True iff a rendered ``.mp3`` reel exists in the game's out root or its
-    ``reels/`` subdir. A shallow scandir (no deep walk); if reels land elsewhere
-    this under-reports, which only leaves the rail nudging toward Library -- a
-    safe, non-blocking failure mode."""
+    """True iff a rendered ``.mp3`` reel exists in the game's output directory.
+    Uses the same per-game mapping as the export job's own success message
+    (``job_controller.py``: ds→out/audio, hzd→out/hzd/audio, fw→out/fw/reels).
+    A shallow scandir (no deep walk); if reels land elsewhere this under-reports,
+    which only leaves the rail nudging toward Library -- a safe, non-blocking
+    failure mode."""
     root = _game_out_root(workspace, game)
-    for d in (root, os.path.join(root, "reels")):
-        try:
-            with os.scandir(d) as it:
-                if any(e.is_file() and e.name.lower().endswith(".mp3") for e in it):
-                    return True
-        except OSError:
-            continue
+    try:
+        with os.scandir(root) as it:
+            if any(e.is_file() and e.name.lower().endswith(".mp3") for e in it):
+                return True
+    except OSError:
+        pass
     return False
 
 
