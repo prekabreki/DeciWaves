@@ -21,6 +21,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
+from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QDialog, QMessageBox
 
 # ── re-export from tests/conftest.py ────────────────────────────────────────
@@ -55,6 +56,33 @@ def _make_allow(name: str):
         return QMessageBox.Yes
     _handler.__name__ = str(name)
     return _handler
+
+
+@pytest.fixture(autouse=True, scope="function")
+def _isolate_qsettings(monkeypatch, tmp_path):
+    """Redirect default-constructed QSettings to file-backed ini under tmp_path.
+
+    PySide6/Qt6 no longer honours ``QSettings.setDefaultFormat`` and
+    ``QSettings.setPath`` as static process-global hints (those methods were
+    effectively removed in Qt 6).  Instead this fixture monkeypatches
+    ``QSettings.__init__`` so that any two- or three-argument call with two
+    string arguments (i.e. ``QSettings(org, app)`` or
+    ``QSettings(org, app, parent)``) is transparently rerouted to a
+    file-backed ``.ini`` under the per-test ``tmp_path``.
+
+    The patch is automatically undone by ``monkeypatch`` in teardown, so
+    non-GUI tests and later processes are unaffected.
+    """
+    _original_init = QSettings.__init__
+
+    def _redirect_init(self, *args, **kwargs):
+        if len(args) in (2, 3) and isinstance(args[0], str) and isinstance(args[1], str):
+            ini = str(tmp_path / f"{args[0]}_{args[1]}.ini")
+            _original_init(self, ini, QSettings.IniFormat, *args[2:], **kwargs)
+        else:
+            _original_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(QSettings, "__init__", _redirect_init)
 
 
 @pytest.fixture(autouse=True, scope="function")
