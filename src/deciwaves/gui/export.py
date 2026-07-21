@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from deciwaves.gui.export_model import catalog_source_path
 from deciwaves.gui.preview_model import PreviewError
 
 _BITRATES = ("96", "128", "192")
@@ -305,3 +306,39 @@ class DumpRunner(QObject):
         self._running = False
         self._worker = None
         self.finished.emit(ok, failed)
+
+
+# --- async Catalog-copy worker (off the UI thread) -------------------------
+
+class _CatalogCopySignals(QObject):
+    """Signal holder for the catalog-copy worker. Mirrors :class:`_DumpSignals`."""
+    finished = Signal(str)
+
+
+class _CatalogCopyWorker(QRunnable):
+    """Copy the catalog CSV artifact to *dest* on a pool thread and emit the result
+    message via :class:`_CatalogCopySignals.finished`. No QWidget access in ``run()`` —
+    the result is marshalled back to the main thread by Qt's signal queuing."""
+
+    def __init__(self, game: str, workspace: str, dest: str, signals: _CatalogCopySignals):
+        super().__init__()
+        self._game = game
+        self._workspace = workspace
+        self._dest = dest
+        self._signals = signals
+
+    @Slot()
+    def run(self) -> None:
+        src = catalog_source_path(self._workspace, self._game)
+        if src is None:
+            self._signals.finished.emit(
+                "export: no catalog artifact yet for this game.\n")
+            return
+        try:
+            os.makedirs(os.path.dirname(os.path.abspath(self._dest)), exist_ok=True)
+            shutil.copyfile(src, self._dest)
+            self._signals.finished.emit(
+                f"export: catalog copied to {self._dest}\n")
+        except OSError as exc:
+            self._signals.finished.emit(
+                f"export: could not write catalog: {exc}\n")
