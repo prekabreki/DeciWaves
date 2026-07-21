@@ -36,6 +36,17 @@ Each worktree is its own rootdir, so each imports its own source regardless of
 what the shared `.pth` points at. Proven: with the prepend, `issue-54`'s pytest
 imports `issue-54/src` even while the `.pth` still names `issue-91`.
 
+**Corollary outside pytest:** the `pythonpath=["src"]` fix only protects pytest
+collection — any *other* entry point (`python -m deciwaves.gui`, a plain script)
+still resolves `import deciwaves` via the shared `.pth`, unprotected. Observed
+2026-07-21: the main dev `.venv`'s `.pth` was left pointing at
+`.foreman-worktrees/issue-91` (the last worktree to `pip install -e .` before it
+was cleaned up), so `launch_gui.bat` failed outright with
+`ModuleNotFoundError: No module named 'deciwaves'` — not a wrong-source false
+green, but a hard crash, on the interactive dev machine, unrelated to any
+foreman run in progress. Fix is the same either way: re-run
+`pip install -e ".[gui]"` from the repo root to repoint the `.pth` at `src/`.
+
 **Corollary for review:** a foreman PR produced before this fix landed cannot be
 trusted on its self-reported green — re-run its tests in a clean single-worktree
 checkout. And any executor left `in-progress` with a branch but **zero commits
