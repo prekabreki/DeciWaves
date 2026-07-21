@@ -10,6 +10,7 @@ from deciwaves.gui.doctor_model import (
     load_doctor_payload,
     overall_ok,
     parse_doctor_payload,
+    pill_for,
     severity,
 )
 
@@ -108,3 +109,27 @@ def test_load_rejects_unparseable_and_non_object_json():
     assert load_doctor_payload("totally not json") is None
     assert load_doctor_payload("[1, 2, 3]") is None   # valid JSON, not an object
     assert load_doctor_payload("") is None
+
+
+# --- pill_for: per-game optional/needed pill grading (#112) ------------------
+
+
+def test_pill_for_cuda_is_optional_on_ds():
+    # CUDA absent on DS -> reads as Optional, never a failure (spec §3).
+    item = _item("cuda", "unavailable")
+    assert pill_for(item, "ds") == ("Optional", "optional")
+
+
+def test_pill_for_cuda_absent_on_hzd_is_not_optional():
+    # On a GPU game CUDA absence is a real readiness gap, not an "Optional" pill.
+    item = _item("cuda", "unavailable")
+    assert pill_for(item, "hzd") != ("Optional", "optional")
+
+
+def test_pill_for_broken_required_row_is_needed():
+    item = _item("vgmstream", "broken")
+    assert pill_for(item, "ds") == ("Needed", "needed")
+
+
+def test_pill_for_plain_ok_tool_has_no_pill():
+    assert pill_for(_item("vgmstream", "ok"), "ds") is None

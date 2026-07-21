@@ -129,3 +129,17 @@ def severity(item: DoctorItem, game: str) -> str:
     if item.name in _GPU_READINESS and game in _GPU_GAMES:
         return SEV_WARN
     return SEV_NEUTRAL
+
+
+def pill_for(item: DoctorItem, game: str) -> tuple[str, str] | None:
+    """A ``(label, tone)`` badge for a Doctor row, or None for a plain row.
+
+    Makes the per-game optional-vs-required framing unmissable (#112): the GPU
+    extras (CUDA / ASR) read as an explicit "Optional" pill for a non-GPU game
+    like DS instead of a bare grey dash, and a genuinely broken required tool
+    reads as "Needed"."""
+    if item.name in _GPU_READINESS and game not in _GPU_GAMES:
+        return ("Optional", "optional")
+    if severity(item, game) == SEV_ERROR:
+        return ("Needed", "needed")
+    return None

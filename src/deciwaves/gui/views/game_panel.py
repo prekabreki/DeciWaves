@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 )
 
 from deciwaves.gui.theme import ERROR, NEUTRAL, OK, WARN
+from deciwaves.gui.widgets import HelpIcon
 from deciwaves.gui.cuda_probe import cuda_status
 from deciwaves.gui.game_panel_model import (
     FW_TIERS_DEFAULT,
@@ -111,7 +112,11 @@ class GamePanel(QWidget):
         self._reorder_btn.setToolTip("Re-order episodes using the selected transcript")
         transcript_box = self._wrap(self._row(
             QLabel("Transcript:"), self._transcript_edit,
-            self._transcript_browse, self._reorder_btn))
+            self._transcript_browse, self._reorder_btn,
+            HelpIcon(
+                "BYO (Bring Your Own): an optional narrative transcript you supply "
+                "to improve story ordering. Not required — the app never ships "
+                "game text.")))
 
         # --- FW required types.json picker ---
         self._types_edit = QLineEdit()

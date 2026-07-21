@@ -33,8 +33,10 @@ from deciwaves.gui.doctor_model import (
     DoctorItem,
     load_doctor_payload,
     parse_doctor_payload,
+    pill_for,
     severity,
 )
+from deciwaves.gui.widgets import HelpIcon, Pill
 from deciwaves.gui.setup_model import (
     build_setup_argv,
     parse_setup_summary,
@@ -157,6 +159,9 @@ class DoctorPanel(QWidget):
         text_label.setWordWrap(True)
         text_label.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
         h.addWidget(text_label, 1)
+        pill = pill_for(item, self._game)
+        if pill is not None:
+            h.addWidget(Pill(*pill))
         return row
 
     def _on_started(self) -> None:
@@ -227,6 +232,11 @@ class SetupScreen(QWidget):
         layout = QVBoxLayout(self)
         header = QHBoxLayout()
         header.addWidget(QLabel("<b>Setup</b>"))
+        header.addWidget(HelpIcon(
+            "BYO (Bring Your Own): you supply your own legally-owned game files. "
+            "Setup only downloads the open-source audio decoders (vgmstream, "
+            "VGAudio, ffmpeg) — about 200 MB on first run. This app never ships "
+            "game content."))
         header.addStretch(1)
         for btn in (self._run_btn, self._redownload_btn, self._recheck_btn):
             header.addWidget(btn)
