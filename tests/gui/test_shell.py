@@ -104,3 +104,11 @@ def test_qsettings_round_trip_saves_and_restores_state(tmp_path, qtbot):
 
     qtbot.wait(50)
     assert w2.library._table.horizontalHeader().saveState() == w1_header
+
+
+def test_minimum_width_fits_1366(qtbot):
+    """The library table must not force the window beyond 1366px (#126 follow-up, #173).
+    Column widths are set explicitly so minimumSizeHint is independent of data content."""
+    w = MainWindow()
+    qtbot.addWidget(w)
+    assert w.minimumSizeHint().width() <= 1366
