@@ -45,3 +45,70 @@ def test_setup_output_streams_into_the_log_console(qtbot):
     qtbot.addWidget(w)
     w.pipeline.setup_doctor.setup._runner.output.emit("setup-live\n")
     assert "setup-live" in w.pipeline.log_text()
+
+
+# --- M6: mutual exclusion both directions -----------------------------------
+
+def test_setup_busy_disables_pipeline_controls(qtbot):
+    w = MainWindow()
+    qtbot.addWidget(w)
+    setup = w.pipeline.setup_doctor.setup
+    setup._busy = True
+    setup.busy_changed.emit(True)
+    assert w.pipeline.controls._scan_btn.isEnabled() is False
+    assert w.pipeline.controls._bind_btn.isEnabled() is False
+
+
+def test_setup_idle_re_enables_pipeline_controls(qtbot):
+    w = MainWindow()
+    qtbot.addWidget(w)
+    setup = w.pipeline.setup_doctor.setup
+    setup._busy = True
+    setup.busy_changed.emit(True)
+    assert w.pipeline.controls._scan_btn.isEnabled() is False
+    setup._busy = False
+    setup.busy_changed.emit(False)
+    assert w.pipeline.controls._scan_btn.isEnabled() is True
+    assert w.pipeline.controls._bind_btn.isEnabled() is True
+
+
+def test_pipeline_busy_disables_setup_buttons(qtbot, monkeypatch):
+    w = MainWindow()
+    qtbot.addWidget(w)
+    setup = w.pipeline.setup_doctor.setup
+    monkeypatch.setattr(type(w.runner), "is_running", property(lambda _self: True))
+    w._sync_running()
+    assert setup._run_btn.isEnabled() is False
+    assert setup._redownload_btn.isEnabled() is False
+    assert setup._recheck_btn.isEnabled() is False
+
+
+def test_pipeline_idle_re_enables_setup_buttons(qtbot, monkeypatch):
+    w = MainWindow()
+    qtbot.addWidget(w)
+    setup = w.pipeline.setup_doctor.setup
+    monkeypatch.setattr(type(w.runner), "is_running", property(lambda _self: True))
+    w._sync_running()
+    assert setup._run_btn.isEnabled() is False
+    monkeypatch.setattr(type(w.runner), "is_running", property(lambda _self: False))
+    w._sync_running()
+    assert setup._run_btn.isEnabled() is True
+    assert setup._redownload_btn.isEnabled() is True
+    assert setup._recheck_btn.isEnabled() is True
+
+
+def test_busy_setup_blocks_pipeline_and_strip(qtbot):
+    w = MainWindow()
+    qtbot.addWidget(w)
+    setup = w.pipeline.setup_doctor.setup
+    setup._busy = True
+    setup.busy_changed.emit(True)
+    assert w.pipeline.strip.rerun_enabled() is False
+
+
+def test_busy_pipeline_blocks_export(qtbot, monkeypatch):
+    w = MainWindow()
+    qtbot.addWidget(w)
+    monkeypatch.setattr(type(w.runner), "is_running", property(lambda _self: True))
+    w._sync_running()
+    assert w.library.export._mp3_btn.isEnabled() is False

@@ -254,3 +254,112 @@ def test_labels_are_selectable(qtbot):
     assert s._warnings_label.textInteractionFlags() & Qt.TextSelectableByMouse
     for tool in ("vgmstream", "VGAudio", "ffmpeg"):
         assert s._tool_status[tool].textInteractionFlags() & Qt.TextSelectableByMouse
+
+
+# --- M3: error row on non-zero exit, buttons disable/re-enable --------------
+
+def test_setup_error_row_shows_on_nonzero_code_and_no_rows(qtbot):
+    s = SetupScreen(base=[sys.executable, "-c", "pass"])
+    qtbot.addWidget(s)
+    s._on_finished(1, "totally garbled output with no summary rows")
+    assert "setup exited with code 1" in s._paths_label.text()
+
+
+def test_setup_buttons_disabled_while_busy(qtbot):
+    s = SetupScreen(base=[sys.executable, "-c", SLOW])
+    qtbot.addWidget(s)
+    assert s.run() is True
+    assert s.is_busy is True
+    assert s._run_btn.isEnabled() is False
+    assert s._redownload_btn.isEnabled() is False
+    assert s._recheck_btn.isEnabled() is False
+    with qtbot.waitSignal(s.finished, timeout=8000):
+        s.cancel()
+
+
+def test_setup_buttons_re_enable_after_failed_run(qtbot):
+    s = SetupScreen(base=[sys.executable, "-c", "pass"])
+    qtbot.addWidget(s)
+    s._on_finished(1, "totally garbled output with no summary rows")
+    assert s._run_btn.isEnabled() is True
+    assert s._redownload_btn.isEnabled() is True
+    assert s._recheck_btn.isEnabled() is True
+    assert s.is_busy is False
+
+
+def test_setup_buttons_re_enable_after_cancelled_run(qtbot):
+    s = SetupScreen(base=[sys.executable, "-c", SLOW])
+    qtbot.addWidget(s)
+    assert s.run() is True
+    with qtbot.waitSignal(s.finished, timeout=8000):
+        s.cancel()
+    assert s._run_btn.isEnabled() is True
+    assert s._redownload_btn.isEnabled() is True
+    assert s._recheck_btn.isEnabled() is True
+    assert s.is_busy is False
+
+
+def test_setup_buttons_re_enable_after_successful_run(qtbot):
+    s = SetupScreen(base=[sys.executable, "-c", _FAKE_SETUP])
+    qtbot.addWidget(s)
+    with qtbot.waitSignal(s.finished, timeout=8000):
+        assert s.run() is True
+    assert s._run_btn.isEnabled() is True
+    assert s._redownload_btn.isEnabled() is True
+    assert s._recheck_btn.isEnabled() is True
+
+
+# --- M5: cancel button visibility -------------------------------------------
+
+def test_setup_cancel_button_visible_while_busy(qtbot):
+    s = SetupScreen(base=[sys.executable, "-c", SLOW])
+    qtbot.addWidget(s)
+    assert s.run() is True
+    assert s._cancel_btn.isVisibleTo(s) is True
+    with qtbot.waitSignal(s.finished, timeout=8000):
+        s.cancel()
+
+
+def test_setup_cancel_button_hidden_when_idle(qtbot):
+    s = SetupScreen(base=[sys.executable, "-c", "pass"])
+    qtbot.addWidget(s)
+    assert s._cancel_btn.isVisibleTo(s) is False
+
+
+def test_setup_cancel_button_hidden_after_run_finishes(qtbot):
+    s = SetupScreen(base=[sys.executable, "-c", _FAKE_SETUP])
+    qtbot.addWidget(s)
+    with qtbot.waitSignal(s.finished, timeout=8000):
+        assert s.run() is True
+    assert s._cancel_btn.isVisibleTo(s) is False
+
+
+# --- M4: doctor placeholder and button disable during run -------------------
+
+def test_doctor_shows_placeholder_when_started(qtbot):
+    from PySide6.QtWidgets import QLabel
+    p = DoctorPanel(base=[sys.executable, "-c", "pass"])
+    qtbot.addWidget(p)
+    p._on_started()
+    texts = []
+    for i in range(p._rows_layout.count()):
+        w = p._rows_layout.itemAt(i).widget()
+        if isinstance(w, QLabel):
+            texts.append(w.text())
+    assert any("Checking" in t for t in texts)
+
+
+def test_doctor_recheck_disabled_while_running(qtbot):
+    p = DoctorPanel(base=[sys.executable, "-c", "pass"])
+    qtbot.addWidget(p)
+    p._on_started()
+    assert p._recheck_btn.isEnabled() is False
+
+
+def test_doctor_recheck_re_enabled_after_finish(qtbot):
+    p = DoctorPanel(base=[sys.executable, "-c", "pass"])
+    qtbot.addWidget(p)
+    p._on_started()
+    assert p._recheck_btn.isEnabled() is False
+    p._on_finished(0, '{"ok": true, "checks": []}')
+    assert p._recheck_btn.isEnabled() is True
