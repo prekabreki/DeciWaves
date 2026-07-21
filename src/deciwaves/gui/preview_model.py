@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import csv
 import os
+import threading
 
 from deciwaves.cli import config
 from deciwaves.engine.audio_clip import clip_wav
@@ -71,6 +72,7 @@ class PreviewResolver:
         self._game = game
         self._workspace = workspace
         self._cfg = cfg if cfg is not None else config.load()
+        self._lock = threading.Lock()
         self._ds_index: PackIndex | None = None
         self._ds_index_key: tuple[str, str] | None = None
         self._hzd_pkg: HzdPackage | None = None
@@ -116,8 +118,10 @@ class PreviewResolver:
     def _ds_pack_index(self, data_dir: str, oodle: str) -> PackIndex:
         key = (data_dir, oodle)
         if self._ds_index is None or self._ds_index_key != key:
-            self._ds_index = PackIndex(data_dir, oodle)  # expensive: globs+hashes every .bin
-            self._ds_index_key = key
+            with self._lock:
+                if self._ds_index is None or self._ds_index_key != key:
+                    self._ds_index = PackIndex(data_dir, oodle)
+                    self._ds_index_key = key
         return self._ds_index
 
     # --- HZD ---------------------------------------------------------------
@@ -151,7 +155,9 @@ class PreviewResolver:
 
     def _hzd_dsar(self, package: str):
         if self._hzd_pkg is None:
-            self._hzd_pkg = HzdPackage(package)
+            with self._lock:
+                if self._hzd_pkg is None:
+                    self._hzd_pkg = HzdPackage(package)
         return self._hzd_pkg.dsar_for(VOICE_ARCHIVE)
 
     def _load_hzd_maps(self) -> tuple[dict[str, str], dict[int, tuple[int, int]]]:
@@ -159,9 +165,11 @@ class PreviewResolver:
         manifests, loaded once and cached. Delegates to the shared
         ``catalog.load_hzd_manifest_join`` instead of re-implementing the join."""
         if self._hzd_maps is None:
-            root = os.path.join(self._workspace, "out", "hzd")
-            self._hzd_maps = load_hzd_manifest_join(
-                os.path.join(root, "asr-manifest.csv"),
-                os.path.join(root, "clip-index.csv"),
-            )
+            with self._lock:
+                if self._hzd_maps is None:
+                    root = os.path.join(self._workspace, "out", "hzd")
+                    self._hzd_maps = load_hzd_manifest_join(
+                        os.path.join(root, "asr-manifest.csv"),
+                        os.path.join(root, "clip-index.csv"),
+                    )
         return self._hzd_maps

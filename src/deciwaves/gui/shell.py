@@ -401,7 +401,9 @@ class MainWindow(QMainWindow):
             self.pipeline.append_log("dump: no checked rows to dump.\n")
             return
         self.pipeline.append_log(f"dump: decoding {len(rows)} line(s) to {dest} …\n")
-        self.dump.start(self._preview_resolver(), rows, dest)
+        game = self.bar.current_game()
+        resolver = PreviewResolver(game, self._workspace())
+        self.dump.start(resolver, rows, dest)
         self._sync_running()
 
     def _on_dump_progress(self, done: int, total: int) -> None:
