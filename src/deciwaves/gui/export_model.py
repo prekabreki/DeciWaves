@@ -80,6 +80,32 @@ def render_selection_path(workspace: str, game: str) -> str:
     return os.path.join(workspace, "out", game, "gui", "render-selection.csv")
 
 
+def _read_filter_write(src: str, out_path: str,
+                       unchecked: set[str]) -> tuple[str, list[str], list[dict]]:
+    """Read *src* as a BOM-tolerant CSV, filter out *unchecked* lines, write the
+    result atomically to *out_path* as BOM-free utf-8, and return the absolute
+    path, fieldnames, and filtered rows.
+
+    ``extrasaction="ignore"`` so a stray extra column in a torn source row can't
+    crash the write; the declared fieldnames are preserved in order."""
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    unchecked = set(unchecked)
+
+    with open(src, "r", newline="", encoding="utf-8-sig") as f:
+        reader = csv.DictReader(f)
+        fieldnames = reader.fieldnames or []
+        rows = [r for r in reader if r.get("line_id", "") not in unchecked]
+
+    def _write(tmp_path: str) -> None:
+        with open(tmp_path, "w", newline="", encoding="utf-8") as out:
+            w = csv.DictWriter(out, fieldnames=fieldnames, extrasaction="ignore")
+            w.writeheader()
+            w.writerows(rows)
+
+    atomic_write(out_path, _write)
+    return out_path, fieldnames, rows
+
+
 def write_render_selection(workspace: str, game: str, unchecked: set[str]) -> str:
     """Write the filtered render-input CSV (rows = checked lines, columns unchanged) to
     ``out/<game>/gui/render-selection.csv`` and return its absolute path.
@@ -99,55 +125,23 @@ def write_render_selection(workspace: str, game: str, unchecked: set[str]) -> st
     if src is None:
         raise ExportError(_missing_source_message(game))
     out_path = render_selection_path(workspace, game)
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    unchecked = set(unchecked)
-
-    with open(src, "r", newline="", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
-        fieldnames = reader.fieldnames or []
-        rows = [r for r in reader if r.get("line_id", "") not in unchecked]
-
-    def _write(tmp_path: str) -> None:
-        with open(tmp_path, "w", newline="", encoding="utf-8") as out:
-            # extrasaction="ignore" so a stray extra column in a torn source row (DictReader's
-            # restkey) can't crash the write; the declared fieldnames are preserved in order.
-            w = csv.DictWriter(out, fieldnames=fieldnames, extrasaction="ignore")
-            w.writeheader()
-            w.writerows(rows)
-
-    atomic_write(out_path, _write)
-    return out_path
+    path, _fieldnames, _rows = _read_filter_write(src, out_path, unchecked)
+    return path
 
 
 def write_render_selection_with_tiers(workspace: str, game: str,
-                                      unchecked: set[str]) -> tuple[str, str]:
+                                       unchecked: set[str]) -> tuple[str, str]:
     """Like :func:`write_render_selection` but also returns the precomputed tier union
     for FW (``csv_path, tiers_str``). For non-FW games the second element is ``""``.
 
-    Computing tiers during the single write pass avoids the second file read that
-    ``_fw_tiers`` would do (M8)."""
+    Computing tiers from the already-filtered rows avoids a second file read (M8)."""
     src = render_input_source(workspace, game)
     if src is None:
         raise ExportError(_missing_source_message(game))
     out_path = render_selection_path(workspace, game)
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    unchecked = set(unchecked)
-
-    with open(src, "r", newline="", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
-        fieldnames = reader.fieldnames or []
-        rows = [r for r in reader if r.get("line_id", "") not in unchecked]
-
+    path, _fieldnames, rows = _read_filter_write(src, out_path, unchecked)
     fw_tiers = _collect_tiers(game, rows)
-
-    def _write(tmp_path: str) -> None:
-        with open(tmp_path, "w", newline="", encoding="utf-8") as out:
-            w = csv.DictWriter(out, fieldnames=fieldnames, extrasaction="ignore")
-            w.writeheader()
-            w.writerows(rows)
-
-    atomic_write(out_path, _write)
-    return out_path, fw_tiers
+    return path, fw_tiers
 
 
 def _collect_tiers(game: str, rows: list[dict]) -> str:
