@@ -331,11 +331,13 @@ def test_shell_catalog_copy(qtbot, tmp_path):
         f.write("line_id\na\n")
     w = _mainwindow(qtbot, tmp_path, "ds")
     dest = os.path.join(ws, "exported-catalog.csv")
-    w.library.export.export_catalog_requested.emit(dest)
     from PySide6.QtCore import QThreadPool
-    QThreadPool.globalInstance().waitForDone()
+    w.library.export.export_catalog_requested.emit(dest)
+    QThreadPool.globalInstance().waitForDone(5000)
+    qtbot.waitUntil(lambda: "catalog" in w.pipeline.log_text(), timeout=3000)
     assert os.path.isfile(dest)
     assert open(dest, encoding="utf-8").read() == "line_id\na\n"
+    assert "catalog copied" in w.pipeline.log_text()
 
 
 def test_shell_catalog_missing_source_messages(qtbot, tmp_path):

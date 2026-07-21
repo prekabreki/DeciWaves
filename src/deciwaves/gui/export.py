@@ -263,6 +263,32 @@ class _DumpWorker(QRunnable):
         self._signals.finished.emit(ok, failed)
 
 
+class _CatalogCopySignals(QObject):
+    """Signals holder for the catalog copy worker (same pattern as _DumpSignals)."""
+
+    finished = Signal(str)   # dest path
+    failed = Signal(str)     # error message
+
+
+class _CatalogCopyWorker(QRunnable):
+    """Copy the catalog CSV to a user-chosen destination on a pool thread. The result is
+    signalled back to the GUI thread — no QWidget mutation from the worker."""
+
+    def __init__(self, src: str, dest: str, signals: _CatalogCopySignals):
+        super().__init__()
+        self._src = src
+        self._dest = dest
+        self._signals = signals
+
+    def run(self) -> None:
+        try:
+            os.makedirs(os.path.dirname(os.path.abspath(self._dest)), exist_ok=True)
+            shutil.copyfile(self._src, self._dest)
+            self._signals.finished.emit(self._dest)
+        except OSError as exc:
+            self._signals.failed.emit(str(exc))
+
+
 class DumpRunner(QObject):
     """Runs at most one batch dump at a time on a ``QThreadPool``, re-exposing the worker's
     signals and flipping ``is_running`` around the batch (so the shell can mutually-exclude it

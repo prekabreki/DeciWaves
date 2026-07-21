@@ -8,14 +8,13 @@ Scan/Bind/Re-run/Transcribe-all controls emit intent signals; this shell turns t
 from __future__ import annotations
 
 import os
-import shutil
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QThreadPool, QTimer
 from PySide6.QtWidgets import QMainWindow, QMessageBox, QStackedWidget, QTabBar, QVBoxLayout, QWidget
 
 from deciwaves.cli import config, doctor
 from deciwaves.gui.cli_command import default_base
-from deciwaves.gui.export import DumpRunner
+from deciwaves.gui.export import DumpRunner, _CatalogCopySignals, _CatalogCopyWorker
 from deciwaves.gui.export_model import (
     ExportError,
     catalog_source_path,
@@ -368,7 +367,7 @@ class MainWindow(QMainWindow):
         ws = self._workspace()
         if self.library.checked_count() == 0:
             self.pipeline.append_log("export: nothing selected.\n")
-            return   # M7: empty-selection guard (like Dump at :390)
+            return
         try:
             csv_path, fw_tiers = write_render_selection(ws, game, self.library.unchecked_ids())
             # thread the per-game panel's render scope (#73): DS {main_story}, HZD {spine_only},
@@ -420,25 +419,12 @@ class MainWindow(QMainWindow):
         if src is None:
             self.pipeline.append_log("export: no catalog artifact yet for this game.\n")
             return
-        try:
-            os.makedirs(os.path.dirname(os.path.abspath(dest)), exist_ok=True)
-        except OSError as exc:
-            self.pipeline.append_log(f"export: could not write catalog: {exc}\n")
-            return
-
-        class _CatalogCopyWorker(QRunnable):
-            def __init__(self, src, dest, log_fn):
-                super().__init__()
-                self._src = src
-                self._dest = dest
-                self._log = log_fn
-
-            def run(self):
-                try:
-                    shutil.copyfile(self._src, self._dest)
-                    self._log(f"export: catalog copied to {self._dest}\n")
-                except OSError as exc:
-                    self._log(f"export: could not write catalog: {exc}\n")
-
-        QThreadPool.globalInstance().start(
-            _CatalogCopyWorker(src, dest, self.pipeline.append_log))
+        signals = _CatalogCopySignals()
+        signals.finished.connect(
+            lambda d: self.pipeline.append_log(f"export: catalog copied to {d}\n"))
+        signals.failed.connect(
+            lambda msg: self.pipeline.append_log(f"export: could not write catalog: {msg}\n"))
+        # keep a reference so the signals object isn't GC'd before the cross-thread
+        # signal delivery is processed on the main thread (mirrors _DumpSignals lifetime)
+        self._catalog_copy_signals = signals
+        QThreadPool.globalInstance().start(_CatalogCopyWorker(src, dest, signals))
