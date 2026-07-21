@@ -68,6 +68,10 @@ def test_budget_seconds_custom_target():
     assert secs * 16000 * (1 + rs.MP3_OVERHEAD) <= 200_000_000
 
 
+def test_budget_seconds_smaller_target_yields_smaller_budget():
+    assert rs.budget_seconds(target_mb=100) < rs.budget_seconds(target_mb=285)
+
+
 def test_budget_seconds_scales_with_bitrate():
     # Lower bitrate fits more seconds per file, and the real encoded bytes at
     # that bitrate must still stay under the target (bytes/s = kbps*1000/8).
