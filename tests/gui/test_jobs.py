@@ -47,3 +47,12 @@ def test_start_returns_false_and_no_signal_when_busy(qtbot):
     r.cancel()
     with qtbot.waitSignal(r.finished, timeout=5000):
         pass
+
+
+def test_failed_to_start_finishes_instead_of_hanging(qtbot):
+    r = JobRunner()
+    with qtbot.waitSignal(r.finished, timeout=5000) as blocker:
+        assert r.start(["deciwaves-no-such-program-zzz"]) is True
+    (code,) = blocker.args
+    assert code == -1
+    assert r.is_running is False
