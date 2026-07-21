@@ -13,7 +13,7 @@ authors = [{ name = "prekabreki", email = "prekabreki@users.noreply.github.com" 
 dependencies = ["lz4>=4.0", "numpy>=1.24", "rapidfuzz>=3.0"]
 
 [project.optional-dependencies]
-test = ["pytest"]
+test = ["pytest", "pytest-timeout"]
 asr = ["whisperx>=3.1,<4"]
 gui = ["PySide6>=6.7"]
 # GUI dev/test env = the runtime extra plus pytest-qt. Kept OUT of `test` on purpose:
@@ -52,6 +52,7 @@ testpaths = ["tests"]
 # worktree import its own source regardless of the shared .pth. Env-independent:
 # .venv is affected too, so "use the venv" does NOT fix it on its own.
 # See .memories/worktree-editable-install-contamination.md.
+addopts = "--timeout=60 --timeout-method=thread"
 pythonpath = ["src"]
 
 [tool.ruff]
