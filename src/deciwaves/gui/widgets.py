@@ -41,3 +41,4 @@ class Pill(QLabel):
         self.setStyleSheet(
             f"color: white; background: {colour}; "
             "border-radius: 6px; padding: 0px 6px;")
+        self.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)

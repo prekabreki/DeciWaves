@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from deciwaves.gui.theme import NEUTRAL, OK, RUNNING, WARN
+from deciwaves.gui.widgets import HelpIcon
 from deciwaves.gui.coverage_model import (
     coverage_summary,
     format_coverage,
@@ -157,6 +158,10 @@ class CoverageBar(QWidget):
         row = QHBoxLayout(self)
         row.setAlignment(Qt.AlignLeft)
         row.addWidget(self._label)
+        row.addWidget(HelpIcon(
+            "Coverage: how many voice lines have their audio bound. HZD/FW group "
+            "lines into cutscene 'cores' and 'segments'; a sample cap can leave "
+            "some groups untranscribed until you 'Transcribe all'."))
         row.addWidget(self._escalate_btn)
 
     def refresh(self, game: str, workspace: str) -> None:
@@ -188,11 +193,20 @@ class IssuesPanel(QWidget):
         self._groups: list = []
         self._header = QLabel("<b>Issues</b>")
         self._header.setToolTip("Errors and warnings found during pipeline stages")
+        header_row = QHBoxLayout()
+        header_row.setContentsMargins(0, 0, 0, 0)
+        header_row.addWidget(self._header)
+        header_row.addWidget(HelpIcon(
+            "Issues counts per-stage errors and 'dupes' — duplicate lines the same "
+            "audio maps to, which are de-duplicated in the exported reels."))
+        header_row.addStretch(1)
+        self._header_host = QWidget()
+        self._header_host.setLayout(header_row)
         self._body = QWidget()
         self._body_layout = QVBoxLayout(self._body)
         self._body_layout.setContentsMargins(0, 0, 0, 0)
         layout = QVBoxLayout(self)
-        layout.addWidget(self._header)
+        layout.addWidget(self._header_host)
         layout.addWidget(self._body)
 
     def refresh(self, game: str, workspace: str) -> None:
