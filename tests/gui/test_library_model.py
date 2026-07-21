@@ -6,11 +6,15 @@ the HZD b_samples length join, all selection commands, and the selection.json ro
 """
 import csv
 import os
+import sys
+import threading
 import wave
 
 from conftest import catalog_row
 
 from deciwaves.gui.library_model import (
+    _DURATION_CACHE,
+    _cached_wav_duration,
     LineRow,
     availability_by_id,
     check_all,
@@ -20,6 +24,7 @@ from deciwaves.gui.library_model import (
     load_lines,
     load_selection,
     preview_available,
+    resolve_wav_durations,
     save_selection,
     selection_path,
     sort_rows,
@@ -141,7 +146,11 @@ def test_fw_under_game_dir_full_reel_preferred_and_wav_length(tmp_path):
     rows = load_lines(ws, "fw")
     assert [r.line_id for r in rows] == ["f1"]
     assert rows[0].has_subtitle is False  # clip-index carries no subtitle
-    assert abs(rows[0].length_s - 2.0) < 0.05
+    assert rows[0].length_s is None       # load_lines never probes WAVs synchronously
+
+    # Length resolves via the separate resolve_wav_durations pass (runs in background thread).
+    resolved = resolve_wav_durations(rows)
+    assert abs(resolved["f1"] - 2.0) < 0.05
 
     # full-reel manifest wins; carries speaker/subtitle/tier
     _write_csv(os.path.join(ws, "out", "fw", "full-reel-manifest.csv"), FW_FULL,
@@ -151,7 +160,10 @@ def test_fw_under_game_dir_full_reel_preferred_and_wav_length(tmp_path):
     rows = load_lines(ws, "fw")
     assert rows[0].speaker == "Varl" and rows[0].subtitle == "Hello Aloy"
     assert rows[0].has_subtitle is True and rows[0].tier == "S"
-    assert abs(rows[0].length_s - 2.0) < 0.05
+    assert rows[0].length_s is None       # still lazy
+
+    resolved = resolve_wav_durations(rows)
+    assert abs(resolved["f1"] - 2.0) < 0.05
 
 
 def test_fw_subtitle_manifest_used_when_no_full_reel(tmp_path):
@@ -174,7 +186,10 @@ def test_fw_subtitle_manifest_used_when_no_full_reel(tmp_path):
     assert [r.line_id for r in rows] == ["f1"]
     assert rows[0].speaker == "Varl" and rows[0].subtitle == "Hello Aloy"
     assert rows[0].has_subtitle is True and rows[0].tier == "S"
-    assert abs(rows[0].length_s - 2.0) < 0.05
+    assert rows[0].length_s is None
+
+    resolved = resolve_wav_durations(rows)
+    assert abs(resolved["f1"] - 2.0) < 0.05
 
 
 def test_fw_full_reel_wins_over_subtitle_manifest(tmp_path):
@@ -219,6 +234,109 @@ def test_load_tolerates_utf8_bom(tmp_path):
 
 
 # --- WAV-header duration reader --------------------------------------------
+
+def test_load_lines_leaves_fw_lengths_none(tmp_path):
+    """load_lines must NOT probe WAV headers synchronously — FW rows start with length_s=None.
+    resolve_wav_durations fills them separately (run on a background thread by the view)."""
+    ws = str(tmp_path)
+    _write_wav(os.path.join(ws, "out", "fw", "audio", "f1.wav"), seconds=1.5)
+    _write_csv(os.path.join(ws, "out", "fw", "full-reel-manifest.csv"), FW_FULL,
+               [{"line_id": "f1", "wav": "audio/f1.wav", "speaker": "Varl", "subtitle": "Hello",
+                 "gamescript_index": "1", "quest": "MQ", "tier": "S", "score": "9",
+                 "transcript": "x"}])
+    rows = load_lines(ws, "fw")
+    assert rows[0].line_id == "f1"
+    assert rows[0].length_s is None  # key assertion: not probed synchronously
+
+
+def test_resolve_wav_durations_fills_lengths(tmp_path):
+    ws = str(tmp_path)
+    _write_wav(os.path.join(ws, "out", "fw", "audio", "f1.wav"), seconds=1.5)
+    _write_csv(os.path.join(ws, "out", "fw", "full-reel-manifest.csv"), FW_FULL,
+               [{"line_id": "f1", "wav": "audio/f1.wav", "speaker": "Varl", "subtitle": "Hello",
+                 "gamescript_index": "1", "quest": "MQ", "tier": "S", "score": "9",
+                 "transcript": "x"}])
+    rows = load_lines(ws, "fw")
+    assert rows[0].length_s is None
+
+    resolved = resolve_wav_durations(rows)
+    assert abs(resolved["f1"] - 1.5) < 0.01
+
+
+def test_wav_duration_cache_hit_avoids_reprobe(tmp_path, monkeypatch):
+    """The path+mtime cache returns the same value on a repeated resolve without opening
+    the file again. Cache invalidation keys on mtime, not just path."""
+    ws = str(tmp_path)
+    wav_path = os.path.join(ws, "out", "fw", "audio", "f1.wav")
+    _write_wav(wav_path, seconds=2.0)
+    _write_csv(os.path.join(ws, "out", "fw", "full-reel-manifest.csv"), FW_FULL,
+               [{"line_id": "f1", "wav": "audio/f1.wav", "speaker": "Varl", "subtitle": "Hello",
+                 "gamescript_index": "1", "quest": "MQ", "tier": "S", "score": "9",
+                 "transcript": "x"}])
+    rows = load_lines(ws, "fw")
+
+    # First resolve: probes the file.
+    resolved1 = resolve_wav_durations(rows)
+    assert abs(resolved1["f1"] - 2.0) < 0.01
+
+    # Second resolve without changing the file: must hit cache, no open needed.
+    # We verify this indirectly: even after we corrupt the file on disk, the
+    # cached value (keyed by path+mtime) should still be returned.
+    os.remove(wav_path)
+    resolved2 = resolve_wav_durations(rows)
+    assert abs(resolved2["f1"] - 2.0) < 0.01  # cached, not re-probed
+
+def test_cached_wav_duration_cache_is_thread_safe(tmp_path):
+    """Multiple concurrent threads calling _cached_wav_duration against a mix of existing
+    and missing WAV files must not raise RuntimeError (dictionary changed size during
+    iteration). The _DURATION_CACHE_LOCK must protect the full read-check-iterate-write
+    sequence so insertions and the missing-file iteration fallback never race."""
+    existing = []
+    for i in range(10):
+        p = os.path.join(str(tmp_path), f"exist_{i}.wav")
+        _write_wav(p, seconds=1.0)
+        existing.append(p)
+
+    missing = [os.path.join(str(tmp_path), f"missing_{i}.wav") for i in range(10)]
+
+    errors: list[Exception] = []
+
+    def insert_worker(path):
+        try:
+            _cached_wav_duration(path)
+        except Exception as e:
+            errors.append(e)
+
+    def iterate_worker(path):
+        try:
+            _cached_wav_duration(path)
+        except Exception as e:
+            errors.append(e)
+
+    orig_switchinterval = sys.getswitchinterval()
+    try:
+        sys.setswitchinterval(0.0001)
+        for _ in range(20):
+            _DURATION_CACHE.clear()
+
+            threads: list[threading.Thread] = []
+            for p in existing[:6]:
+                threads.append(threading.Thread(target=insert_worker, args=(p,)))
+            for p in missing[:6]:
+                threads.append(threading.Thread(target=iterate_worker, args=(p,)))
+
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+
+            if errors:
+                break
+    finally:
+        sys.setswitchinterval(orig_switchinterval)
+
+    assert errors == [], f"concurrent _cached_wav_duration hit errors: {errors}"
+
 
 def test_wav_duration_seconds_reads_header(tmp_path):
     p = os.path.join(str(tmp_path), "x.wav")

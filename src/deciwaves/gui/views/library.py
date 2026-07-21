@@ -6,7 +6,12 @@ here ▶ only reflects availability and emits an (as-yet unconnected) ``preview_
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QAbstractTableModel, QEvent, QModelIndex, Qt, QTimer, Signal
+from dataclasses import replace
+
+from PySide6.QtCore import (
+    QAbstractTableModel, QEvent, QModelIndex, QObject, QRunnable, Qt,
+    QThreadPool, QTimer, Signal,
+)
 from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -36,6 +41,7 @@ from deciwaves.gui.library_model import (
     load_lines,
     load_selection,
     preview_unavailable_tooltip,
+    resolve_wav_durations,
     save_selection,
     sort_rows,
     uncheck_barks,
@@ -188,6 +194,29 @@ class _LibraryTableView(QTableView):
         super().mouseReleaseEvent(event)
 
 
+class _DurationSignaller(QObject):
+    """QObject whose ``finished`` signal is emitted from the thread pool to the main thread
+    with the generation tag and resolved durations."""
+    finished = Signal(int, object)  # generation, dict[str, float | None]
+
+
+class _DurationTask(QRunnable):
+    """Runs ``resolve_wav_durations`` on a background thread and emits the result via the
+    *signaller* when done. Carries a *generation* tag so the view can discard stale results
+    when ``refresh()`` fires again before the probe finishes."""
+
+    def __init__(self, signaller: _DurationSignaller, generation: int,
+                 rows: list[LineRow]):
+        super().__init__()
+        self._signaller = signaller
+        self._generation = generation
+        self._rows = rows
+
+    def run(self) -> None:
+        durations = resolve_wav_durations(self._rows)
+        self._signaller.finished.emit(self._generation, durations)
+
+
 class LibraryView(QWidget):
     """The line list with search/speaker/dupe/no-subtitle filters, undoable selection
     commands, a persisted checkbox column, and an availability-aware ▶ preview column."""
@@ -218,6 +247,10 @@ class LibraryView(QWidget):
         self._checked_count = 0
         self._can_export_mp3 = False
         self._has_catalog = False
+        self._duration_generation = 0
+        self._duration_signaller = _DurationSignaller()
+        self._duration_signaller.finished.connect(self._on_durations_ready)
+        self._duration_pool = QThreadPool()
 
         # Selection debounce (issue #133 L3): a real member QTimer so rapid Space-toggling
         # produces exactly one disk write.
@@ -318,7 +351,11 @@ class LibraryView(QWidget):
         A **game change** drops the prior game's stray filter/sort state (search, sort
         key/dir, both hide toggles, speaker) -- the list is per-game. A **same-game** refresh
         (e.g. a job finished for the current game) preserves all filter/sort state so an
-        in-progress curation survives a background reload."""
+        in-progress curation survives a background reload.
+
+        WAV durations are NOT probed synchronously here -- they start ``None`` and fill in
+        via a background ``QThreadPool`` worker, so the table appears immediately without
+        blocking the UI thread."""
         game_changed = game != self._game
         self._game = game
         self._workspace = workspace
@@ -332,6 +369,9 @@ class LibraryView(QWidget):
         self._can_export_mp3 = can_export_mp3(workspace, game)
         self._has_catalog = catalog_source_path(workspace, game) is not None
         self._undo.clear()
+
+        # Bump the generation so any still-in-flight duration task discards itself on finish.
+        self._duration_generation += 1
 
         if game_changed:
             self._reset_filter_state()
@@ -353,6 +393,14 @@ class LibraryView(QWidget):
         self._uncheck_short_btn.setEnabled(has_len)
 
         self._apply_filters()
+
+        # Launch a background probe for WAV durations (no-op for DS/HZD which have no
+        # per-row WAV to probe). The task carries the current generation; stale results
+        # from a prior refresh are silently dropped.
+        if game == "fw" and self._rows:
+            task = _DurationTask(
+                self._duration_signaller, self._duration_generation, list(self._rows))
+            self._duration_pool.start(task)
 
     def _reset_filter_state(self) -> None:
         """Clear search text, sort key/dir, and both hide toggles to defaults (called on a
@@ -382,6 +430,30 @@ class LibraryView(QWidget):
             self._sort_key, self._sort_desc)
         self._model.set_rows(self._visible)
         self._update_status()
+
+    def _on_durations_ready(self, generation: int, durations: dict[str, float | None]) -> None:
+        """Handle the result of a background WAV-duration probe. Discards stale results
+        from a prior ``refresh`` (whose generation was already bumped).
+
+        Updates ``_rows`` in-place with the filled durations and re-applies filters so the
+        table repaints with the new length column values. The re-filter also handles the
+        case where the user had sorted by length and order changes as None entries fill in."""
+        if generation != self._duration_generation:
+            return
+        if not durations:
+            return
+
+        by_id = {r.line_id: i for i, r in enumerate(self._rows)}
+        for lid, dur in durations.items():
+            idx = by_id.get(lid)
+            if idx is not None and self._rows[idx].length_s != dur:
+                self._rows[idx] = replace(self._rows[idx], length_s=dur)
+
+        self._apply_filters()
+
+        has_len = has_known_lengths(self._rows)
+        self._short_secs.setEnabled(has_len)
+        self._uncheck_short_btn.setEnabled(has_len)
 
     def _on_header_clicked(self, section: int) -> None:
         key = self._SORT_KEYS.get(section)
