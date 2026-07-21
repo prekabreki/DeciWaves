@@ -2,6 +2,7 @@
 import pytest
 
 pytest.importorskip("PySide6")
+from deciwaves.cli.doctor import Availability  # noqa: E402
 from deciwaves.gui.global_bar import GlobalBar  # noqa: E402
 
 
@@ -50,19 +51,29 @@ def test_workspace_picker_cancel_keeps_original_field(qtbot, monkeypatch):
     assert bar.workspace() == original
 
 
-# --- set_install_status ------------------------------------------------------
-# Three-state + glyph mapping pending #122; test the current two-state contract.
+# --- set_install_status: three-state + glyph (issue #122) --------------------
 
 
-def test_set_install_status_two_state(qtbot):
+def test_set_install_status_ok(qtbot):
     bar = GlobalBar()
     qtbot.addWidget(bar)
-    bar.set_install_status("Ready", ok=True)
-    assert bar._status.text() == "Ready"
+    bar.set_install_status("Ready", Availability.OK)
+    assert "✓" in bar._status.text()
     assert "color: #167f3b" in bar._status.styleSheet()
+
+
+def test_set_install_status_not_configured(qtbot):
+    bar = GlobalBar()
+    qtbot.addWidget(bar)
+    bar.set_install_status("Not configured", Availability.NOT_CONFIGURED)
+    assert "—" in bar._status.text()
+    assert "color: #666666" in bar._status.styleSheet()
     assert "color: #b00020" not in bar._status.styleSheet()
 
-    bar.set_install_status("Missing", ok=False)
-    assert bar._status.text() == "Missing"
+
+def test_set_install_status_broken(qtbot):
+    bar = GlobalBar()
+    qtbot.addWidget(bar)
+    bar.set_install_status("Broken", Availability.BROKEN)
+    assert "✗" in bar._status.text()
     assert "color: #b00020" in bar._status.styleSheet()
-    assert "color: #167f3b" not in bar._status.styleSheet()

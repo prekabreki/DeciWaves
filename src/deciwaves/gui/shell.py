@@ -29,6 +29,14 @@ _CHECKS = {
 }
 
 
+def _first_owned_game(cfg) -> str:
+    """First game that is configured/owned, or ``"ds"`` as fallback."""
+    for key in ("ds", "hzd", "fw"):
+        if _CHECKS[key](cfg).status is not doctor.Availability.NOT_CONFIGURED:
+            return key
+    return "ds"
+
+
 class MainWindow(QMainWindow):
     def __init__(self, parent=None, settings=None):
         super().__init__(parent)
@@ -153,7 +161,9 @@ class MainWindow(QMainWindow):
                 self._refresh_library()
                 self._refresh_game_panel()
         else:
-            self.bar.select_game("ds")
+            cfg = config.load()
+            default = _first_owned_game(cfg)
+            self.bar.select_game(default)
             self._refresh_status()
             self._refresh_panels()
             self._refresh_library()
@@ -172,7 +182,7 @@ class MainWindow(QMainWindow):
     def _refresh_status(self) -> None:
         cfg = config.load()
         check = _CHECKS[self.bar.current_game()](cfg)
-        self.bar.set_install_status(check.detail, check.status is doctor.Availability.OK)
+        self.bar.set_install_status(check.detail, check.status)
 
     def _active_stage(self, game: str) -> str | None:
         for st in stage_states(game, self._workspace()):

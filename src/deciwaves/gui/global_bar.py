@@ -8,7 +8,8 @@ from PySide6.QtWidgets import (
     QComboBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidget,
 )
 
-from deciwaves.gui.theme import ERROR, OK
+from deciwaves.cli.doctor import Availability
+from deciwaves.gui.doctor_model import install_status_attrs
 
 # (key, menu label) -- keys match the CLI game tokens / doctor check map.
 _GAMES = [("ds", "Death Stranding"),
@@ -81,9 +82,10 @@ class GlobalBar(QWidget):
     def _clear_workspace_accept(self) -> None:
         self._workspace_accept = False
 
-    def set_install_status(self, text: str, ok: bool) -> None:
-        self._status.setText(text)
-        self._status.setStyleSheet(f"color: {OK};" if ok else f"color: {ERROR};")
+    def set_install_status(self, text: str, status: Availability) -> None:
+        glyph, colour = install_status_attrs(status)
+        self._status.setText(f"{glyph} {text}")
+        self._status.setStyleSheet(f"color: {colour};")
 
     def set_job_chip(self, text: str) -> None:
         self._chip.setText(text)
