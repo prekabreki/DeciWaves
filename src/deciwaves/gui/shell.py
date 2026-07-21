@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QSettings, QTimer
 from PySide6.QtWidgets import QMainWindow, QStackedWidget, QTabBar, QVBoxLayout, QWidget
 
 from deciwaves.cli import config, doctor
@@ -30,8 +30,9 @@ _CHECKS = {
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, settings=None):
         super().__init__(parent)
+        self._settings = settings if settings is not None else QSettings("DeciWaves", "gui")
         self.setWindowTitle("DeciWaves")
         self.setMinimumSize(900, 600)
 
@@ -128,13 +129,40 @@ class MainWindow(QMainWindow):
         self.bar.workspace_changed.connect(lambda _ws: self._refresh_game_panel())
         self.bar.workspace_changed.connect(lambda _ws: setattr(self, '_resolver', None))
 
-        self.bar.select_game("ds")   # DS is the built-first vertical slice
-        # select_game("ds") leaves the combo on its existing index 0, so game_changed does
-        # not fire -- prime the status line and panels for the initial game explicitly.
-        self._refresh_status()
-        self._refresh_panels()
-        self._refresh_library()
-        self._refresh_game_panel()
+        # --- restore persisted session state ---------------------------------
+        geo = self._settings.value("window/geometry")
+        if geo is not None:
+            self.restoreGeometry(geo)
+
+        state = self._settings.value("window/state")
+        if state is not None:
+            self.restoreState(state)
+
+        ws = self._settings.value("workspace")
+        if ws is not None and ws:
+            self.bar.set_workspace(ws)
+
+        game = self._settings.value("game")
+        if game in ("ds", "hzd", "fw"):
+            self.bar.select_game(game)
+            if game == "ds":
+                # select_game("ds") leaves the combo on its existing index 0,
+                # so game_changed does not fire -- prime explicitly.
+                self._refresh_status()
+                self._refresh_panels()
+                self._refresh_library()
+                self._refresh_game_panel()
+        else:
+            self.bar.select_game("ds")
+            self._refresh_status()
+            self._refresh_panels()
+            self._refresh_library()
+            self._refresh_game_panel()
+
+        saved_header = self._settings.value("library/header_state")
+        if saved_header is not None:
+            QTimer.singleShot(0, lambda h=saved_header: (
+                self.library._table.horizontalHeader().restoreState(h)))
 
     # --- status + panels ---------------------------------------------------
 
@@ -322,3 +350,14 @@ class MainWindow(QMainWindow):
     def _on_export_catalog(self, dest: str) -> None:
         self._controller.start_catalog_copy(
             self.bar.current_game(), self._workspace(), dest)
+
+    # --- session persistence ------------------------------------------------
+
+    def closeEvent(self, event) -> None:
+        self._settings.setValue("window/geometry", self.saveGeometry())
+        self._settings.setValue("window/state", self.saveState())
+        self._settings.setValue("workspace", self.bar.workspace())
+        self._settings.setValue("game", self.bar.current_game())
+        self._settings.setValue("library/header_state",
+                                self.library._table.horizontalHeader().saveState())
+        super().closeEvent(event)
