@@ -358,6 +358,9 @@ def main(argv=None):
                     help="MP3 CBR bitrate in kbps (drives both encode and the "
                          "byte-budget packing math). Lower = fewer files; speech is "
                          "highly compressible so ~96 stays ~transparent")
+    ap.add_argument("--target-mb", type=float, default=285.0,
+                    help="Target MB per reel file (default 285; output stays safely "
+                         "under the 290 MB buffer)")
     ap.add_argument("--jobs", type=int, default=default_jobs(),
                     help="number of clips to decode concurrently (each spawns one "
                          f"vgmstream-cli). Default min(8, cpu_count)={default_jobs()}; "
@@ -441,7 +444,7 @@ def main(argv=None):
                              s.line_id])
     assemble_reels(
         segs, ep_secs, decoded, out_dir=args.out_dir, cache_dir=args.cache, stem=stem,
-        columns=columns, budget=budget_seconds(kbps=args.bitrate),
+        columns=columns, budget=budget_seconds(target_mb=args.target_mb, kbps=args.bitrate),
         gap_key=lambda s: s.scene, concat_kwargs={"kbps": args.bitrate},
         unit_label="segments")
     return 0

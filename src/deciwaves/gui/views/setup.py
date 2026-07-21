@@ -146,10 +146,6 @@ class DoctorPanel(QWidget):
     def items(self) -> list[DoctorItem]:
         return list(self._items)
 
-    def cancel(self) -> None:
-        """Cancel an in-flight ``doctor --json`` subprocess, if any."""
-        self._runner.cancel()
-
     def last_payload(self) -> dict | None:
         """The most recent ``doctor --json`` payload (for the pre-bind CUDA probe, #69)."""
         return self._payload
