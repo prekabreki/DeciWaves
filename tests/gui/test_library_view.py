@@ -418,3 +418,26 @@ def test_filter_state_resets_on_game_change_but_persists_same_game(qtbot, tmp_pa
     v.refresh("hzd", ws)
     assert v._search.text() == "world"
     assert v._hide_dupes.isChecked() is True
+
+
+def test_flush_pending_selection_saves_inside_debounce_window(qtbot, tmp_path):
+    ws = str(tmp_path)
+    _write_ds_catalog(ws, [_cat_row(line_id="a"), _cat_row(line_id="b")])
+    v = LibraryView()
+    qtbot.addWidget(v)
+    v.refresh("ds", ws)
+    assert v.checked_count() == 2
+
+    # Toggle a row — debounce timer starts, no disk write yet
+    idx = v._model.index(0, v._model.COL_CHECK)
+    assert v._model.setData(idx, Qt.Unchecked, Qt.CheckStateRole) is True
+    assert v._selection_timer.isActive()
+
+    # Flush pending — persists immediately without waiting for the 150 ms timer
+    v.flush_pending_selection()
+    assert not v._selection_timer.isActive()
+    assert "a" in load_selection(ws, "ds")
+    assert v.checked_count() == 1
+
+    # Second call is a strict no-op (no pending save)
+    v.flush_pending_selection()
