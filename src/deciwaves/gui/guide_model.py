@@ -1,0 +1,127 @@
+"""Qt-free computation of the onboarding "guide rail" journey (#112).
+
+The rail reflects a first-time user's path for the CURRENT (game, workspace):
+``Setup -> Workspace -> Scan -> Bind -> Curate -> Export``. Exactly one step is
+"live" (the first not-done one); the rail turns that into a single navigate-only
+action. Everything is derived from state the GUI already reads -- the
+``doctor --json`` payload, the game's install ``Availability``, the raw workspace
+string, and the ``.done-<stage>`` markers via :mod:`pipeline_model`. This module
+never writes markers or config; it only reads."""
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from enum import Enum
+
+from deciwaves.cli.doctor import Availability
+from deciwaves.gui.pipeline_model import scan_target, stage_states
+
+# The audio tools setup fetches -- the doctor check `name`s (config.TOOLS[*].display).
+REQUIRED_TOOLS = ("vgmstream", "VGAudio", "ffmpeg")
+
+
+class StepId(Enum):
+    SETUP = "setup"
+    WORKSPACE = "workspace"
+    SCAN = "scan"
+    BIND = "bind"
+    CURATE = "curate"
+    EXPORT = "export"
+
+
+class ActionTarget(Enum):
+    """What the shell should do when the rail's live button is clicked."""
+    SETUP = "setup"
+    WORKSPACE = "workspace"
+    SCAN = "scan"
+    BIND = "bind"
+    CURATE = "curate"
+
+
+@dataclass(frozen=True)
+class Step:
+    id: StepId
+    label: str
+    done: bool
+    current: bool  # the single first-not-done step
+
+
+@dataclass(frozen=True)
+class Journey:
+    game_owned: bool
+    steps: tuple[Step, ...]          # () when the game isn't owned/configured
+    next_action: ActionTarget | None  # None when complete or not owned
+    next_hint: str
+
+
+def tools_ready(payload: dict | None) -> bool:
+    """True iff every required audio tool is an OK check in *payload*."""
+    if not payload:
+        return False
+    ok = {c.get("name") for c in payload.get("checks", [])
+          if c.get("status") == "ok"}
+    return all(t in ok for t in REQUIRED_TOOLS)
+
+
+def _game_out_root(workspace: str, game: str) -> str:
+    return os.path.join(workspace, "out", game)
+
+
+def export_done(workspace: str, game: str) -> bool:
+    """True iff a rendered ``.mp3`` reel exists in the game's out root or its
+    ``reels/`` subdir. A shallow scandir (no deep walk); if reels land elsewhere
+    this under-reports, which only leaves the rail nudging toward Library -- a
+    safe, non-blocking failure mode."""
+    root = _game_out_root(workspace, game)
+    for d in (root, os.path.join(root, "reels")):
+        try:
+            with os.scandir(d) as it:
+                if any(e.is_file() and e.name.lower().endswith(".mp3") for e in it):
+                    return True
+        except OSError:
+            continue
+    return False
+
+
+def build_journey(*, doctor_payload: dict | None, game: str, game_label: str,
+                  game_status: Availability, workspace: str) -> Journey:
+    if game_status is not Availability.OK:
+        return Journey(
+            game_owned=False, steps=(), next_action=None,
+            next_hint=f"You haven't set up {game_label} — "
+                      "pick a game you own, or add its path in Setup.")
+
+    ws = workspace or "."
+    states = stage_states(game, ws)
+    scan_name = scan_target(game)
+    setup_done = tools_ready(doctor_payload)
+    workspace_done = bool((workspace or "").strip())
+    scan_done = any(s.name == scan_name and s.done for s in states)
+    bind_done = bool(states) and all(s.done for s in states)
+    exported = export_done(ws, game)
+
+    _library_hint = "Curate & export your reels in the Library tab"
+    # (StepId, label, done, action-when-live, hint-when-live)
+    raw = [
+        (StepId.SETUP, "Setup", setup_done, ActionTarget.SETUP,
+         "Run setup to download the audio tools"),
+        (StepId.WORKSPACE, "Workspace", workspace_done, ActionTarget.WORKSPACE,
+         "Choose an output folder for your reels"),
+        (StepId.SCAN, "Scan", scan_done, ActionTarget.SCAN,
+         "Scan to build the line catalog"),
+        (StepId.BIND, "Bind", bind_done, ActionTarget.BIND,
+         "Bind to attach audio to each line"),
+        (StepId.CURATE, "Curate", exported, ActionTarget.CURATE, _library_hint),
+        (StepId.EXPORT, "Export", exported, ActionTarget.CURATE, _library_hint),
+    ]
+
+    current_idx = next((i for i, r in enumerate(raw) if not r[2]), None)
+    steps = tuple(
+        Step(sid, label, done, i == current_idx)
+        for i, (sid, label, done, _a, _h) in enumerate(raw))
+
+    if current_idx is None:
+        return Journey(True, steps, None,
+                       "All steps done — your reels are in the workspace.")
+    action, hint = raw[current_idx][3], raw[current_idx][4]
+    return Journey(True, steps, action, f"Next: {hint}")
