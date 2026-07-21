@@ -148,6 +148,11 @@ def test_short_controls_enabled_with_fw_wav_lengths(qtbot, tmp_path):
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("fw", ws)
+    # Lengths start None (lazy) — short controls disabled until the background probe finishes.
+    assert v._uncheck_short_btn.isEnabled() is False
+
+    v._duration_pool.waitForDone()
+    QApplication.processEvents()
     assert v._uncheck_short_btn.isEnabled() is True
 
 
@@ -282,6 +287,85 @@ def test_preview_column_availability_ds_and_fw_available(qtbot, tmp_path):
     idx = v._model.index(0, v._model.COL_PREVIEW)
     assert v._model.data(idx, Qt.ForegroundRole) is None
     assert v._model.data(idx, Qt.ToolTipRole) == "Play preview"
+
+
+def test_fw_refresh_does_not_block_on_wav_probe(qtbot, tmp_path):
+    """FW refresh must display rows immediately with length_s=None; the WAV probe runs
+    on a background thread. This is the core H4 fix — the UI thread must never open
+    tens of thousands of WAV headers synchronously."""
+    ws = str(tmp_path)
+    _write_wav(os.path.join(ws, "out", "fw", "audio", "f1.wav"), seconds=1.5)
+    _write_csv(os.path.join(ws, "out", "fw", "full-reel-manifest.csv"), FW_FULL,
+               [{"line_id": "f1", "wav": "audio/f1.wav", "speaker": "Varl",
+                 "subtitle": "Hello", "gamescript_index": "1", "quest": "MQ", "tier": "S",
+                 "score": "9", "transcript": "x"}])
+    v = LibraryView()
+    qtbot.addWidget(v)
+    v.refresh("fw", ws)
+    # Rows appear immediately, lengths are None — no blocking WAV probe.
+    assert v.total_count() == 1
+    assert v.rows()[0].length_s is None
+    assert v.visible_count() == 1
+    # Length column shows "—" (None signal).
+    idx = v._model.index(0, v._model.COL_LEN)
+    assert v._model.data(idx, Qt.DisplayRole) == "—"
+
+
+def test_fw_lengths_fill_via_background_pass(qtbot, tmp_path):
+    """After the background QThreadPool worker finishes, lengths fill in and the model
+    emits dataChanged for the length column so the table repaints progressively."""
+    ws = str(tmp_path)
+    _write_wav(os.path.join(ws, "out", "fw", "audio", "f1.wav"), seconds=1.5)
+    _write_csv(os.path.join(ws, "out", "fw", "full-reel-manifest.csv"), FW_FULL,
+               [{"line_id": "f1", "wav": "audio/f1.wav", "speaker": "Varl",
+                 "subtitle": "Hello", "gamescript_index": "1", "quest": "MQ", "tier": "S",
+                 "score": "9", "transcript": "x"}])
+    v = LibraryView()
+    qtbot.addWidget(v)
+    v.refresh("fw", ws)
+    assert v.rows()[0].length_s is None
+
+    # Wait for the background probe and flush queued signals.
+    v._duration_pool.waitForDone()
+    QApplication.processEvents()
+
+    assert v.rows()[0].length_s is not None
+    assert abs(v.rows()[0].length_s - 1.5) < 0.01
+    # Short controls should be enabled now that lengths are known.
+    assert v._uncheck_short_btn.isEnabled() is True
+    idx = v._model.index(0, v._model.COL_LEN)
+    assert v._model.data(idx, Qt.DisplayRole) != "—"
+
+
+def test_stale_duration_task_results_are_dropped(qtbot, tmp_path, monkeypatch):
+    """When refresh() fires while a prior duration probe is still in flight, the stale
+    result must be discarded — the generation tag prevents double-population and races."""
+    ws = str(tmp_path)
+    _write_wav(os.path.join(ws, "out", "fw", "audio", "f1.wav"), seconds=1.0)
+    _write_csv(os.path.join(ws, "out", "fw", "full-reel-manifest.csv"), FW_FULL,
+               [{"line_id": "f1", "wav": "audio/f1.wav", "speaker": "Varl",
+                 "subtitle": "Hello", "gamescript_index": "1", "quest": "MQ", "tier": "S",
+                 "score": "9", "transcript": "x"}])
+    v = LibraryView()
+    qtbot.addWidget(v)
+    v.refresh("fw", ws)
+
+    # Capture the generation that the first task sees.
+    gen_before = v._duration_generation
+
+    # Second refresh bumps generation again (simulates rapid refresh before probe finishes).
+    v.refresh("fw", ws)
+    assert v._duration_generation == gen_before + 1
+
+    # Simulate a stale result arriving for the old generation — it must be discarded.
+    v._on_durations_ready(gen_before, {"f1": 5.0})
+    # The rows should NOT have length 5.0 — the stale result was dropped.
+    assert v.rows()[0].length_s is None  # fresh refresh also started with None
+
+    # After the current generation's probe finishes, lengths are correct.
+    v._duration_pool.waitForDone()
+    QApplication.processEvents()
+    assert v.rows()[0].length_s == 1.0
 
 
 def test_empty_state_overlay(qtbot, tmp_path):

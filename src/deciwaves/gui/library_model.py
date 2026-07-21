@@ -30,6 +30,7 @@ import json
 import os
 import struct
 from dataclasses import dataclass, replace
+from pathlib import Path
 
 from deciwaves.engine.atomic_io import atomic_write
 
@@ -190,7 +191,7 @@ def _load_fw(workspace: str) -> list[LineRow]:
         audio = _fw_audio_path(root, r.get("wav"))
         out.append(LineRow(
             line_id=r.get("line_id", ""), audio_path=audio,
-            length_s=wav_duration_seconds(audio), has_subtitle=False, order_index=i))
+            length_s=None, has_subtitle=False, order_index=i))
     return out
 
 
@@ -204,7 +205,7 @@ def _load_fw_manifest(root: str, path: str) -> list[LineRow]:
         out.append(LineRow(
             line_id=r.get("line_id", ""), speaker=r.get("speaker") or None,
             subtitle=sub, scene=r.get("quest") or None, tier=r.get("tier") or None,
-            audio_path=audio, length_s=wav_duration_seconds(audio),
+            audio_path=audio, length_s=None,
             has_subtitle=_has_subtitle(sub), order_index=i))
     return out
 
@@ -233,14 +234,63 @@ def _mark_dupes(rows: list[LineRow]) -> list[LineRow]:
 
 # --- WAV-header duration reader (no external deps) -------------------------
 
+# Cache keyed by (normalized_path, mtime): a WAV file at the same path with the same
+# modification time must have the same header -> reusing it avoids tens of thousands of
+# opens across repeated refreshes. None values are also cached (absent / unparseable files).
+_DURATION_CACHE: dict[tuple[str, float], float | None] = {}
+
+
+def _cached_wav_duration(path: str | None) -> float | None:
+    """Duration from the cache or by opening the WAV header. Keyed on (path, mtime) so
+    re-probes happen only when the file is actually different. If the file is absent we
+    return the last-cached value for that path — the next fresh probe with a new mtime
+    will naturally evict it."""
+    if not path:
+        return None
+    resolved = str(Path(path).resolve())
+    try:
+        current_mtime = os.path.getmtime(path)
+    except OSError:
+        current_mtime = 0.0
+
+    # Exact (path, mtime) hit.
+    key = (resolved, current_mtime)
+    if key in _DURATION_CACHE:
+        return _DURATION_CACHE[key]
+
+    # Same path but file gone or mtime changed — check for a stale-cached
+    # entry (any mtime for this resolved path). Useful when the file was
+    # probed then deleted before the next refresh re-asks.
+    if current_mtime == 0.0:
+        for (p, _), dur in _DURATION_CACHE.items():
+            if p == resolved:
+                return dur
+
+    if current_mtime == 0.0 or not os.path.isfile(path):
+        return None
+
+    _DURATION_CACHE[key] = wav_duration_seconds(path)
+    return _DURATION_CACHE[key]
+
+
+def resolve_wav_durations(rows: list[LineRow]) -> dict[str, float | None]:
+    """Probe WAV headers for every row that carries an ``audio_path``, using and populating
+    the path+mtime cache. Returns ``{line_id: duration_seconds}``, including ``None`` for
+    rows whose WAV couldn't be probed (absent / unparseable).
+
+    This function does real file I/O and is expected to run on a background thread; the
+    calling view feeds its results back into the model via ``dataChanged`` for the length
+    column only."""
+    return {r.line_id: _cached_wav_duration(r.audio_path) for r in rows}
+
+
 def wav_duration_seconds(path: str | None) -> float | None:
     """Duration in seconds from a WAV file's header, or ``None`` if the file is
     absent/unreadable or not a parseable PCM WAV.
 
     Walks RIFF chunks for ``fmt `` (sample rate, channels, bits-per-sample) and ``data``
     (payload size); duration = data_bytes / (sample_rate * channels * bits/8). Reads only the
-    header region, tolerates unexpected bytes by returning ``None`` -- safe to call across
-    tens of thousands of clip WAVs during a refresh."""
+    header region, tolerates unexpected bytes by returning ``None``."""
     if not path or not os.path.isfile(path):
         return None
     try:
