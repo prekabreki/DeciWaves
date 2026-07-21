@@ -75,6 +75,7 @@ class DoctorPanel(QWidget):
 
         # doctor --json must be parsed from clean stdout (merge_stderr=False)
         self._runner = CaptureRunner(self, merge_stderr=False)
+        self._runner.started.connect(self._on_started)
         self._runner.finished.connect(self._on_finished)
 
         self._recheck_btn = QPushButton("Re-check")
@@ -158,7 +159,15 @@ class DoctorPanel(QWidget):
         h.addWidget(text_label, 1)
         return row
 
+    def _on_started(self) -> None:
+        _clear(self._rows_layout)
+        placeholder = QLabel("<i>Checking…</i>")
+        placeholder.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
+        self._rows_layout.addWidget(placeholder)
+        self._recheck_btn.setEnabled(False)
+
     def _on_finished(self, _code: int, text: str) -> None:
+        self._recheck_btn.setEnabled(True)
         payload = load_doctor_payload(text)
         if payload is None:
             payload = {"ok": False, "checks": [
@@ -171,11 +180,13 @@ class DoctorPanel(QWidget):
 class SetupScreen(QWidget):
     finished = Signal(int)  # setup exit code, after rows + warnings are rendered
     output = Signal(str)    # raw stdout chunks, re-emitted for the shared log console
+    busy_changed = Signal(bool)  # fired when _busy toggles, lets shell enforce mutual exclusion
 
     def __init__(self, base: list[str] | None = None, parent=None):
         super().__init__(parent)
         self._base = base or default_base()
         self._busy = False
+        self._pipeline_busy = False
         self._rows: list = []
         self._warnings: list[str] = []
 
@@ -208,12 +219,18 @@ class SetupScreen(QWidget):
         self._warnings_label.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
         self._warnings_label.setStyleSheet(f"color: {_SEV_STYLE[SEV_WARN][1]};")
 
+        self._cancel_btn = QPushButton("Cancel")
+        self._cancel_btn.setToolTip("Stop the running setup (safe — terminates then kills)")
+        self._cancel_btn.clicked.connect(lambda: self.cancel())
+        self._cancel_btn.setVisible(False)
+
         layout = QVBoxLayout(self)
         header = QHBoxLayout()
         header.addWidget(QLabel("<b>Setup</b>"))
         header.addStretch(1)
         for btn in (self._run_btn, self._redownload_btn, self._recheck_btn):
             header.addWidget(btn)
+        header.addWidget(self._cancel_btn)
         layout.addLayout(header)
         layout.addLayout(tools_box)
         layout.addWidget(self._paths_label)
@@ -241,6 +258,8 @@ class SetupScreen(QWidget):
         if not self._runner.start(argv):
             return False
         self._busy = True
+        self._update_buttons()
+        self.busy_changed.emit(True)
         for tool in _SETUP_TOOLS:
             self._tool_spinner[tool].setVisible(True)
             self._tool_status[tool].setVisible(False)
@@ -248,6 +267,18 @@ class SetupScreen(QWidget):
 
     def cancel(self) -> None:
         self._runner.cancel()
+
+    def _update_buttons(self) -> None:
+        enabled = not self._busy and not self._pipeline_busy
+        self._run_btn.setEnabled(enabled)
+        self._redownload_btn.setEnabled(enabled)
+        self._recheck_btn.setEnabled(enabled)
+        self._cancel_btn.setVisible(self._busy)
+
+    def set_running(self, running: bool) -> None:
+        """Disable setup buttons when the pipeline is busy (external mutual-exclusion)."""
+        self._pipeline_busy = running
+        self._update_buttons()
 
     @property
     def is_busy(self) -> bool:
@@ -280,6 +311,8 @@ class SetupScreen(QWidget):
 
     def _on_finished(self, code: int, text: str) -> None:
         self._busy = False
+        self._update_buttons()
+        self.busy_changed.emit(False)
         self._rows = parse_setup_summary(text)
         self._warnings = parse_setup_warnings(text)
         by_label = {r.label: r for r in self._rows}
@@ -293,12 +326,13 @@ class SetupScreen(QWidget):
                 status.setStyleSheet("")
                 continue
             status.setText(row.detail)
-            # Same row-only severity rule as tool_severity (doctor not consulted yet); reuse
-            # it so the pre-doctor paint and the post-doctor regrade can't drift (#110 review).
             sev = tool_severity(row, [])
             status.setStyleSheet(f"color: {_SEV_STYLE[sev][1]};")
-        path_rows = [r for r in self._rows if r.label not in _SETUP_TOOLS]
-        self._paths_label.setText("\n".join(f"{r.label}: {r.detail}" for r in path_rows))
+        if code != 0 and not self._rows:
+            self._paths_label.setText("setup exited with code {}".format(code))
+        else:
+            path_rows = [r for r in self._rows if r.label not in _SETUP_TOOLS]
+            self._paths_label.setText("\n".join(f"{r.label}: {r.detail}" for r in path_rows))
         self._warnings_label.setText("\n".join(self._warnings))
         self.finished.emit(int(code))
 

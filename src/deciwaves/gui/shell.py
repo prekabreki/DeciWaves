@@ -99,6 +99,9 @@ class MainWindow(QMainWindow):
         self.pipeline.strip.rerun_requested.connect(self._on_rerun)
         self.pipeline.coverage.escalate_requested.connect(self._on_escalate)
 
+        self.pipeline.setup_doctor.setup.busy_changed.connect(
+            lambda _busy: self._sync_running())
+
         # the adaptive per-game panel (#73): swap controls on game change, then refresh its
         # types.json/GPU context; its intents drive standalone re-order + BYO-path persistence.
         self.game_panel.set_game(self.bar.current_game())
@@ -290,6 +293,7 @@ class MainWindow(QMainWindow):
         self.pipeline.strip.set_running(busy)
         self.library.export.set_running(busy)
         self.library.export.set_dumping(self._controller.dump.is_running)
+        self.pipeline.setup_doctor.setup.set_running(busy)
 
     def _on_poll_start(self) -> None:
         self._poll.start()
@@ -308,7 +312,9 @@ class MainWindow(QMainWindow):
 
     def _sync_running(self) -> None:
         self._controller._sync_running()
-        self._on_busy_changed(self._controller.runner.is_running or self._controller.dump.is_running)
+        self._on_busy_changed(self._controller.runner.is_running
+                              or self._controller.dump.is_running
+                              or self.pipeline.setup_doctor.setup.is_busy)
 
     def _report_export_result(self, game: str | None, code: int) -> None:
         msg = self._controller._report_export_result(game, code)
