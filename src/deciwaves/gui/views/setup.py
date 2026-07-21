@@ -32,11 +32,13 @@ from deciwaves.gui.doctor_model import (
     SEV_WARN,
     DoctorItem,
     load_doctor_payload,
+    overall_ok,
     parse_doctor_payload,
     pill_for,
     severity,
 )
-from deciwaves.gui.widgets import HelpIcon, Pill
+from deciwaves.gui.guide_model import tools_ready
+from deciwaves.gui.widgets import CollapsibleSection, HelpIcon, Pill
 from deciwaves.gui.setup_model import (
     build_setup_argv,
     parse_setup_summary,
@@ -348,26 +350,52 @@ class SetupScreen(QWidget):
 
 
 class SetupDoctorView(QFrame):
-    """Setup screen above the Doctor panel -- the first-run home (spec §2, §3)."""
+    """Setup screen above the Doctor panel -- the first-run home (spec §2, §3),
+    each wrapped in a CollapsibleSection that collapses once ready (#112)."""
 
     def __init__(self, base: list[str] | None = None, parent=None):
         super().__init__(parent)
         self.setup = SetupScreen(base)
         self.doctor = DoctorPanel(base)
+        self.setup_section = CollapsibleSection("Setup", self.setup)
+        self.doctor_section = CollapsibleSection("Doctor", self.doctor)
+
         # first-run flow: a finished setup re-checks doctor toward a green panel (spec §3)
         self.setup.finished.connect(lambda _code: self.doctor.recheck())
-        # ...and every doctor result re-grades the setup rows, so Setup can't show a tool as
-        # FAILED (red) while Doctor shows it ok (green) at the same time (#110).
+        # ...and every doctor result re-grades the setup rows (#110) and re-derives the
+        # collapse/summary state (#112).
         self.doctor.refreshed.connect(
             lambda: self.setup.regrade_against_doctor(self.doctor.items()))
+        self.doctor.refreshed.connect(self.apply_readiness_summary)
 
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignTop)
-        layout.addWidget(self.setup)
+        layout.addWidget(self.setup_section)
         line = QFrame()
         line.setFrameShape(QFrame.HLine)
         layout.addWidget(line)
-        layout.addWidget(self.doctor)
+        layout.addWidget(self.doctor_section)
 
     def set_game(self, game: str) -> None:
         self.doctor.set_game(game)
+
+    def apply_readiness_summary(self) -> None:
+        """Derive each section's one-line summary and default collapse from the
+        latest doctor payload: collapse when ready (the rail carries status),
+        expand where a required check is missing (#112)."""
+        payload = self.doctor.last_payload()
+        setup_ok = tools_ready(payload)
+        doctor_ok = overall_ok(payload) if payload is not None else False
+
+        self.setup_section.set_summary(
+            "Tools ready ✓" if setup_ok else "Setup needed — downloads ~200 MB")
+        self.setup_section.set_collapsed(setup_ok)
+
+        items = self.doctor.items()
+        total = len(items)
+        optional = sum(1 for it in items
+                       if pill_for(it, self.doctor._game) == ("Optional", "optional"))
+        self.doctor_section.set_summary(
+            f"{total - optional} required OK · {optional} optional" if doctor_ok
+            else "Doctor found something to fix")
+        self.doctor_section.set_collapsed(doctor_ok)
