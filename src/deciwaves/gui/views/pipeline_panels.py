@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from deciwaves.gui.theme import NEUTRAL, OK, RUNNING, WARN
 from deciwaves.gui.coverage_model import (
     coverage_summary,
     format_coverage,
@@ -23,10 +24,7 @@ from deciwaves.gui.coverage_model import (
 from deciwaves.gui.issues_model import gather_issues
 from deciwaves.gui.pipeline_model import StageState, has_gpu_stage, stage_states
 
-_DONE = "#167f3b"      # green (matches the global bar / doctor panel)
-_PENDING = "#666666"   # gray
-_RUNNING = "#1b6ec2"   # blue
-_WARN = "#b06f00"      # amber
+# Theme colours imported from deciwaves.gui.theme: OK, NEUTRAL, RUNNING, WARN, ERROR
 
 
 def _clear(layout) -> None:
@@ -80,11 +78,11 @@ class StageStrip(QWidget):
 
     def _chip(self, st: StageState) -> QWidget:
         if st.name == self._running:
-            colour, mark = _RUNNING, "▶"
+            colour, mark = RUNNING, "▶"
         elif st.done:
-            colour, mark = _DONE, "✓"
+            colour, mark = OK, "✓"
         else:
-            colour, mark = _PENDING, "○"
+            colour, mark = NEUTRAL, "○"
         label = f"{mark} {st.name}" + (" (GPU)" if st.gpu else "")
         chip = QLabel(label)
         chip.setToolTip(f"Pipeline stage: {st.name} — right-click to re-run from here")
@@ -97,6 +95,7 @@ class StageStrip(QWidget):
 
     def _chip_menu(self, chip: QWidget, pos, stage: str) -> None:
         menu = QMenu(self)
+        menu.setAttribute(Qt.WA_DeleteOnClose)
         action = menu.addAction("Re-run from here")
         action.setEnabled(not self._busy)   # grayed out while a job runs (spec §5.3)
         action.triggered.connect(lambda: self.request_rerun(stage))
@@ -153,7 +152,7 @@ class CoverageBar(QWidget):
         self._has_coverage = False
         self._label = QLabel("")
         self._escalate_btn = QPushButton("Transcribe all (hours)")
-        self._escalate_btn.setStyleSheet(f"color: {_WARN};")
+        self._escalate_btn.setStyleSheet(f"color: {WARN};")
         self._escalate_btn.clicked.connect(lambda: self.escalate_requested.emit())
         row = QHBoxLayout(self)
         row.setAlignment(Qt.AlignLeft)
@@ -206,7 +205,7 @@ class IssuesPanel(QWidget):
         self._header.setText(f"<b>Issues</b> — {total:,}")
         for g in self._groups:
             row = QLabel(f"{g.source}: {g.count:,}")
-            row.setStyleSheet(f"color: {_WARN};")
+            row.setStyleSheet(f"color: {WARN};")
             if g.sample:
                 row.setToolTip("\n".join(g.sample))
             self._body_layout.addWidget(row)
