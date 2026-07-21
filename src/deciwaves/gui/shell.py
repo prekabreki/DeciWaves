@@ -370,6 +370,7 @@ class MainWindow(QMainWindow):
     # --- session persistence ------------------------------------------------
 
     def closeEvent(self, event) -> None:
+        self.library.flush_pending_selection()
         self._settings.setValue("window/geometry", self.saveGeometry())
         self._settings.setValue("window/state", self.saveState())
         self._settings.setValue("workspace", self.bar.workspace())
