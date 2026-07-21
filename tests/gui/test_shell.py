@@ -71,3 +71,36 @@ def test_cancel_from_shell_stops_the_job_and_resets_chip(qtbot):
         w.runner.cancel()
     assert w.runner.is_running is False
     assert w.bar._chip.text() == "idle"
+
+
+def test_qsettings_round_trip_saves_and_restores_state(tmp_path, qtbot):
+    """Build a MainWindow against an isolated QSettings scope, mutate state,
+    close it (triggering closeEvent), then rebuild from the same settings and
+    assert restored game/geometry/header state match what was saved."""
+    from PySide6.QtCore import QSettings
+
+    settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
+
+    w1 = MainWindow(settings=settings)
+    qtbot.addWidget(w1)
+    w1.setGeometry(200, 200, 1000, 800)
+
+    w1.bar.select_game("hzd")
+    w1.bar.set_workspace("/test/workspace")
+    w1_header = w1.library._table.horizontalHeader().saveState()
+
+    w1.close()
+
+    assert settings.value("game") == "hzd"
+    assert settings.value("workspace") == "/test/workspace"
+    assert settings.value("window/geometry") is not None
+    assert settings.value("library/header_state") == w1_header
+
+    w2 = MainWindow(settings=settings)
+    qtbot.addWidget(w2)
+
+    assert w2.bar.current_game() == "hzd"
+    assert w2.bar.workspace() == "/test/workspace"
+
+    qtbot.wait(50)
+    assert w2.library._table.horizontalHeader().saveState() == w1_header

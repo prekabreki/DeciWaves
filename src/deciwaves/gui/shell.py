@@ -30,8 +30,9 @@ _CHECKS = {
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, settings=None):
         super().__init__(parent)
+        self._settings = settings if settings is not None else QSettings("DeciWaves", "gui")
         self.setWindowTitle("DeciWaves")
         self.setMinimumSize(900, 600)
 
@@ -128,54 +129,40 @@ class MainWindow(QMainWindow):
         self.bar.workspace_changed.connect(lambda _ws: self._refresh_game_panel())
         self.bar.workspace_changed.connect(lambda _ws: setattr(self, '_resolver', None))
 
-        self._settings = QSettings("DeciWaves", "gui")
+        # --- restore persisted session state ---------------------------------
+        geo = self._settings.value("window/geometry")
+        if geo is not None:
+            self.restoreGeometry(geo)
 
-        # Restore last workspace first (set_workspace emits no signal)
-        ws = self._settings.value("lastWorkspace", "")
-        if ws:
+        state = self._settings.value("window/state")
+        if state is not None:
+            self.restoreState(state)
+
+        ws = self._settings.value("workspace")
+        if ws is not None and ws:
             self.bar.set_workspace(ws)
 
-        # Restore last game; fall back to "ds" for missing/invalid values
-        last_game = self._settings.value("lastGame", "ds")
-        if isinstance(last_game, str) and last_game in ("ds", "hzd", "fw"):
-            self.bar.select_game(last_game)
+        game = self._settings.value("game")
+        if game in ("ds", "hzd", "fw"):
+            self.bar.select_game(game)
+            if game == "ds":
+                # select_game("ds") leaves the combo on its existing index 0,
+                # so game_changed does not fire -- prime explicitly.
+                self._refresh_status()
+                self._refresh_panels()
+                self._refresh_library()
+                self._refresh_game_panel()
         else:
             self.bar.select_game("ds")
-        # select_game("ds") leaves the combo on its existing index 0, so game_changed
-        # does not fire -- prime the status line and panels for the initial game explicitly.
-        if self.bar.current_game() == "ds":
             self._refresh_status()
             self._refresh_panels()
             self._refresh_library()
             self._refresh_game_panel()
 
-        # Restore header column state and sort (after the library has loaded)
-        hdr_state = self._settings.value("headerState")
-        if hdr_state is not None:
-            self.library._table.horizontalHeader().restoreState(hdr_state)
-        sort_key = self._settings.value("sortKey")
-        if sort_key is not None:
-            self.library._sort_key = sort_key
-            self.library._sort_desc = bool(self._settings.value("sortDesc", False))
-
-        # Restore window geometry (must come after all widgets are added)
-        geom = self._settings.value("geometry")
-        if geom is not None:
-            self.restoreGeometry(geom)
-        state = self._settings.value("windowState")
-        if state is not None:
-            self.restoreState(state)
-
-    def closeEvent(self, event):
-        self._settings.setValue("geometry", self.saveGeometry())
-        self._settings.setValue("windowState", self.saveState())
-        self._settings.setValue("lastGame", self.bar.current_game())
-        self._settings.setValue("lastWorkspace", self.bar.workspace())
-        hdr = self.library._table.horizontalHeader()
-        self._settings.setValue("headerState", hdr.saveState())
-        self._settings.setValue("sortKey", self.library._sort_key)
-        self._settings.setValue("sortDesc", self.library._sort_desc)
-        super().closeEvent(event)
+        saved_header = self._settings.value("library/header_state")
+        if saved_header is not None:
+            QTimer.singleShot(0, lambda h=saved_header: (
+                self.library._table.horizontalHeader().restoreState(h)))
 
     # --- status + panels ---------------------------------------------------
 
@@ -366,3 +353,14 @@ class MainWindow(QMainWindow):
             self.pipeline.append_log(error)
         else:
             self.pipeline.append_log(f"export: catalog copied to {dest}\n")
+
+    # --- session persistence ------------------------------------------------
+
+    def closeEvent(self, event) -> None:
+        self._settings.setValue("window/geometry", self.saveGeometry())
+        self._settings.setValue("window/state", self.saveState())
+        self._settings.setValue("workspace", self.bar.workspace())
+        self._settings.setValue("game", self.bar.current_game())
+        self._settings.setValue("library/header_state",
+                                self.library._table.horizontalHeader().saveState())
+        super().closeEvent(event)
