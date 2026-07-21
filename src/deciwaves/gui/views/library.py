@@ -6,7 +6,7 @@ here ▶ only reflects availability and emits an (as-yet unconnected) ``preview_
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QAbstractTableModel, QEvent, QModelIndex, Qt, Signal
+from PySide6.QtCore import QAbstractTableModel, QEvent, QModelIndex, Qt, QTimer, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -62,9 +62,20 @@ class _TableModel(QAbstractTableModel):
         self._visible: list[LineRow] = []
 
     def set_rows(self, visible: list[LineRow]) -> None:
-        self.beginResetModel()
+        old_by_row = {i: r.line_id for i, r in enumerate(self._visible)}
+        new_by_id = {r.line_id: i for i, r in enumerate(visible)}
+        persistent = self.persistentIndexList()
+        self.layoutAboutToBeChanged.emit()
+        for idx in persistent:
+            if idx.isValid():
+                row = idx.row()
+                lid = old_by_row.get(row)
+                if lid is not None and lid in new_by_id:
+                    new_row = new_by_id[lid]
+                    if new_row != row:
+                        self.changePersistentIndex(idx, self.index(new_row, idx.column()))
         self._visible = visible
-        self.endResetModel()
+        self.layoutChanged.emit()
 
     def row_at(self, r: int) -> LineRow:
         return self._visible[r]
@@ -225,8 +236,14 @@ class LibraryView(QWidget):
         layout.addWidget(self._status)
         layout.addWidget(self.export)
 
+        # --- search debounce (#120) ---
+        self._debounce_timer = QTimer()
+        self._debounce_timer.setSingleShot(True)
+        self._debounce_timer.setInterval(150)
+        self._debounce_timer.timeout.connect(self._apply_filters)
+
         # --- wiring ---
-        self._search.textChanged.connect(self._apply_filters)
+        self._search.textChanged.connect(self._on_search_changed)
         self._speaker.currentIndexChanged.connect(self._apply_filters)
         self._hide_dupes.toggled.connect(self._apply_filters)
         self._hide_nosub.toggled.connect(self._apply_filters)
@@ -293,7 +310,13 @@ class LibraryView(QWidget):
         for w in (self._search, self._hide_dupes, self._hide_nosub):
             w.blockSignals(False)
 
+    def _on_search_changed(self) -> None:
+        if not self._debounce_timer.isActive():
+            self._apply_filters()
+        self._debounce_timer.start()
+
     def _apply_filters(self) -> None:
+        self._debounce_timer.stop()
         self._visible = sort_rows(
             visible_rows(self._rows, search=self._search.text(),
                          speaker=self._speaker.currentText() or "all",
