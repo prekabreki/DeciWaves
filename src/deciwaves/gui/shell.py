@@ -291,7 +291,8 @@ class MainWindow(QMainWindow):
     def _on_export_mp3(self, bitrate: int) -> None:
         error = self._controller.start_export_mp3(
             self.bar.current_game(), self._workspace(), bitrate,
-            self.library.unchecked_ids(), self.game_panel.render_scope())
+            self.library.unchecked_ids(), self.library.checked_count(),
+            self.game_panel.render_scope())
         if error:
             self.pipeline.append_log(error)
 
@@ -319,9 +320,5 @@ class MainWindow(QMainWindow):
         self.library.export.dump_finished(ok, failed)
 
     def _on_export_catalog(self, dest: str) -> None:
-        error = self._controller.export_catalog(
+        self._controller.start_catalog_copy(
             self.bar.current_game(), self._workspace(), dest)
-        if error:
-            self.pipeline.append_log(error)
-        else:
-            self.pipeline.append_log(f"export: catalog copied to {dest}\n")

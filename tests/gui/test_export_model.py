@@ -19,6 +19,7 @@ from deciwaves.gui.export_model import (
     catalog_source_path,
     render_selection_argv,
     write_render_selection,
+    write_render_selection_with_tiers,
 )
 
 from deciwaves.games.ds import story_order
@@ -409,3 +410,48 @@ def test_resolve_ds_install_matches_cli():
 
     # Unconfigured -> (None, None)
     assert resolve_ds_install({}) == (None, None)
+
+
+# --- write_render_selection_with_tiers (M8a) -------------------------------
+
+def test_write_render_selection_with_tiers_returns_fw_tiers(tmp_path):
+    """The tier union is computed during the single write pass and returned
+    correctly — no re-read of the just-written file (M8a)."""
+    from deciwaves.games.fw import render as fw_render
+    ws = str(tmp_path)
+    root = os.path.join(ws, "out", "fw")
+    _write_csv(os.path.join(root, "full-reel-manifest.csv"), FW_COLS, [
+        _fw_row("a", tier="1"), _fw_row("b", tier="W"),
+        _fw_row("c", tier="1"),  # duplicate tier — only first-seen counts
+    ])
+
+    csv_path, fw_tiers = write_render_selection_with_tiers(ws, "fw", unchecked={"b"})
+    assert os.path.isfile(csv_path)
+    assert fw_tiers == "1"  # row "b" (tier=W) was unchecked, so union is just {"1"}
+
+    # Verify the tier union is correct for the checked rows
+    passed = {t.strip() for t in fw_tiers.split(",") if t.strip()}
+    kept = fw_render.build_spine(
+        [_fw_row("a", tier="1", gamescript_index="0"),
+         _fw_row("c", tier="1", gamescript_index="1")],
+        bound_tiers=passed)
+    assert {i.line_id for i in kept} == {"a", "c"}
+
+
+def test_write_render_selection_with_tiers_all_checked_union(tmp_path):
+    ws = str(tmp_path)
+    root = os.path.join(ws, "out", "fw")
+    _write_csv(os.path.join(root, "full-reel-manifest.csv"), FW_COLS, [
+        _fw_row("a", tier="1"), _fw_row("b", tier="2"),
+        _fw_row("c", tier="S"),
+    ])
+    csv_path, fw_tiers = write_render_selection_with_tiers(ws, "fw", unchecked=set())
+    assert fw_tiers == "1,2,S"
+
+
+def test_write_render_selection_with_tiers_non_fw_returns_empty_tiers(tmp_path):
+    ws = str(tmp_path)
+    _make_ds_playlist(ws, ["a"])
+    csv_path, fw_tiers = write_render_selection_with_tiers(ws, "ds", unchecked=set())
+    assert fw_tiers == ""
+    assert os.path.isfile(csv_path)

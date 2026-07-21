@@ -7,17 +7,17 @@ from __future__ import annotations
 import os
 import shutil
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, QThreadPool, Signal
 from PySide6.QtWidgets import QMessageBox
 
 from deciwaves.cli import config
 from deciwaves.gui.cli_command import default_base
-from deciwaves.gui.export import DumpRunner
+from deciwaves.gui.export import DumpRunner, _CatalogCopySignals, _CatalogCopyWorker
 from deciwaves.gui.export_model import (
     ExportError,
     catalog_source_path,
     render_selection_argv,
-    write_render_selection,
+    write_render_selection_with_tiers,
 )
 from deciwaves.gui.game_panel_model import transcript_order_argv
 from deciwaves.gui.gpu_gate import confirm_gpu
@@ -117,16 +117,21 @@ class JobController(QObject):
     # -- export dispatch (#72) -----------------------------------------------
 
     def start_export_mp3(self, game: str, workspace: str, bitrate: int,
-                         unchecked_ids: list[str],
+                         unchecked_ids: list[str], checked_count: int = 0,
                          render_scope_kwargs: dict | None = None) -> str | None:
         if self.runner.is_running or self.dump.is_running:
             return "export: a job is already running.\n"
+        if checked_count <= 0:
+            return "export: nothing selected — check some rows first.\n"
         try:
-            csv_path = write_render_selection(workspace, game, unchecked_ids)
+            csv_path, fw_tiers = write_render_selection_with_tiers(
+                workspace, game, unchecked_ids)
             scope = render_scope_kwargs or {}
+            if game == "fw" and "tiers" not in scope:
+                scope["tiers"] = fw_tiers
             argv = render_selection_argv(default_base(), workspace, game, csv_path,
-                                         bitrate=bitrate, cfg=config.load(),
-                                         **scope)
+                                          bitrate=bitrate, cfg=config.load(),
+                                          **scope)
         except ExportError as exc:
             return f"export: {exc}\n"
         self._job_kind = "export"
@@ -157,6 +162,17 @@ class JobController(QObject):
         except OSError as exc:
             return f"export: could not write catalog: {exc}\n"
         return None
+
+    def start_catalog_copy(self, game: str, workspace: str, dest: str) -> None:
+        signals = _CatalogCopySignals()
+        signals.finished.connect(self._on_catalog_copy_finished)
+        worker = _CatalogCopyWorker(game, workspace, dest, signals)
+        self._catalog_signals = signals
+        QThreadPool.globalInstance().start(worker)
+
+    def _on_catalog_copy_finished(self, msg: str) -> None:
+        self.log_message.emit(msg)
+        self._catalog_signals = None
 
     # -- job lifecycle -------------------------------------------------------
 

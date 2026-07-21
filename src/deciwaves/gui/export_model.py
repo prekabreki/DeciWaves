@@ -119,6 +119,51 @@ def write_render_selection(workspace: str, game: str, unchecked: set[str]) -> st
     return out_path
 
 
+def write_render_selection_with_tiers(workspace: str, game: str,
+                                      unchecked: set[str]) -> tuple[str, str]:
+    """Like :func:`write_render_selection` but also returns the precomputed tier union
+    for FW (``csv_path, tiers_str``). For non-FW games the second element is ``""``.
+
+    Computing tiers during the single write pass avoids the second file read that
+    ``_fw_tiers`` would do (M8)."""
+    src = render_input_source(workspace, game)
+    if src is None:
+        raise ExportError(_missing_source_message(game))
+    out_path = render_selection_path(workspace, game)
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    unchecked = set(unchecked)
+
+    with open(src, "r", newline="", encoding="utf-8-sig") as f:
+        reader = csv.DictReader(f)
+        fieldnames = reader.fieldnames or []
+        rows = [r for r in reader if r.get("line_id", "") not in unchecked]
+
+    fw_tiers = _collect_tiers(game, rows)
+
+    def _write(tmp_path: str) -> None:
+        with open(tmp_path, "w", newline="", encoding="utf-8") as out:
+            w = csv.DictWriter(out, fieldnames=fieldnames, extrasaction="ignore")
+            w.writeheader()
+            w.writerows(rows)
+
+    atomic_write(out_path, _write)
+    return out_path, fw_tiers
+
+
+def _collect_tiers(game: str, rows: list[dict]) -> str:
+    """Compute the FW tier union from already-filtered *rows* in first-seen order.
+    Returns ``""`` for non-FW games; falls back to ``_FW_ALL_TIERS`` when no tier
+    values are present (degenerate/empty selection -- render no-ops on it anyway)."""
+    if game != "fw":
+        return ""
+    tiers: list[str] = []
+    for r in rows:
+        t = (r.get("tier") or "").strip()
+        if t and t not in tiers:
+            tiers.append(t)
+    return ",".join(tiers) if tiers else _FW_ALL_TIERS
+
+
 def _missing_source_message(game: str) -> str:
     hint = {"ds": "run `deciwaves ds order` first",
             "hzd": "run `deciwaves hzd bind` first",
