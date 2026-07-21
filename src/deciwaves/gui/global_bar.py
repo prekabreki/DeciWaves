@@ -8,6 +8,8 @@ from PySide6.QtWidgets import (
     QComboBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidget,
 )
 
+from deciwaves.gui.theme import ERROR, OK
+
 # (key, menu label) -- keys match the CLI game tokens / doctor check map.
 _GAMES = [("ds", "Death Stranding"),
           ("hzd", "Horizon Zero Dawn"),
@@ -81,7 +83,7 @@ class GlobalBar(QWidget):
 
     def set_install_status(self, text: str, ok: bool) -> None:
         self._status.setText(text)
-        self._status.setStyleSheet("color: #167f3b;" if ok else "color: #b00020;")
+        self._status.setStyleSheet(f"color: {OK};" if ok else f"color: {ERROR};")
 
     def set_job_chip(self, text: str) -> None:
         self._chip.setText(text)

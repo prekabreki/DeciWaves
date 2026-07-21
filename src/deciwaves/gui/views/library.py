@@ -215,6 +215,16 @@ class LibraryView(QWidget):
         self._unavailable_tooltip = ""
         self._sort_key: str | None = None
         self._sort_desc = False
+        self._checked_count = 0
+        self._can_export_mp3 = False
+        self._has_catalog = False
+
+        # Selection debounce (issue #133 L3): a real member QTimer so rapid Space-toggling
+        # produces exactly one disk write.
+        self._selection_timer = QTimer(self)
+        self._selection_timer.setSingleShot(True)
+        self._selection_timer.setInterval(150)
+        self._selection_timer.timeout.connect(self._flush_selection)
 
         # --- filter row ---
         self._search = QLineEdit()
@@ -314,9 +324,13 @@ class LibraryView(QWidget):
         self._workspace = workspace
         self._rows = load_lines(workspace, game)
         self._unchecked = load_selection(workspace, game)
+        self._checked_count = sum(
+            1 for r in self._rows if r.line_id not in self._unchecked)
         self._bind_done = is_bind_done(workspace, game)
         self._available = availability_by_id(self._rows, game, bind_done=self._bind_done)
         self._unavailable_tooltip = preview_unavailable_tooltip(game, bind_done=self._bind_done)
+        self._can_export_mp3 = can_export_mp3(workspace, game)
+        self._has_catalog = catalog_source_path(workspace, game) is not None
         self._undo.clear()
 
         if game_changed:
@@ -382,40 +396,70 @@ class LibraryView(QWidget):
     # --- selection (never touched by filters/sort) -------------------------
 
     def _set_checked(self, line_id: str, checked: bool) -> None:
-        """A single checkbox toggle: update + persist the unchecked set (no model rebuild)."""
+        """A single checkbox toggle: update in-memory state immediately, defer disk write."""
         if checked:
             self._unchecked.discard(line_id)
+            self._checked_count += 1
         else:
             self._unchecked.add(line_id)
-        save_selection(self._workspace, self._game, self._unchecked)
+            self._checked_count -= 1
+        self._defer_save()
         self._update_status()
 
+    def _defer_save(self) -> None:
+        """Start or restart the selection debounce timer. ``QTimer.start()`` always resets the
+        interval, so a rapid succession of toggles produces exactly one eventual flush."""
+        self._selection_timer.start()
+
+    def _flush_selection(self) -> None:
+        """Persist the unchecked set to disk (called by the debounce timer, or immediately
+        for bulk commands)."""
+        save_selection(self._workspace, self._game, self._unchecked)
+
     def _apply_selection(self, new_unchecked: set[str]) -> None:
-        """Apply a bulk selection command, pushing the prior set onto the undo stack."""
+        """Apply a bulk selection command — flush immediately, not debounced."""
+        self._selection_timer.stop()
         self._undo.append(set(self._unchecked))
         self._unchecked = new_unchecked
-        save_selection(self._workspace, self._game, self._unchecked)
+        self._checked_count = sum(
+            1 for r in self._rows if r.line_id not in self._unchecked)
+        self._flush_selection()
         self._model.refresh_checks()
         self._update_status()
 
     def _on_uncheck_short(self) -> None:
+        """Uncheck rows shorter than *seconds* — operates on ALL loaded rows (not just the
+        filtered ``_visible`` slice), because a length-based gate should never depend on what
+        the user typed in the search box. (issue #133 L4 — scope made explicit.)"""
         self._apply_selection(
             uncheck_shorter_than(self._rows, self._unchecked, self._short_secs.value()))
 
     def _on_uncheck_barks(self) -> None:
+        """Uncheck bark/chatter lines — operates on ALL loaded rows. Barks are identified by
+        per-game heuristics (empty subtitle, ambient category, etc.) that are independent of
+        the current search/speaker filter. (issue #133 L4 — scope made explicit.)"""
         self._apply_selection(uncheck_barks(self._rows, self._unchecked, self._game))
 
     def _on_check_all(self) -> None:
+        """Check ALL loaded rows — never just the visible subset. The unchecked set becomes
+        empty, making every line eligible for export regardless of current filters.
+        (issue #133 L4 — scope made explicit.)"""
         self._apply_selection(check_all(self._rows))
 
     def _on_check_none(self) -> None:
+        """Uncheck ALL loaded rows — never just the visible subset. The unchecked set becomes
+        every line_id, making every line ineligible for export regardless of current filters.
+        (issue #133 L4 — scope made explicit.)"""
         self._apply_selection(check_none(self._rows))
 
     def _on_undo(self) -> None:
+        self._selection_timer.stop()
         if not self._undo:
             return
         self._unchecked = self._undo.pop()
-        save_selection(self._workspace, self._game, self._unchecked)
+        self._checked_count = sum(
+            1 for r in self._rows if r.line_id not in self._unchecked)
+        self._flush_selection()
         self._model.refresh_checks()
         self._update_status()
 
@@ -487,13 +531,14 @@ class LibraryView(QWidget):
     def _sync_export(self) -> None:
         """Keep the Export panel's context (checked-count + which artifacts exist) current.
         Called on every status update, so it tracks refreshes and per-toggle selection edits.
-        The shell owns the panel's running-state separately."""
+        The shell owns the panel's running-state separately. Uses cached booleans from the
+        last refresh -- no filesystem access per call (issue #133 L3)."""
         if self._game is None:
             return
         self.export.set_context(
             self._game, self._workspace, self.checked_count(),
-            can_export_mp3(self._workspace, self._game),
-            catalog_source_path(self._workspace, self._game) is not None)
+            self._can_export_mp3,
+            self._has_catalog)
 
     def _update_status(self) -> None:
         self._status.setText(self.status_text())
@@ -509,7 +554,7 @@ class LibraryView(QWidget):
         return len(self._visible)
 
     def checked_count(self) -> int:
-        return sum(1 for r in self._rows if r.line_id not in self._unchecked)
+        return self._checked_count
 
     def status_text(self) -> str:
         return f"{self.checked_count()} checked · {self.visible_count()} visible · {self.total_count()} total"
