@@ -10,7 +10,7 @@ issues/game-panel so the look and behaviour are defined and tested once.
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QLabel, QToolButton, QVBoxLayout, QWidget  # noqa: F401 (widened in Issue F)
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QToolButton, QVBoxLayout, QWidget
 
 from deciwaves.gui.theme import NEUTRAL, WARN
 
@@ -42,3 +42,54 @@ class Pill(QLabel):
             f"color: white; background: {colour}; "
             "border-radius: 6px; padding: 0px 6px;")
         self.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
+
+
+class CollapsibleSection(QWidget):
+    """A ▾/▸ header (title + optional one-line summary) over a *body* that hides
+    when collapsed. Used to declutter the long Setup/Doctor panels on first run:
+    a healthy returning user sees a compact summary; a broken/first-run user sees
+    the section expanded where the problem is (#112)."""
+
+    def __init__(self, title: str, body: QWidget, parent=None):
+        super().__init__(parent)
+        self._body = body
+        self._toggle = QToolButton()
+        self._toggle.setCheckable(True)
+        self._toggle.setChecked(True)
+        self._toggle.setStyleSheet("border: none;")
+        self._title = title
+        self._summary = QLabel("")
+        self._summary.setStyleSheet(f"color: {NEUTRAL};")
+
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.addWidget(self._toggle)
+        header.addWidget(self._summary, 1)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addLayout(header)
+        outer.addWidget(self._body)
+
+        self._toggle.toggled.connect(self._on_toggled)
+        self._render_header(expanded=True)
+
+    def _on_toggled(self, expanded: bool) -> None:
+        self._body.setVisible(expanded)
+        self._render_header(expanded)
+
+    def _render_header(self, expanded: bool) -> None:
+        arrow = "▾" if expanded else "▸"
+        self._toggle.setText(f"{arrow} {self._title}")
+
+    def set_summary(self, text: str) -> None:
+        self._summary.setText(text)
+
+    def summary_text(self) -> str:
+        return self._summary.text()
+
+    def set_collapsed(self, collapsed: bool) -> None:
+        self._toggle.setChecked(not collapsed)
+
+    def is_collapsed(self) -> bool:
+        return not self._toggle.isChecked()
