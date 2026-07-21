@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QSettings, QTimer
 from PySide6.QtWidgets import QMainWindow, QStackedWidget, QTabBar, QVBoxLayout, QWidget
 
 from deciwaves.cli import config, doctor
@@ -128,13 +128,54 @@ class MainWindow(QMainWindow):
         self.bar.workspace_changed.connect(lambda _ws: self._refresh_game_panel())
         self.bar.workspace_changed.connect(lambda _ws: setattr(self, '_resolver', None))
 
-        self.bar.select_game("ds")   # DS is the built-first vertical slice
-        # select_game("ds") leaves the combo on its existing index 0, so game_changed does
-        # not fire -- prime the status line and panels for the initial game explicitly.
-        self._refresh_status()
-        self._refresh_panels()
-        self._refresh_library()
-        self._refresh_game_panel()
+        self._settings = QSettings("DeciWaves", "gui")
+
+        # Restore last workspace first (set_workspace emits no signal)
+        ws = self._settings.value("lastWorkspace", "")
+        if ws:
+            self.bar.set_workspace(ws)
+
+        # Restore last game; fall back to "ds" for missing/invalid values
+        last_game = self._settings.value("lastGame", "ds")
+        if isinstance(last_game, str) and last_game in ("ds", "hzd", "fw"):
+            self.bar.select_game(last_game)
+        else:
+            self.bar.select_game("ds")
+        # select_game("ds") leaves the combo on its existing index 0, so game_changed
+        # does not fire -- prime the status line and panels for the initial game explicitly.
+        if self.bar.current_game() == "ds":
+            self._refresh_status()
+            self._refresh_panels()
+            self._refresh_library()
+            self._refresh_game_panel()
+
+        # Restore header column state and sort (after the library has loaded)
+        hdr_state = self._settings.value("headerState")
+        if hdr_state is not None:
+            self.library._table.horizontalHeader().restoreState(hdr_state)
+        sort_key = self._settings.value("sortKey")
+        if sort_key is not None:
+            self.library._sort_key = sort_key
+            self.library._sort_desc = bool(self._settings.value("sortDesc", False))
+
+        # Restore window geometry (must come after all widgets are added)
+        geom = self._settings.value("geometry")
+        if geom is not None:
+            self.restoreGeometry(geom)
+        state = self._settings.value("windowState")
+        if state is not None:
+            self.restoreState(state)
+
+    def closeEvent(self, event):
+        self._settings.setValue("geometry", self.saveGeometry())
+        self._settings.setValue("windowState", self.saveState())
+        self._settings.setValue("lastGame", self.bar.current_game())
+        self._settings.setValue("lastWorkspace", self.bar.workspace())
+        hdr = self.library._table.horizontalHeader()
+        self._settings.setValue("headerState", hdr.saveState())
+        self._settings.setValue("sortKey", self.library._sort_key)
+        self._settings.setValue("sortDesc", self.library._sort_desc)
+        super().closeEvent(event)
 
     # --- status + panels ---------------------------------------------------
 
