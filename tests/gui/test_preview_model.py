@@ -224,3 +224,116 @@ def test_hzd_missing_coords_raises(tmp_path, monkeypatch):
     r = PreviewResolver("hzd", ws, cfg={"hzd_package": "PKG"})
     with pytest.raises(PreviewError):
         r.resolve_wav("h1", None)
+
+
+def _write_min_wav(wem_bytes, wav_path):
+    os.makedirs(os.path.dirname(wav_path), exist_ok=True)
+    with open(wav_path, "wb") as f:
+        f.write(b"\x00" * 64)
+
+
+# --- concurrency: double-checked locking holds under N-thread resolve ---------
+
+def test_concurrent_hzd_resolve_builds_lazy_caches_once(tmp_path, monkeypatch):
+    import threading
+
+    _write_hzd_artifacts(str(tmp_path))
+
+    class _FakeDsar:
+        def read(self, offset, length):
+            return f"wem:{offset}:{length}".encode()
+
+    n_threads = 8
+    pkg_builds = {"n": 0}
+    pkg_barrier = threading.Barrier(n_threads, timeout=2)
+
+    class _CountingFakePkg:
+        def __init__(self, package_dir):
+            pkg_builds["n"] += 1
+            try:
+                pkg_barrier.wait()
+            except threading.BrokenBarrierError:
+                pass
+            self.package_dir = package_dir
+
+        def dsar_for(self, archive):
+            return _FakeDsar()
+
+    maps_builds = {"n": 0}
+    original_load = preview_model.load_hzd_manifest_join
+
+    def _counting_load(manifest_path, clip_index_path):
+        maps_builds["n"] += 1
+        return original_load(manifest_path, clip_index_path)
+
+    monkeypatch.setattr(preview_model, "HzdPackage", _CountingFakePkg)
+    monkeypatch.setattr(preview_model, "load_hzd_manifest_join", _counting_load)
+    monkeypatch.setattr(preview_model, "decode_wem_to_wav", _write_min_wav)
+
+    r = PreviewResolver("hzd", str(tmp_path), cfg={"hzd_package": "PKG"})
+
+    entry_barrier = threading.Barrier(n_threads)
+
+    original_hzd_dsar = PreviewResolver._hzd_dsar
+
+    def _barriered_hzd_dsar(self, package):
+        entry_barrier.wait()
+        return original_hzd_dsar(self, package)
+
+    monkeypatch.setattr(PreviewResolver, "_hzd_dsar", _barriered_hzd_dsar)
+
+    def resolve():
+        r.resolve_wav("h1", None)
+
+    threads = [threading.Thread(target=resolve) for _ in range(n_threads)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert pkg_builds["n"] == 1, f"HzdPackage built {pkg_builds['n']} times, expected 1"
+    assert maps_builds["n"] == 1, f"load_hzd_manifest_join called {maps_builds['n']} times, expected 1"
+
+
+# --- dump resolver isolation (#127 follow-up, PR #188 fix) -------------------
+
+def test_dump_uses_separate_resolver_from_preview(tmp_path, monkeypatch):
+    """Dump (shell._on_dump_wav) creates a fresh PreviewResolver -- two resolvers
+    are independent objects with independent lazy caches."""
+    _write_hzd_artifacts(str(tmp_path))
+
+    class _FakeDsar:
+        def read(self, offset, length):
+            return f"wem:{offset}:{length}".encode()
+
+    builds = []
+
+    class _TaggedFakePkg:
+        def __init__(self, package_dir):
+            builds.append(id(self))
+
+        def dsar_for(self, archive):
+            return _FakeDsar()
+
+    monkeypatch.setattr(preview_model, "HzdPackage", _TaggedFakePkg)
+    monkeypatch.setattr(preview_model, "decode_wem_to_wav", _write_min_wav)
+
+    # preview resolver (cached, lazy init on first use)
+    r_preview = PreviewResolver("hzd", str(tmp_path), cfg={"hzd_package": "PKG"})
+    # dump resolver (always fresh, like shell._on_dump_wav does)
+    r_dump = PreviewResolver("hzd", str(tmp_path), cfg={"hzd_package": "PKG"})
+
+    assert r_preview is not r_dump, "dump must have a separate PreviewResolver instance"
+
+    r_preview.resolve_wav("h1", None)
+    assert builds, "expected at least one HzdPackage build"
+
+    # Remove cached WAV so dump resolver cannot hit the disk cache — it must
+    # build its own HzdPackage, proving independent lazy caches.
+    wav_path = os.path.join(str(tmp_path), "out", "hzd", "wav-cache", "5.wav")
+    os.remove(wav_path)
+
+    r_dump.resolve_wav("h1", None)
+
+    assert len(builds) == 2, f"expected 2 HzdPackage builds, got {len(builds)}"
+    assert builds[0] != builds[1], "each resolver must build its own HzdPackage"
