@@ -79,6 +79,7 @@ def test_toggle_checkbox_changes_count_and_persists(qtbot, tmp_path):
     idx = v._model.index(0, v._model.COL_CHECK)
     assert v._model.setData(idx, Qt.Unchecked, Qt.CheckStateRole) is True
     assert v.checked_count() == 1
+    v._selection_timer.timeout.emit()        # flush debounce so disk reflects the toggle
     assert "a" in load_selection(ws, "ds")
 
     # reload from disk shows the persisted uncheck
@@ -211,9 +212,35 @@ def test_space_key_toggles_current_row_checkbox(qtbot, tmp_path):
     assert v.checked_count() == 2
     _send_key(v._table, Qt.Key_Space)
     assert v.checked_count() == 1
+    v._selection_timer.timeout.emit()        # flush debounce so disk reflects the toggle
     assert "a" in load_selection(ws, "ds")
     _send_key(v._table, Qt.Key_Space)  # toggles back
     assert v.checked_count() == 2
+
+
+def test_rapid_space_toggles_produce_one_disk_write(qtbot, tmp_path, monkeypatch):
+    """Multiple rapid Space-toggles produce exactly one save_selection disk write."""
+    import deciwaves.gui.views.library as lib_mod
+
+    ws = str(tmp_path)
+    _write_ds_catalog(ws, [_cat_row(line_id="a"), _cat_row(line_id="b"), _cat_row(line_id="c")])
+    v = LibraryView()
+    qtbot.addWidget(v)
+    v.refresh("ds", ws)
+    v._table.setCurrentIndex(v._model.index(0, v._model.COL_ID))
+
+    calls = []
+    monkeypatch.setattr(lib_mod, "save_selection", lambda *a: calls.append(1))
+
+    # Three rapid toggles — no disk write during the barrage
+    _send_key(v._table, Qt.Key_Space)
+    _send_key(v._table, Qt.Key_Space)
+    _send_key(v._table, Qt.Key_Space)
+    assert len(calls) == 0
+
+    # Flush the debounce — exactly one write
+    v._selection_timer.timeout.emit()
+    assert len(calls) == 1
 
 
 def test_preview_column_availability_hzd_prebind_dimmed(qtbot, tmp_path):

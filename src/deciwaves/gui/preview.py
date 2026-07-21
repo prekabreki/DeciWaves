@@ -13,6 +13,8 @@ and assert playback without a real audio device -- CI has none.
 """
 from __future__ import annotations
 
+import threading
+
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, QUrl, Signal, Slot
 
 from deciwaves.gui.preview_model import PreviewError
@@ -52,17 +54,26 @@ class _WorkerSignals(QObject):
 
 class _ResolveWorker(QRunnable):
     """Runs ``resolver.resolve_wav`` on a pool thread and reports the result (or a friendly
-    error) back through the shared :class:`_WorkerSignals`."""
+    error) back through the shared :class:`_WorkerSignals`.
 
-    def __init__(self, resolver, line_id, audio_path, generation, signals):
+    A cooperative ``cancel`` :class:`threading.Event` allows the player to short-circuit the
+    worker at the earliest safe point (before the expensive ``resolve_wav`` call), rather than
+    letting every superseded job run a full DS ``PackIndex`` build to completion (issue #133
+    L5). The worker checks the flag once at the top of :meth:`run`; deeper cancellation inside
+    ``resolve_wav`` itself is a future concern."""
+
+    def __init__(self, resolver, line_id, audio_path, generation, signals, cancel_event):
         super().__init__()
         self._resolver = resolver
         self._line_id = line_id
         self._audio_path = audio_path
         self._generation = generation
         self._signals = signals
+        self._cancel = cancel_event
 
     def run(self) -> None:
+        if self._cancel.is_set():
+            return
         try:
             path = self._resolver.resolve_wav(self._line_id, self._audio_path)
         except PreviewError as exc:
@@ -89,13 +100,17 @@ class PreviewPlayer(QObject):
         self._signals.done.connect(self._on_done)
         self._signals.failed.connect(self._on_failed)
         self._generation = 0
+        self._cancel_event = threading.Event()
 
     def play_line(self, resolver, line_id: str, audio_path: str | None) -> None:
         """Resolve *line_id* off the UI thread and play it, stopping any current playback and
         superseding any in-flight decode (its result will be ignored when it arrives)."""
+        self._cancel_event.set()
+        self._cancel_event = threading.Event()
         self._generation += 1
         self._sink.stop()
-        worker = _ResolveWorker(resolver, line_id, audio_path, self._generation, self._signals)
+        worker = _ResolveWorker(resolver, line_id, audio_path, self._generation, self._signals,
+                                self._cancel_event)
         self._pool.start(worker)
 
     def stop(self) -> None:
