@@ -1,40 +1,21 @@
 """The one-window, two-view shell (issue #67, spec §2), with the pipeline wired (#69).
 
-Global bar on top, a Pipeline/Library switcher, and one JobRunner app-wide (spec §5.3).
+Global bar on top, a Pipeline/Library switcher, and one JobController app-wide (spec §5.3).
 The install-status line reuses the CLI's own doctor check functions. The Pipeline view's
 Scan/Bind/Re-run/Transcribe-all controls emit intent signals; this shell turns them into
-`deciwaves <game> run …` jobs on the single runner, attaching the pre-bind CUDA probe
+``deciwaves <game> run …`` jobs on the single runner, attaching the pre-bind CUDA probe
 (#68's gpu_gate) to every GPU action, and refreshes the strip/coverage/issues around runs."""
 from __future__ import annotations
 
 import os
-import shutil
 
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QMainWindow, QMessageBox, QStackedWidget, QTabBar, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QMainWindow, QStackedWidget, QTabBar, QVBoxLayout, QWidget
 
 from deciwaves.cli import config, doctor
-from deciwaves.gui.cli_command import default_base
-from deciwaves.gui.export import DumpRunner
-from deciwaves.gui.export_model import (
-    ExportError,
-    catalog_source_path,
-    render_selection_argv,
-    write_render_selection,
-)
-from deciwaves.gui.game_panel_model import transcript_order_argv
 from deciwaves.gui.global_bar import GlobalBar
-from deciwaves.gui.gpu_gate import confirm_gpu
-from deciwaves.gui.jobs import JobRunner
-from deciwaves.gui.pipeline_model import (
-    _marker_path,
-    escalate_bind_argv,
-    process_argv,
-    rerun_from_argv,
-    rerun_hits_gpu,
-    scan_argv,
-    stage_states,
-)
+from deciwaves.gui.job_controller import JobController
+from deciwaves.gui.pipeline_model import _marker_path, stage_states
 from deciwaves.gui.preview import PreviewPlayer
 from deciwaves.gui.progress_model import probe_progress
 from deciwaves.gui.preview_model import PreviewResolver
@@ -80,26 +61,20 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
 
         # exactly one pipeline job app-wide (spec §5.3)
-        self.runner = JobRunner(self)
-        self._job_game: str | None = None
-        self._job_kind: str | None = None  # "export" for a render job; None for pipeline jobs
-        self.runner.output.connect(self.pipeline.append_log)
-        self.runner.started.connect(self._on_job_started)
-        self.runner.finished.connect(self._on_job_finished)
-
-        # filtered export (#72, spec §8): the Library's Export panel emits three intents. Export
-        # MP3 goes through the SAME single JobRunner (tracked via _job_kind so _on_job_finished
-        # surfaces the render rc); Dump WAV runs as an off-thread batch on its own runner; the
-        # catalog is a file copy. All three mutually-exclude with pipeline jobs (_sync_running).
-        self.dump = DumpRunner(self)
-        self.dump.progress.connect(self._on_dump_progress)
-        self.dump.row_failed.connect(
-            lambda lid, msg: self.pipeline.append_log(f"dump: {lid}: {msg}\n"))
-        self.dump.finished.connect(self._on_dump_finished)
+        self._controller = JobController(self)
+        self._controller.runner.output.connect(self.pipeline.append_log)
+        self._controller.log_message.connect(self.pipeline.append_log)
+        self._controller.job_chip_changed.connect(self.bar.set_job_chip)
+        self._controller.busy_changed.connect(self._on_busy_changed)
+        self._controller.runner.started.connect(self._on_poll_start)
+        self._controller.runner.finished.connect(self._on_pipe_job_finished)
+        self._controller.dump.progress.connect(self._on_dump_progress)
+        self._controller.dump.finished.connect(self._on_dump_widget_finished)
+        self._controller.dump_status.connect(self.library.export.dump_finished)
         self.library.export.export_mp3_requested.connect(self._on_export_mp3)
         self.library.export.dump_wav_requested.connect(self._on_dump_wav)
         self.library.export.export_catalog_requested.connect(self._on_export_catalog)
-        self.library.export.dump_cancel_requested.connect(self.dump.cancel)
+        self.library.export.dump_cancel_requested.connect(self._controller.dump.cancel)
 
         # inline audio preview (#71, spec §6.5): the Library's ▷ / enter emits
         # preview_requested(line_id); play it through one app-wide player, off the UI thread.
@@ -119,7 +94,7 @@ class MainWindow(QMainWindow):
         # pipeline controls -> jobs on the single runner
         self.pipeline.controls.scan_requested.connect(self._on_scan)
         self.pipeline.controls.process_requested.connect(self._on_process)
-        self.pipeline.controls.cancel_requested.connect(self.runner.cancel)
+        self.pipeline.controls.cancel_requested.connect(self._controller.runner.cancel)
         self.pipeline.strip.rerun_requested.connect(self._on_rerun)
         self.pipeline.coverage.escalate_requested.connect(self._on_escalate)
 
@@ -180,7 +155,7 @@ class MainWindow(QMainWindow):
     def _refresh_panels(self) -> None:
         game = self.bar.current_game()
         running = None
-        if self.runner.is_running and self._job_game == game:
+        if self._controller.runner.is_running and self._controller._job_game == game:
             running = self._active_stage(game)
         progress = probe_progress(self._workspace(), game, running) if running else None
         self.pipeline.refresh_panels(game, self._workspace(), running, progress=progress)
@@ -228,167 +203,99 @@ class MainWindow(QMainWindow):
 
     # --- job control -------------------------------------------------------
 
-    def _confirm_gpu(self, game: str) -> bool:
-        return confirm_gpu(self, game, self.pipeline.setup_doctor.doctor.last_payload())
+    # Thin delegating properties for backward-compat (tests reach these directly)
+    @property
+    def runner(self):
+        return self._controller.runner
 
-    def _confirm_escalate(self) -> bool:
-        resp = QMessageBox.warning(
-            self, "Transcribe all",
-            "This re-transcribes every line uncapped — hours. Continue?",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-        return resp == QMessageBox.Yes
+    @property
+    def dump(self):
+        return self._controller.dump
 
-    def _rerun_invalidates_completed(self, game: str, stage: str) -> bool:
-        states = stage_states(game, self._workspace())
-        names = [s.name for s in states]
-        if stage not in names:
-            return False
-        idx = names.index(stage)
-        return any(states[i].done for i in range(idx + 1, len(states)))
+    @property
+    def _job_kind(self) -> str | None:
+        return self._controller._job_kind
 
-    def _confirm_rerun(self, stage: str) -> bool:
-        resp = QMessageBox.warning(
-            self, "Re-run from here",
-            f"Re-running from \"{stage}\" will discard completed stages after "
-            f"this point. Continue?",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-        return resp == QMessageBox.Yes
+    @_job_kind.setter
+    def _job_kind(self, value: str | None) -> None:
+        self._controller._job_kind = value
+
+    @property
+    def _job_game(self) -> str | None:
+        return self._controller._job_game
+
+    @_job_game.setter
+    def _job_game(self, value: str | None) -> None:
+        self._controller._job_game = value
+
+    # -- pipeline dispatch (delegates to the controller) ---------------------
 
     def _on_scan(self) -> None:
-        if self.runner.is_running or self.dump.is_running:
-            return   # one job at a time -- refuse a pipeline start while any job runs (§5.3)
-        game = self.bar.current_game()
-        self._job_game = game
-        self.runner.start(scan_argv(default_base(), self._workspace(), game))
+        self._controller.start_scan(self.bar.current_game(), self._workspace())
 
     def _on_process(self) -> None:
-        if self.runner.is_running or self.dump.is_running:
-            return
-        game = self.bar.current_game()
-        if not self._confirm_gpu(game):
-            return
-        self._job_game = game
-        # the panel's first-bind ASR cap (#73, HZD only; None otherwise -> bind's own default).
-        # A cap change is inert while .done-bind stands (spec §9 #4) -- re-capping is the
-        # coverage bar's "Transcribe all" escalation, which owns the marker delete, not here.
-        self.runner.start(process_argv(default_base(), self._workspace(), game,
-                                       sample_cap=self.game_panel.sample_cap()))
+        self._controller.start_process(
+            self.bar.current_game(), self._workspace(),
+            self.game_panel.sample_cap(),
+            self.pipeline.setup_doctor.doctor.last_payload())
 
     def _on_transcript_order(self, path: str) -> None:
-        """The DS panel's "Re-order with transcript" affordance (#73, spec §7): run the
-        STANDALONE ``ds order --transcript <abs>`` on the single runner (never ``ds run``).
-        Same one-job-at-a-time + dump mutual exclusion as the other pipeline starts (§5.3)."""
-        if self.runner.is_running or self.dump.is_running:
+        ok = self._controller.start_transcript_order(
+            self.bar.current_game(), self._workspace(), path)
+        if not ok:
             self.pipeline.append_log("re-order: a job is already running.\n")
-            return
-        game = self.bar.current_game()
-        if game != "ds":   # DS-only affordance; the control is hidden for HZD/FW anyway
-            return
-        self._job_game = game
-        argv = transcript_order_argv(default_base(), self._workspace(), path)
-        if not self.runner.start(argv):
-            self.pipeline.append_log("re-order: a job is already running.\n")
-            self._job_game = None
 
     def _on_rerun(self, stage: str) -> None:
-        if self.runner.is_running or self.dump.is_running:
-            return   # a running dump/job must not be joined by a strip "Re-run from here" (§5.3)
-        game = self.bar.current_game()
-        if self._rerun_invalidates_completed(game, stage) and not self._confirm_rerun(stage):
-            return
-        if rerun_hits_gpu(game, stage) and not self._confirm_gpu(game):
-            return
-        self._job_game = game
-        self.runner.start(rerun_from_argv(default_base(), self._workspace(), game, stage))
+        self._controller.start_rerun(
+            self.bar.current_game(), self._workspace(), stage,
+            self.pipeline.setup_doctor.doctor.last_payload())
 
     def _on_escalate(self) -> None:
-        if self.runner.is_running or self.dump.is_running:
-            return
-        game = self.bar.current_game()
-        if not self._confirm_escalate():
-            return
-        if not self._confirm_gpu(game):
-            return
-        self._job_game = game
-        self.runner.start(escalate_bind_argv(default_base(), self._workspace(), game))
+        self._controller.start_escalate(
+            self.bar.current_game(), self._workspace(),
+            self.pipeline.setup_doctor.doctor.last_payload())
 
-    def _on_job_started(self) -> None:
-        self.bar.set_job_chip(f"{self.bar.current_game()} · running")
-        self._sync_running()
-        self._poll.start()
+    # -- UI callbacks from controller signals -------------------------------
 
-    def _on_job_finished(self, code: int) -> None:
-        self._poll.stop()
-        kind, game = self._job_kind, self._job_game
-        self._job_kind = None
-        self._job_game = None
-        if kind == "export":
-            self._report_export_result(game, code)
-            self.bar.set_job_chip("idle")
-        elif code == 0 or self.runner.was_cancelled:
-            self.bar.set_job_chip("idle")
-        else:
-            self.bar.set_job_chip("failed")
-            self.pipeline.append_log(
-                f"pipeline job failed (rc {code}) — see the log above.\n")
-        self._sync_running()
-        self._refresh_panels()
-        self._refresh_library()   # surface catalog/asr-manifest rows written by Scan/Bind
-        self._refresh_game_panel()   # a bind/extract may have produced/consumed types.json
-
-    def _sync_running(self) -> None:
-        """One job at a time (spec §5.3): a pipeline job, an export render, and a dump batch all
-        mutually exclude. Whenever ANY is active, disable the pipeline controls, the stage-strip
-        Re-run affordance, and the export panel; the export panel additionally shows a Cancel
-        while its own dump runs. Inline preview (▷/Enter) is intentionally left alone (§6.5)."""
-        busy = self.runner.is_running or self.dump.is_running
+    def _on_busy_changed(self, busy: bool) -> None:
         self.pipeline.controls.set_running(busy)
         self.pipeline.strip.set_running(busy)
         self.library.export.set_running(busy)
-        self.library.export.set_dumping(self.dump.is_running)
+        self.library.export.set_dumping(self._controller.dump.is_running)
+
+    def _on_poll_start(self) -> None:
+        self._poll.start()
+
+    def _on_pipe_job_finished(self, code: int) -> None:
+        self._poll.stop()
+        self._refresh_panels()
+        self._refresh_library()
+        self._refresh_game_panel()
+
+    # -- delegate for tests that call _on_job_finished directly ---------------
+
+    def _on_job_finished(self, code: int) -> None:
+        self._controller._on_job_finished(code)
+        self._on_pipe_job_finished(code)
+
+    def _sync_running(self) -> None:
+        self._controller._sync_running()
+        self._on_busy_changed(self._controller.runner.is_running or self._controller.dump.is_running)
 
     def _report_export_result(self, game: str | None, code: int) -> None:
-        if code == 0:
-            out = {"ds": "out/audio", "hzd": "out/hzd/audio",
-                   "fw": "out/fw/reels"}.get(game or "", "out/")
-            self.pipeline.append_log(
-                f"export: done — reels + tracklist sidecars written under {out}.\n")
-        else:
-            self.pipeline.append_log(
-                f"export: render failed (rc {code}) — see the log above "
-                f"(an empty selection with no renderable rows can also cause this).\n")
+        msg = self._controller._report_export_result(game, code)
+        self.pipeline.append_log(msg)
 
     # --- export flows (#72) ------------------------------------------------
 
     def _on_export_mp3(self, bitrate: int) -> None:
-        if self.runner.is_running or self.dump.is_running:
-            self.pipeline.append_log("export: a job is already running.\n")
-            return   # mirror _on_dump_wav: mutually exclude with the runner AND the dump (§5.3)
-        game = self.bar.current_game()
-        ws = self._workspace()
-        try:
-            csv_path = write_render_selection(ws, game, self.library.unchecked_ids())
-            # thread the per-game panel's render scope (#73): DS {main_story}, HZD {spine_only},
-            # FW {tiers}. An explicit scope NARROWS (a checked row outside it is dropped);
-            # empty defaults reproduce #72's "exactly the checked rows" (render_selection_argv's
-            # kwargs default to today's behavior).
-            argv = render_selection_argv(default_base(), ws, game, csv_path,
-                                         bitrate=bitrate, cfg=config.load(),
-                                         **self.game_panel.render_scope())
-        except ExportError as exc:
-            self.pipeline.append_log(f"export: {exc}\n")
-            return
-        self._job_kind = "export"
-        self._job_game = game
-        if not self.runner.start(argv):
-            self.pipeline.append_log("export: a job is already running.\n")
-            self._job_kind = None
-            self._job_game = None
+        error = self._controller.start_export_mp3(
+            self.bar.current_game(), self._workspace(), bitrate,
+            self.library.unchecked_ids(), self.game_panel.render_scope())
+        if error:
+            self.pipeline.append_log(error)
 
     def _on_dump_wav(self, dest: str) -> None:
-        if self.runner.is_running or self.dump.is_running:
-            self.pipeline.append_log("dump: a job is already running.\n")
-            return
         rows = [(r.line_id, r.audio_path) for r in self.library.checked_rows()]
         if not rows:
             self.pipeline.append_log("dump: no checked rows to dump.\n")
@@ -396,27 +303,25 @@ class MainWindow(QMainWindow):
         self.pipeline.append_log(f"dump: decoding {len(rows)} line(s) to {dest} …\n")
         game = self.bar.current_game()
         resolver = PreviewResolver(game, self._workspace())
-        self.dump.start(resolver, rows, dest)
-        self._sync_running()
+        error = self._controller.start_dump_wav(game, self._workspace(), resolver, rows, dest)
+        if error:
+            self.pipeline.append_log(error)
 
     def _on_dump_progress(self, done: int, total: int) -> None:
         self.library.export.set_dump_progress(done, total)
 
-    def _on_dump_finished(self, ok: int, failed: int) -> None:
-        self.pipeline.append_log(f"dump: done — {ok} ok, {failed} failed.\n")
+    def _on_dump_widget_finished(self, ok: int, failed: int) -> None:
         self.library.export.dump_finished(ok, failed)
-        self._sync_running()
+
+    def _on_dump_finished(self, ok: int, failed: int) -> None:
+        """Backward-compat delegate: tests call this directly."""
+        self._controller._on_dump_finished(ok, failed)
+        self.library.export.dump_finished(ok, failed)
 
     def _on_export_catalog(self, dest: str) -> None:
-        game = self.bar.current_game()
-        src = catalog_source_path(self._workspace(), game)
-        if src is None:
-            self.pipeline.append_log("export: no catalog artifact yet for this game.\n")
-            return
-        try:
-            os.makedirs(os.path.dirname(os.path.abspath(dest)), exist_ok=True)
-            shutil.copyfile(src, dest)
-        except OSError as exc:
-            self.pipeline.append_log(f"export: could not write catalog: {exc}\n")
-            return
-        self.pipeline.append_log(f"export: catalog copied to {dest}\n")
+        error = self._controller.export_catalog(
+            self.bar.current_game(), self._workspace(), dest)
+        if error:
+            self.pipeline.append_log(error)
+        else:
+            self.pipeline.append_log(f"export: catalog copied to {dest}\n")
