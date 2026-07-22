@@ -5,7 +5,9 @@ view's intent signals (scan/process/rerun/escalate) into pipeline jobs."""
 from __future__ import annotations
 
 from PySide6.QtGui import QTextCursor
-from PySide6.QtWidgets import QFrame, QLabel, QPlainTextEdit, QToolButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QFrame, QLabel, QPlainTextEdit, QScrollArea, QToolButton, QVBoxLayout, QWidget,
+)
 
 from deciwaves.gui.pipeline_model import has_gpu_stage
 from deciwaves.gui.progress_model import StageProgress
@@ -41,7 +43,8 @@ class PipelineView(QWidget):
         self._log = QPlainTextEdit()
         self._log.setReadOnly(True)
 
-        layout = QVBoxLayout(self)
+        content = QWidget()
+        layout = QVBoxLayout(content)
         layout.addWidget(self.setup_doctor)
         layout.addWidget(_hline())
         layout.addWidget(self.strip)
@@ -52,6 +55,13 @@ class PipelineView(QWidget):
         layout.addWidget(self._toggle)
         layout.addWidget(self._log, 1)
         self._toggle.toggled.connect(self._on_toggle)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(content)
+
+        outer = QVBoxLayout(self)
+        outer.addWidget(scroll)
 
     def refresh_panels(self, game: str, workspace: str, running_stage: str | None = None,
                        progress: list[StageProgress] | None = None) -> None:
