@@ -37,7 +37,6 @@ MONO_FMT = (1, SR, 2)        # FW fast-path clips are all mono / 48 kHz / s16
 
 def mono_silence_wav(seconds, cache_dir):
     """Mono 48 kHz s16 silence, matching the FW clip format (for the fast concat)."""
-    import wave
     os.makedirs(cache_dir, exist_ok=True)
     path = os.path.join(cache_dir, f"silence_mono_{int(seconds * 1000)}ms.wav")
     if os.path.isfile(path):
@@ -49,11 +48,10 @@ def mono_silence_wav(seconds, cache_dir):
 
 
 def _is_mono(wav):
-    import wave
     try:
         with wave.open(wav) as w:
             return (w.getnchannels(), w.getframerate(), w.getsampwidth()) == MONO_FMT
-    except Exception:
+    except (wave.Error, OSError, EOFError):
         return False
 
 
