@@ -53,6 +53,13 @@ def test_parse_cuda_version_multiline():
     assert _parse_nvidia_smi_cuda_version(text) == 12.4
 
 
+def test_parse_cuda_version_new_umd_format():
+    # Newer drivers print "CUDA UMD Version:" instead of "CUDA Version:".
+    assert _parse_nvidia_smi_cuda_version(
+        "| NVIDIA-SMI 610.62  KMD Version: 610.62  CUDA UMD Version: 13.3 |"
+    ) == 13.3
+
+
 # ---------------------------------------------------------------------------
 # _parse_nvidia_smi_gpu_name
 # ---------------------------------------------------------------------------
@@ -83,20 +90,32 @@ def test_parse_gpu_name_multiple_lines():
 # ---------------------------------------------------------------------------
 
 
-def test_select_wheel_tag_default_is_cu124():
+def test_select_wheel_tag_default_is_cu128():
+    # cu128 is the floor for a torch 2.8 CUDA build (what whisperx pins).
     tag, url = _select_wheel_tag(None)
-    assert tag == "cu124"
-    assert "cu124" in url
+    assert tag == "cu128"
+    assert "cu128" in url
 
 
-def test_select_wheel_tag_cu124_for_modern_driver():
+def test_select_wheel_tag_cu128_for_128():
+    tag, url = _select_wheel_tag(12.8)
+    assert tag == "cu128"
+    assert "cu128" in url
+
+
+def test_select_wheel_tag_cu126_for_126():
+    tag, _url = _select_wheel_tag(12.6)
+    assert tag == "cu126"
+
+
+def test_select_wheel_tag_cu124_for_124():
     tag, url = _select_wheel_tag(12.4)
     assert tag == "cu124"
 
 
-def test_select_wheel_tag_above_threshold_uses_default():
-    tag, _url = _select_wheel_tag(13.0)
-    assert tag == "cu124"
+def test_select_wheel_tag_new_driver_uses_cu128():
+    tag, _url = _select_wheel_tag(13.3)
+    assert tag == "cu128"
 
 
 def test_select_wheel_tag_downgrades_to_cu121():
@@ -210,11 +229,11 @@ def test_probe_gpu_timeout_returns_cpu(monkeypatch):
     assert probe_gpu() is CPU_RESULT
 
 
-def test_probe_gpu_unparseable_output_defaults_to_cu124(monkeypatch):
+def test_probe_gpu_unparseable_output_defaults_to_cu128(monkeypatch):
     _mock_nvidia_smi(monkeypatch, cuda_version=None)
     result = probe_gpu()
     assert result.has_nvidia_gpu is True
-    assert result.wheel_tag == "cu124"
+    assert result.wheel_tag == "cu128"
 
 
 def test_probe_gpu_empty_gpu_name_returns_cpu(monkeypatch):
@@ -237,34 +256,24 @@ def _gpu_probe_result(tag="cu124", url="https://download.pytorch.org/whl/cu124")
     )
 
 
-def test_steps_gpu_returns_two_steps(monkeypatch):
+def test_steps_gpu_is_single_command_with_extra_index_url(monkeypatch):
     monkeypatch.setattr("deciwaves.gui.gpu_probe._is_editable", lambda: True)
     monkeypatch.setattr(
         "deciwaves.gui.gpu_probe._editable_project_dir",
         lambda: Path(r"C:\repo\DeciWaves"),
     )
     steps = build_asr_install_steps(_gpu_probe_result())
-    assert len(steps) == 2
-    labels = [lbl for lbl, _cmd in steps]
-    assert labels[0].startswith("1.")
-    assert labels[1].startswith("2.")
-
-
-def test_steps_gpu_torch_step_has_index_url_extra_step_does_not(monkeypatch):
-    monkeypatch.setattr("deciwaves.gui.gpu_probe._is_editable", lambda: True)
-    monkeypatch.setattr(
-        "deciwaves.gui.gpu_probe._editable_project_dir",
-        lambda: Path(r"C:\repo\DeciWaves"),
-    )
-    (_l1, torch_cmd), (_l2, extra_cmd) = build_asr_install_steps(_gpu_probe_result())
-    # Step 1 installs the CUDA torch from the pytorch index...
-    assert "torch" in torch_cmd
-    assert "--index-url" in torch_cmd
-    assert "cu124" in torch_cmd
-    assert "[asr]" not in torch_cmd
-    # ...step 2 installs the extra from PyPI (NO --index-url, or whisperx 404s).
-    assert "--index-url" not in extra_cmd
-    assert "[asr]" in extra_cmd
+    assert len(steps) == 1
+    _label, cmd = steps[0]
+    assert "[asr]" in cmd
+    # --extra-index-url ADDS the pytorch index (whisperx still from PyPI); it must
+    # NOT be the bare --index-url replace form, which 404s whisperx.
+    assert "--extra-index-url" in cmd
+    assert "--index-url" not in cmd
+    assert "cu124" in cmd  # threaded from the probe's index_url
+    # Let pip resolve the pinned version — no explicit torch / --force-reinstall.
+    assert "--force-reinstall" not in cmd
+    assert "install torch" not in cmd  # not force-installing torch by name
 
 
 def test_steps_editable_uses_absolute_path(monkeypatch):
@@ -273,33 +282,33 @@ def test_steps_editable_uses_absolute_path(monkeypatch):
         "deciwaves.gui.gpu_probe._editable_project_dir",
         lambda: Path(r"C:\repo\DeciWaves"),
     )
-    _torch, (_lbl, extra_cmd) = build_asr_install_steps(_gpu_probe_result())
-    assert '-e ".[asr]"' not in extra_cmd
-    assert r'-e "C:\repo\DeciWaves[asr]"' in extra_cmd
+    _label, cmd = build_asr_install_steps(_gpu_probe_result())[0]
+    assert '-e ".[asr]"' not in cmd
+    assert r'-e "C:\repo\DeciWaves[asr]"' in cmd
 
 
 def test_steps_editable_falls_back_to_dot_when_root_unknown(monkeypatch):
     monkeypatch.setattr("deciwaves.gui.gpu_probe._is_editable", lambda: True)
     monkeypatch.setattr(
         "deciwaves.gui.gpu_probe._editable_project_dir", lambda: None)
-    (steps) = build_asr_install_steps(CPU_RESULT)
+    steps = build_asr_install_steps(CPU_RESULT)
     assert '-e ".[asr]"' in steps[0][1]
 
 
 def test_steps_installed_form(monkeypatch):
     monkeypatch.setattr("deciwaves.gui.gpu_probe._is_editable", lambda: False)
-    _torch, (_lbl, extra_cmd) = build_asr_install_steps(_gpu_probe_result())
-    assert '"deciwaves[asr]"' in extra_cmd
-    assert "-e " not in extra_cmd
+    _label, cmd = build_asr_install_steps(_gpu_probe_result())[0]
+    assert '"deciwaves[asr]"' in cmd
+    assert "-e " not in cmd
 
 
-def test_steps_cpu_result_is_single_step_without_index_url(monkeypatch):
+def test_steps_cpu_result_has_no_index_url(monkeypatch):
     monkeypatch.setattr("deciwaves.gui.gpu_probe._is_editable", lambda: True)
     monkeypatch.setattr(
         "deciwaves.gui.gpu_probe._editable_project_dir", lambda: None)
     steps = build_asr_install_steps(CPU_RESULT)
     assert len(steps) == 1
-    assert "--index-url" not in steps[0][1]
+    assert "index-url" not in steps[0][1]   # neither --index-url nor --extra-index-url
     assert "[asr]" in steps[0][1]
 
 
@@ -312,10 +321,10 @@ def test_steps_every_command_uses_call_operator_and_sys_executable(monkeypatch):
         assert "-m pip install" in cmd
 
 
-def test_steps_downgraded_index_url(monkeypatch):
+def test_steps_threads_index_url(monkeypatch):
     monkeypatch.setattr("deciwaves.gui.gpu_probe._is_editable", lambda: True)
     monkeypatch.setattr(
         "deciwaves.gui.gpu_probe._editable_project_dir", lambda: None)
-    result = _gpu_probe_result(tag="cu118", url="https://download.pytorch.org/whl/cu118")
-    (_l, torch_cmd), _extra = build_asr_install_steps(result)
-    assert "cu118" in torch_cmd
+    result = _gpu_probe_result(tag="cu128", url="https://download.pytorch.org/whl/cu128")
+    _label, cmd = build_asr_install_steps(result)[0]
+    assert "cu128" in cmd

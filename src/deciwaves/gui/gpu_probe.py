@@ -19,6 +19,8 @@ from deciwaves.gui import ASR_INSTALL_HINT
 _NVIDIA_SMI_TIMEOUT = 10
 
 _CUDA_INDEX_URLS: dict[str, str] = {
+    "cu128": "https://download.pytorch.org/whl/cu128",
+    "cu126": "https://download.pytorch.org/whl/cu126",
     "cu124": "https://download.pytorch.org/whl/cu124",
     "cu121": "https://download.pytorch.org/whl/cu121",
     "cu118": "https://download.pytorch.org/whl/cu118",
@@ -26,10 +28,15 @@ _CUDA_INDEX_URLS: dict[str, str] = {
     "cu116": "https://download.pytorch.org/whl/cu116",
 }
 
-_DEFAULT_WHEEL_TAG = "cu124"
+# whisperx (the [asr] extra) pins torch~=2.8, whose CUDA wheels live on cu126/cu128
+# (cu124 tops out at torch 2.6) — so cu128 is the floor for a GPU build that satisfies
+# the extra. Default to it when the driver's CUDA version can't be read.
+_DEFAULT_WHEEL_TAG = "cu128"
 _DEFAULT_INDEX_URL = _CUDA_INDEX_URLS[_DEFAULT_WHEEL_TAG]
 
 _CUDA_WHEEL_THRESHOLDS: list[tuple[float, str]] = [
+    (12.8, "cu128"),
+    (12.6, "cu126"),
     (12.4, "cu124"),
     (12.1, "cu121"),
     (11.8, "cu118"),
@@ -61,7 +68,9 @@ def _select_wheel_tag(max_cuda_version: float | None) -> tuple[str, str]:
 
 
 def _parse_nvidia_smi_cuda_version(text: str) -> float | None:
-    m = re.search(r"CUDA Version:\s*(\d+)\.(\d+)", text)
+    # Old nvidia-smi prints "CUDA Version: 12.4"; newer drivers print
+    # "CUDA UMD Version: 13.3" — match both (optional word between CUDA/Version).
+    m = re.search(r"CUDA\s+(?:\w+\s+)?Version:\s*(\d+)\.(\d+)", text)
     if m:
         try:
             return float(f"{m.group(1)}.{m.group(2)}")
@@ -163,33 +172,40 @@ def _asr_extra_target() -> str:
 
 
 def build_asr_install_steps(probe_result: GpuProbeResult) -> list[tuple[str, str]]:
-    """Ordered ``(label, command)`` steps to install the ASR extra.
+    """The ``(label, command)`` step(s) to install the ASR extra -- one command.
 
-    With an NVIDIA GPU this is **two** steps: first install the CUDA build of
-    PyTorch from the pytorch wheel index, THEN install ``deciwaves[asr]`` from
-    PyPI. They must be separate because ``--index-url`` *replaces* PyPI, and the
-    pytorch index hosts no ``whisperx`` (a single combined command fails with
-    "No matching distribution found for whisperx"). Without a GPU it's a single
-    step — a CPU ``torch`` resolves from PyPI as an ordinary dependency of the
-    extra.
+    A single ``pip install <extra> --extra-index-url <cuXXX>`` does the whole job on
+    a GPU: pip resolves the *whole* graph across PyPI AND the pytorch index, so it
+    honours whisperx's ``torch~=2.8`` pin AND prefers the CUDA wheel (a ``+cu128``
+    local version sorts above the plain PyPI ``2.8.0``). Verified end-to-end to land
+    ``torch 2.8.0+cu128`` with ``torch.cuda.is_available()`` True and a clean
+    ``pip check``. Returned as a one-element list (the widget renders N steps).
 
-    Every command uses ``sys.executable`` (targets the running venv, not PATH)
-    and is prefixed with PowerShell's call operator (``&``): Windows 11's default
-    shell parses a line that *starts* with a quoted string as a string literal,
-    not a command, so ``"C:\\...python.exe" -m pip ...`` fails with a
-    ParserError. ``&`` tells PowerShell to invoke the quoted path. (This repo is
-    Windows/PowerShell-only — see CLAUDE.md.)
+    Why exactly this shape -- each footgun learned the hard way:
+
+    - ``--extra-index-url``, NEVER ``--index-url``. ``--index-url`` *replaces* PyPI,
+      and the pytorch index hosts no ``whisperx`` ("No matching distribution found
+      for whisperx"). ``--extra-index-url`` *adds* the index, so whisperx resolves
+      from PyPI while torch comes from the CUDA index.
+    - The index must carry torch's pinned version. whisperx pins ``torch~=2.8``,
+      whose CUDA wheels live on cu126/cu128 (cu124 tops out at torch 2.6) -- see
+      ``_CUDA_WHEEL_THRESHOLDS`` / ``_DEFAULT_WHEEL_TAG``.
+    - Let pip resolve the version -- an explicit ``pip install torch --index-url
+      <cuXXX>`` grabs the index's *newest* torch, drifting off whisperx's pin;
+      resolving the graph together keeps them matched.
+
+    Without a GPU it's the bare extra -- a CPU ``torch`` resolves from PyPI as an
+    ordinary dependency.
+
+    The command uses ``sys.executable`` (the running venv, not PATH) and is prefixed
+    with PowerShell's call operator (``&``): Windows 11's default shell parses a line
+    that *starts* with a quoted string as a string literal, so a bare quoted path
+    fails with a ParserError. ``&`` tells PowerShell to invoke it. (Windows-only.)
     """
     call = f'& "{sys.executable}"'  # PowerShell call operator; see docstring
-    extra_cmd = f"{call} -m pip install {_asr_extra_target()}"
+    cmd = f"{call} -m pip install {_asr_extra_target()}"
 
     if probe_result.has_nvidia_gpu and probe_result.index_url:
-        torch_cmd = (
-            f"{call} -m pip install torch torchaudio "
-            f"--index-url {probe_result.index_url}"
-        )
-        return [
-            ("1. Install the CUDA build of PyTorch", torch_cmd),
-            ("2. Install the ASR extra (deciwaves[asr])", extra_cmd),
-        ]
-    return [("Install the ASR extra (deciwaves[asr])", extra_cmd)]
+        cmd += f" --extra-index-url {probe_result.index_url}"
+        return [("Install ASR with GPU (CUDA) PyTorch", cmd)]
+    return [("Install the ASR extra (deciwaves[asr])", cmd)]

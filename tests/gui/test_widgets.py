@@ -77,13 +77,14 @@ def _gpu_result():
         wheel_tag="cu124", index_url="https://download.pytorch.org/whl/cu124")
 
 
-def test_asr_install_hint_renders_gpu_steps_selectable(qtbot, monkeypatch):
+def test_asr_install_hint_renders_gpu_command_selectable(qtbot, monkeypatch):
     monkeypatch.setattr("deciwaves.gui.gpu_probe.probe_gpu", _gpu_result)
     hint = AsrInstallHint()
     qtbot.addWidget(hint)
-    cmds = hint.commands()   # triggers probe + renders the step rows
-    assert len(cmds) == 2    # GPU → CUDA torch, then the extra
-    assert len(hint._cmd_labels) == 2
+    cmds = hint.commands()   # triggers probe + renders the step row(s)
+    assert len(cmds) == 1    # GPU → one --extra-index-url command
+    assert "--extra-index-url" in cmds[0]
+    assert len(hint._cmd_labels) == 1
     for lbl in hint._cmd_labels:
         assert lbl.textInteractionFlags() & Qt.TextSelectableByMouse
         assert lbl.textInteractionFlags() & Qt.TextSelectableByKeyboard
@@ -94,7 +95,7 @@ def test_asr_install_hint_each_step_has_a_copy_button(qtbot, monkeypatch):
     hint = AsrInstallHint()
     qtbot.addWidget(hint)
     hint.commands()
-    assert len(hint._copy_btns) == 2
+    assert len(hint._copy_btns) == 1
     assert all(b.toolTip() for b in hint._copy_btns)
 
 
