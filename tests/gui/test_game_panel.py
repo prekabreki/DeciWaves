@@ -12,9 +12,17 @@ from PySide6.QtWidgets import QFileDialog  # noqa: E402
 from deciwaves.gui.views.game_panel import GamePanel  # noqa: E402
 
 _CUDA_OK = {"ok": True, "checks": [
-    {"name": "cuda", "ok": True, "status": "ok", "message": "", "fix": ""}]}
-_CUDA_ABSENT = {"ok": True, "checks": [
-    {"name": "cuda", "ok": True, "status": "unavailable", "message": "", "fix": ""}]}
+    {"name": "cuda", "ok": True, "status": "ok",
+     "message": "CUDA: available (NVIDIA GeForce RTX 4080)", "fix": ""}]}
+_CUDA_NO_GPU = {"ok": True, "checks": [
+    {"name": "cuda", "ok": True, "status": "unavailable",
+     "message": "CUDA: torch installed but no GPU visible (informational)", "fix": ""}]}
+_CUDA_NOT_INSTALLED = {"ok": True, "checks": [
+    {"name": "cuda", "ok": True, "status": "unavailable",
+     "message": "CUDA: torch not installed (informational; see ASR extra)", "fix": ""}]}
+_CUDA_IMPORT_FAILED = {"ok": True, "checks": [
+    {"name": "cuda", "ok": True, "status": "unavailable",
+     "message": "CUDA: torch import failed (DLL load failed) (informational)", "fix": ""}]}
 
 
 # --- set_game: hide-not-grey per-game control swap -------------------------
@@ -173,8 +181,28 @@ def test_gpu_label_reflects_cuda_payload(qtbot, tmp_path):
     p.set_game("hzd")
     p.set_context(str(tmp_path), {}, _CUDA_OK)
     assert "cuda" in p.gpu_status_text().lower() or "ready" in p.gpu_status_text().lower()
-    p.set_context(str(tmp_path), {}, _CUDA_ABSENT)
+    p.set_context(str(tmp_path), {}, _CUDA_NO_GPU)
     assert p.gpu_status_text() != ""
+
+
+def test_gpu_label_distinguishes_torch_not_installed_from_no_device(qtbot, tmp_path):
+    p = GamePanel()
+    qtbot.addWidget(p)
+    p.set_game("hzd")
+
+    p.set_context(str(tmp_path), {}, _CUDA_NOT_INSTALLED)
+    text = p.gpu_status_text()
+    assert "acceleration not installed" in text
+    assert "see ASR extra" in text
+    assert "no CUDA GPU" not in text
+
+    p.set_context(str(tmp_path), {}, _CUDA_NO_GPU)
+    text = p.gpu_status_text()
+    assert text == "GPU: no CUDA GPU visible"
+
+    p.set_context(str(tmp_path), {}, _CUDA_IMPORT_FAILED)
+    text = p.gpu_status_text()
+    assert text == "GPU: torch import failed"
 
 
 # --- Tooltips ---------------------------------------------------------------
