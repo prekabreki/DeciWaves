@@ -275,6 +275,28 @@ def _parse_or_exit(ap: argparse.ArgumentParser, extra_argv: list) -> argparse.Na
         return exc.code
 
 
+def _run_pipeline(game: str, chain: list[Stage], ctx: dict, ns: argparse.Namespace,
+                  *, full_chain: list[Stage] | None = None) -> int:
+    """Common tail of ``_run_ds`` and ``_run_hzd``: validate --from/--until, delete
+    the --from marker iff validation passes, then dispatch the (sliced) chain.
+
+    ``_run_fw`` does NOT use this helper -- its ``_run_chain`` calls are split
+    across the BYO --gamescript gate with upfront validation and a gamescript
+    existence check interleaved (see its own logic).
+
+    Validation-only, delete-later contract (``_slice_bounds`` docstring): a run
+    that fails slice validation (rc != 0) deletes nothing. ``full_chain`` is
+    threaded through to ``_run_chain`` so downstream-marker invalidation sees
+    the game's complete declared order, not just the sliced tail.
+    """
+    last_idx, rc = _slice_bounds(game, chain, ns.from_stage, ns.until)
+    if rc:
+        return rc
+    if ns.from_stage:
+        _remove_marker(game, ns.from_stage)  # --from's contract: delete, then run normally
+    return _run_chain(game, chain[:last_idx + 1], ctx, full_chain=full_chain or chain)
+
+
 # ---------------------------------------------------------------------------
 # ds
 # ---------------------------------------------------------------------------
@@ -342,12 +364,7 @@ def _run_ds(cfg: dict, extra_argv: list) -> int:
         return _missing_config("ds", "DS install (ds_install)", "--data-dir/--oodle")
 
     ctx = {"data_dir": data_dir, "oodle": oodle}
-    last_idx, rc = _slice_bounds("ds", chain, ns.from_stage, ns.until)
-    if rc:
-        return rc
-    if ns.from_stage:
-        _remove_marker("ds", ns.from_stage)  # --from's contract: delete, then run normally
-    return _run_chain("ds", chain[:last_idx + 1], ctx, full_chain=chain)
+    return _run_pipeline("ds", chain, ctx, ns, full_chain=chain)
 
 
 # ---------------------------------------------------------------------------
@@ -408,12 +425,7 @@ def _run_hzd(cfg: dict, extra_argv: list) -> int:
         return _missing_config("hzd", "HZD package (hzd_package)", "--package")
 
     ctx = {"package": package, "sample_cap": ns.sample_cap}
-    last_idx, rc = _slice_bounds("hzd", chain, ns.from_stage, ns.until)
-    if rc:
-        return rc
-    if ns.from_stage:
-        _remove_marker("hzd", ns.from_stage)  # --from's contract: delete, then run normally
-    return _run_chain("hzd", chain[:last_idx + 1], ctx, full_chain=chain)
+    return _run_pipeline("hzd", chain, ctx, ns, full_chain=chain)
 
 
 # ---------------------------------------------------------------------------
