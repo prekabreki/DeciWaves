@@ -9,6 +9,7 @@ from __future__ import annotations
 import importlib.util
 
 INSTALL_HINT = 'pip install "deciwaves[gui]"'
+ASR_INSTALL_HINT = "pip install deciwaves[asr]"
 
 
 def is_available() -> bool:

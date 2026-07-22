@@ -38,6 +38,7 @@ from typing import NamedTuple
 
 from deciwaves.cli import config
 from deciwaves.engine import tool_paths
+from deciwaves.gui import ASR_INSTALL_HINT
 from deciwaves.engine.asr import cuda_available
 from deciwaves.games.hzd import profile as hzd_profile
 
@@ -241,7 +242,7 @@ def check_asr_extra() -> Check:
         return Check("asr_extra", Availability.UNAVAILABLE,
                      "ASR extra (whisperx): not installed (only needed for GPU "
                      "stages: ds trim, hzd bind, fw asr).",
-                     "pip install deciwaves[asr]")
+                     ASR_INSTALL_HINT)
 
 
 def check_cuda() -> Check:
