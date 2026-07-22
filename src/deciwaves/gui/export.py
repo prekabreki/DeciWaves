@@ -57,6 +57,7 @@ class ExportPanel(QWidget):
         self._can_catalog = False
         self._running = False
         self._dumping = False
+        self._workspace_empty = False
 
         self._mp3_btn = QPushButton("Export MP3")
         self._bitrate = QComboBox()
@@ -128,6 +129,12 @@ class ExportPanel(QWidget):
         self._dumping = dumping
         self._update()
 
+    def set_workspace_empty(self, empty: bool) -> None:
+        """Mirrors PipelineControls.set_workspace_empty: when no workspace is set the
+        export actions are disabled (consistent with the pipeline gate from #246)."""
+        self._workspace_empty = empty
+        self._update()
+
     def set_dump_progress(self, done: int, total: int) -> None:
         self._progress.setVisible(True)
         self._progress.setMaximum(max(total, 1))
@@ -140,7 +147,8 @@ class ExportPanel(QWidget):
         self._status.setText(f"Dumped {ok} clip(s)" + (f", {failed} failed" if failed else ""))
 
     def _update(self) -> None:
-        can_start = self._checked > 0 and not self._running
+        has_workspace = not self._workspace_empty
+        can_start = self._checked > 0 and not self._running and has_workspace
         self._mp3_btn.setEnabled(self._can_mp3 and can_start)
         self._catalog_btn.setEnabled(self._can_catalog and can_start)
         if self._dumping:
