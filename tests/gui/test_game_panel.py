@@ -109,43 +109,66 @@ def test_fw_tiers_hint_hidden_for_non_fw_games(qtbot):
     assert not p._tiers_hint.isVisibleTo(p)
 
 
-def test_fw_tiers_warning_on_unknown_token(qtbot):
+def test_fw_tiers_checkboxes_default_to_1_2_s(qtbot):
     p = GamePanel()
     qtbot.addWidget(p)
     p.set_game("fw")
-    assert not p._tiers_warning.isVisibleTo(p)
-    p._tiers_edit.setText("1,2,Z")
-    assert p._tiers_warning.isVisibleTo(p)
-    assert "Z" in p._tiers_warning.text()
-    assert "Unknown tier" in p._tiers_warning.text()
+    checked = {t for t, cb in p._tiers_checks.items() if cb.isChecked()}
+    assert checked == {"1", "2", "S"}
 
 
-def test_fw_tiers_warning_hidden_for_valid_input(qtbot):
+def test_fw_tiers_checking_w_adds_it_to_render_scope(qtbot):
     p = GamePanel()
     qtbot.addWidget(p)
     p.set_game("fw")
-    p._tiers_edit.setText("1,2,Z")
-    assert p._tiers_warning.isVisibleTo(p)
-    p._tiers_edit.setText("1,2,S")
-    assert not p._tiers_warning.isVisibleTo(p)
+    p._tiers_checks["W"].setChecked(True)
+    assert p.render_scope() == {"tiers": "1,2,S,W"}
 
 
-def test_fw_tiers_warning_hidden_for_valid_subset_wd(qtbot):
+def test_fw_tiers_unchecking_updates_render_scope(qtbot):
     p = GamePanel()
     qtbot.addWidget(p)
     p.set_game("fw")
-    p._tiers_edit.setText("W,D")
-    assert not p._tiers_warning.isVisibleTo(p)
+    p._tiers_checks["2"].setChecked(False)
+    assert p.render_scope() == {"tiers": "1,S"}
 
 
-def test_fw_tiers_warning_cleared_on_game_reset(qtbot):
+def test_fw_tiers_render_scope_preserves_canonical_order(qtbot):
     p = GamePanel()
     qtbot.addWidget(p)
     p.set_game("fw")
-    p._tiers_edit.setText("1,2,Z")
-    assert p._tiers_warning.isVisibleTo(p)
+    # Check D before W; output must still be canonical 1,2,S,W,D order.
+    p._tiers_checks["D"].setChecked(True)
+    p._tiers_checks["W"].setChecked(True)
+    assert p.render_scope() == {"tiers": "1,2,S,W,D"}
+
+
+def test_fw_tiers_none_checked_falls_back_to_default(qtbot):
+    p = GamePanel()
+    qtbot.addWidget(p)
     p.set_game("fw")
-    assert not p._tiers_warning.isVisibleTo(p)
+    for cb in p._tiers_checks.values():
+        cb.setChecked(False)
+    assert p.render_scope() == {"tiers": "1,2,S"}
+
+
+def test_fw_tiers_toggle_emits_render_scope_changed(qtbot):
+    p = GamePanel()
+    qtbot.addWidget(p)
+    p.set_game("fw")
+    with qtbot.waitSignal(p.render_scope_changed, timeout=500):
+        p._tiers_checks["W"].setChecked(True)
+
+
+def test_fw_tiers_checkboxes_reset_on_game_reset(qtbot):
+    p = GamePanel()
+    qtbot.addWidget(p)
+    p.set_game("fw")
+    p._tiers_checks["W"].setChecked(True)
+    p._tiers_checks["2"].setChecked(False)
+    p.set_game("fw")
+    checked = {t for t, cb in p._tiers_checks.items() if cb.isChecked()}
+    assert checked == {"1", "2", "S"}
 
 
 # --- sample cap (HZD) ------------------------------------------------------
@@ -284,3 +307,12 @@ def test_cancelled_pick_emits_nothing(qtbot, monkeypatch):
     p.types_picked.connect(fired.append)
     p._types_browse.click()
     assert fired == []
+
+
+def test_asr_hint_recheck_reemits_panel_signal(qtbot):
+    # The hint's recheck_requested is re-exposed as a panel signal the shell
+    # wires to a Doctor re-check (so status refreshes after install).
+    p = GamePanel()
+    qtbot.addWidget(p)
+    with qtbot.waitSignal(p.asr_recheck_requested, timeout=500):
+        p._asr_hint.recheck_requested.emit()

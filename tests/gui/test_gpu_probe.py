@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from pathlib import Path
 
 from deciwaves.gui.gpu_probe import (
     CPU_RESULT,
@@ -14,7 +15,7 @@ from deciwaves.gui.gpu_probe import (
     _parse_nvidia_smi_cuda_version,
     _parse_nvidia_smi_gpu_name,
     _select_wheel_tag,
-    build_asr_install_command,
+    build_asr_install_steps,
     probe_gpu,
 )
 
@@ -223,7 +224,7 @@ def test_probe_gpu_empty_gpu_name_returns_cpu(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# build_asr_install_command
+# build_asr_install_steps
 # ---------------------------------------------------------------------------
 
 
@@ -236,48 +237,85 @@ def _gpu_probe_result(tag="cu124", url="https://download.pytorch.org/whl/cu124")
     )
 
 
-def test_build_command_editable_form(monkeypatch):
+def test_steps_gpu_returns_two_steps(monkeypatch):
     monkeypatch.setattr("deciwaves.gui.gpu_probe._is_editable", lambda: True)
-    result = _gpu_probe_result()
-    cmd = build_asr_install_command(result)
-    assert sys.executable in cmd
-    assert '-e ".[asr]"' in cmd
-    assert "--index-url" in cmd
-    assert "cu124" in cmd
+    monkeypatch.setattr(
+        "deciwaves.gui.gpu_probe._editable_project_dir",
+        lambda: Path(r"C:\repo\DeciWaves"),
+    )
+    steps = build_asr_install_steps(_gpu_probe_result())
+    assert len(steps) == 2
+    labels = [lbl for lbl, _cmd in steps]
+    assert labels[0].startswith("1.")
+    assert labels[1].startswith("2.")
 
 
-def test_build_command_installed_form(monkeypatch):
+def test_steps_gpu_torch_step_has_index_url_extra_step_does_not(monkeypatch):
+    monkeypatch.setattr("deciwaves.gui.gpu_probe._is_editable", lambda: True)
+    monkeypatch.setattr(
+        "deciwaves.gui.gpu_probe._editable_project_dir",
+        lambda: Path(r"C:\repo\DeciWaves"),
+    )
+    (_l1, torch_cmd), (_l2, extra_cmd) = build_asr_install_steps(_gpu_probe_result())
+    # Step 1 installs the CUDA torch from the pytorch index...
+    assert "torch" in torch_cmd
+    assert "--index-url" in torch_cmd
+    assert "cu124" in torch_cmd
+    assert "[asr]" not in torch_cmd
+    # ...step 2 installs the extra from PyPI (NO --index-url, or whisperx 404s).
+    assert "--index-url" not in extra_cmd
+    assert "[asr]" in extra_cmd
+
+
+def test_steps_editable_uses_absolute_path(monkeypatch):
+    monkeypatch.setattr("deciwaves.gui.gpu_probe._is_editable", lambda: True)
+    monkeypatch.setattr(
+        "deciwaves.gui.gpu_probe._editable_project_dir",
+        lambda: Path(r"C:\repo\DeciWaves"),
+    )
+    _torch, (_lbl, extra_cmd) = build_asr_install_steps(_gpu_probe_result())
+    assert '-e ".[asr]"' not in extra_cmd
+    assert r'-e "C:\repo\DeciWaves[asr]"' in extra_cmd
+
+
+def test_steps_editable_falls_back_to_dot_when_root_unknown(monkeypatch):
+    monkeypatch.setattr("deciwaves.gui.gpu_probe._is_editable", lambda: True)
+    monkeypatch.setattr(
+        "deciwaves.gui.gpu_probe._editable_project_dir", lambda: None)
+    (steps) = build_asr_install_steps(CPU_RESULT)
+    assert '-e ".[asr]"' in steps[0][1]
+
+
+def test_steps_installed_form(monkeypatch):
     monkeypatch.setattr("deciwaves.gui.gpu_probe._is_editable", lambda: False)
-    result = _gpu_probe_result()
-    cmd = build_asr_install_command(result)
-    assert sys.executable in cmd
-    assert '"deciwaves[asr]"' in cmd
-    assert "-e " not in cmd
+    _torch, (_lbl, extra_cmd) = build_asr_install_steps(_gpu_probe_result())
+    assert '"deciwaves[asr]"' in extra_cmd
+    assert "-e " not in extra_cmd
 
 
-def test_build_command_cpu_result_omits_index_url(monkeypatch):
+def test_steps_cpu_result_is_single_step_without_index_url(monkeypatch):
     monkeypatch.setattr("deciwaves.gui.gpu_probe._is_editable", lambda: True)
-    cmd = build_asr_install_command(CPU_RESULT)
-    assert "--index-url" not in cmd
+    monkeypatch.setattr(
+        "deciwaves.gui.gpu_probe._editable_project_dir", lambda: None)
+    steps = build_asr_install_steps(CPU_RESULT)
+    assert len(steps) == 1
+    assert "--index-url" not in steps[0][1]
+    assert "[asr]" in steps[0][1]
 
 
-def test_build_command_uses_sys_executable(monkeypatch):
+def test_steps_every_command_uses_call_operator_and_sys_executable(monkeypatch):
     monkeypatch.setattr("deciwaves.gui.gpu_probe._is_editable", lambda: True)
-    cmd = build_asr_install_command(_gpu_probe_result())
-    # sys.executable should be the venv python, not just "python"
-    assert cmd.startswith(f'"{sys.executable}"')
-    assert "-m pip install" in cmd
+    monkeypatch.setattr(
+        "deciwaves.gui.gpu_probe._editable_project_dir", lambda: None)
+    for _label, cmd in build_asr_install_steps(_gpu_probe_result()):
+        assert cmd.startswith(f'& "{sys.executable}"')
+        assert "-m pip install" in cmd
 
 
-def test_build_command_cpu_result_still_has_extras(monkeypatch):
+def test_steps_downgraded_index_url(monkeypatch):
     monkeypatch.setattr("deciwaves.gui.gpu_probe._is_editable", lambda: True)
-    cmd = build_asr_install_command(CPU_RESULT)
-    assert "[asr]" in cmd
-
-
-def test_build_command_downgraded_index_url(monkeypatch):
-    monkeypatch.setattr("deciwaves.gui.gpu_probe._is_editable", lambda: True)
+    monkeypatch.setattr(
+        "deciwaves.gui.gpu_probe._editable_project_dir", lambda: None)
     result = _gpu_probe_result(tag="cu118", url="https://download.pytorch.org/whl/cu118")
-    cmd = build_asr_install_command(result)
-    assert "cu118" in cmd
-    assert "--index-url" in cmd
+    (_l, torch_cmd), _extra = build_asr_install_steps(result)
+    assert "cu118" in torch_cmd

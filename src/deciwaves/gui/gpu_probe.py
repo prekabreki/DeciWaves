@@ -129,25 +129,67 @@ def _is_editable() -> bool:
     return "site-packages" not in Path(deciwaves.__file__).resolve().parts
 
 
-def build_asr_install_command(probe_result: GpuProbeResult) -> str:
-    """Build the GPU-aware ASR ``pip install`` command.
+def _editable_project_dir() -> Path | None:
+    """Locate the editable checkout's project root (the dir with pyproject.toml).
 
-    Uses ``sys.executable`` (targets the running venv, not PATH) and
-    selects the extras form based on editable-vs-installed detection.
-    GPU-aware ``--index-url`` is appended when the probe found an NVIDIA
-    GPU with a CUDA wheel index URL.
+    An editable ``pip install -e .`` command only resolves if the shell's CWD
+    is the repo root. The GUI hands the user a copy-pasteable command that they
+    run in a fresh console (which opens at their home dir), so a bare ``.`` fails
+    with "does not appear to be a Python project". Resolve the absolute project
+    root from the imported package location instead, so the command is
+    CWD-independent. Returns ``None`` if no ``pyproject.toml`` is found upward.
+    """
+    import deciwaves
+    start = Path(deciwaves.__file__).resolve().parent
+    for parent in (start, *start.parents):
+        if (parent / "pyproject.toml").is_file():
+            return parent
+    return None
 
-    Reuses the ``[asr]`` extras fragment from :data:`ASR_INSTALL_HINT`.
+
+def _asr_extra_target() -> str:
+    """The pip target for the deciwaves ASR extra.
+
+    Editable checkout → ``-e "<abs-project-dir>[asr]"`` (absolute, not a bare
+    ``.``, so the copied command works from any console CWD). Installed →
+    ``"deciwaves[asr]"``.
     """
     extras = _extract_asr_extras()
-    executable = sys.executable
-
     if _is_editable():
-        cmd = f'"{executable}" -m pip install -e ".{extras}"'
-    else:
-        cmd = f'"{executable}" -m pip install "deciwaves{extras}"'
+        project_dir = _editable_project_dir()
+        target = f"{project_dir}{extras}" if project_dir is not None else f".{extras}"
+        return f'-e "{target}"'
+    return f'"deciwaves{extras}"'
+
+
+def build_asr_install_steps(probe_result: GpuProbeResult) -> list[tuple[str, str]]:
+    """Ordered ``(label, command)`` steps to install the ASR extra.
+
+    With an NVIDIA GPU this is **two** steps: first install the CUDA build of
+    PyTorch from the pytorch wheel index, THEN install ``deciwaves[asr]`` from
+    PyPI. They must be separate because ``--index-url`` *replaces* PyPI, and the
+    pytorch index hosts no ``whisperx`` (a single combined command fails with
+    "No matching distribution found for whisperx"). Without a GPU it's a single
+    step — a CPU ``torch`` resolves from PyPI as an ordinary dependency of the
+    extra.
+
+    Every command uses ``sys.executable`` (targets the running venv, not PATH)
+    and is prefixed with PowerShell's call operator (``&``): Windows 11's default
+    shell parses a line that *starts* with a quoted string as a string literal,
+    not a command, so ``"C:\\...python.exe" -m pip ...`` fails with a
+    ParserError. ``&`` tells PowerShell to invoke the quoted path. (This repo is
+    Windows/PowerShell-only — see CLAUDE.md.)
+    """
+    call = f'& "{sys.executable}"'  # PowerShell call operator; see docstring
+    extra_cmd = f"{call} -m pip install {_asr_extra_target()}"
 
     if probe_result.has_nvidia_gpu and probe_result.index_url:
-        cmd += f" --index-url {probe_result.index_url}"
-
-    return cmd
+        torch_cmd = (
+            f"{call} -m pip install torch torchaudio "
+            f"--index-url {probe_result.index_url}"
+        )
+        return [
+            ("1. Install the CUDA build of PyTorch", torch_cmd),
+            ("2. Install the ASR extra (deciwaves[asr])", extra_cmd),
+        ]
+    return [("Install the ASR extra (deciwaves[asr])", extra_cmd)]
