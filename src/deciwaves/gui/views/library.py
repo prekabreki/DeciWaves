@@ -415,9 +415,7 @@ class LibraryView(QWidget):
         self._speaker.setCurrentIndex(restore if restore >= 0 else 0)
         self._speaker.blockSignals(False)
 
-        has_len = has_known_lengths(self._rows)
-        self._short_secs.setEnabled(has_len)
-        self._uncheck_short_btn.setEnabled(has_len)
+        self._set_shortlen_enabled(has_known_lengths(self._rows))
 
         self._apply_filters()
 
@@ -478,9 +476,26 @@ class LibraryView(QWidget):
 
         self._apply_filters()
 
-        has_len = has_known_lengths(self._rows)
+        self._set_shortlen_enabled(has_known_lengths(self._rows))
+
+    def _set_shortlen_enabled(self, has_len: bool) -> None:
+        """Enable/disable the "Uncheck shorter than" control + its spinbox, and set a
+        tooltip that explains WHY when it's disabled -- dogfooding: DS/HZD carry no
+        per-line duration, so the control was permanently greyed with no indication."""
         self._short_secs.setEnabled(has_len)
         self._uncheck_short_btn.setEnabled(has_len)
+        if has_len:
+            tip = ("Unchecks every line shorter than this many seconds "
+                   "(uses each line's decoded audio length).")
+        elif self._game == "fw":
+            tip = ("Line durations are still loading — this filter enables once "
+                   "they're ready.")
+        else:
+            tip = ("Not available for this game: filtering by length needs each line's "
+                   "audio duration, which only Forbidden West provides. DS/HZD lines "
+                   "carry no duration (the Length column shows “—”).")
+        self._short_secs.setToolTip(tip)
+        self._uncheck_short_btn.setToolTip(tip)
 
     def _on_header_clicked(self, section: int) -> None:
         key = self._SORT_KEYS.get(section)
