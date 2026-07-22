@@ -204,6 +204,7 @@ class MainWindow(QMainWindow):
         empty = not self._has_workspace()
         self.pipeline.controls.set_workspace_empty(empty)
         self.game_panel.set_reorder_enabled(not empty)
+        self.library.export.set_workspace_empty(empty)
 
     def _refresh_status(self) -> None:
         cfg = config.load()
@@ -376,6 +377,8 @@ class MainWindow(QMainWindow):
     # --- export flows (#72) ------------------------------------------------
 
     def _on_export_mp3(self, bitrate: int) -> None:
+        if not self._has_workspace():
+            return
         error = self._controller.start_export_mp3(
             self.bar.current_game(), self._workspace(), bitrate,
             self.library.unchecked_ids(), self.library.checked_count(),
@@ -384,6 +387,8 @@ class MainWindow(QMainWindow):
             self.pipeline.append_log(error)
 
     def _on_dump_wav(self, dest: str) -> None:
+        if not self._has_workspace():
+            return
         rows = [(r.line_id, r.audio_path) for r in self.library.checked_rows()]
         if not rows:
             self.pipeline.append_log("dump: no checked rows to dump.\n")
@@ -402,6 +407,8 @@ class MainWindow(QMainWindow):
         self.library.export.dump_finished(ok, failed)
 
     def _on_export_catalog(self, dest: str) -> None:
+        if not self._has_workspace():
+            return
         self._controller.start_catalog_copy(
             self.bar.current_game(), self._workspace(), dest)
 

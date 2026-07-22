@@ -62,6 +62,25 @@ def test_all_enabled_when_ready(qtbot):
     assert (p.mp3_enabled(), p.dump_enabled(), p.catalog_enabled()) == (True, True, True)
 
 
+def test_buttons_disabled_when_workspace_empty(qtbot):
+    p = ExportPanel(); qtbot.addWidget(p)
+    _ctx(p, checked=5)
+    assert (p.mp3_enabled(), p.dump_enabled(), p.catalog_enabled()) == (True, True, True)
+    p.set_workspace_empty(True)
+    assert p.mp3_enabled() is False
+    assert p.dump_enabled() is False
+    assert p.catalog_enabled() is False
+
+
+def test_buttons_reenable_when_workspace_set(qtbot):
+    p = ExportPanel(); qtbot.addWidget(p)
+    p.set_workspace_empty(True)
+    _ctx(p, checked=5)
+    assert p.mp3_enabled() is False
+    p.set_workspace_empty(False)
+    assert (p.mp3_enabled(), p.dump_enabled(), p.catalog_enabled()) == (True, True, True)
+
+
 def test_bitrate_combo_ds_only(qtbot):
     p = ExportPanel(); qtbot.addWidget(p)
     _ctx(p, game="ds")
@@ -408,6 +427,67 @@ def test_shell_dump_disables_then_reenables_pipeline_and_strip(qtbot, tmp_path):
     w._controller._on_dump_finished(2, 0)
     assert w.pipeline.controls._scan_btn.isEnabled() is True
     assert w.pipeline.strip.rerun_enabled() is True
+
+
+def test_export_buttons_disabled_when_no_workspace(qtbot):
+    from deciwaves.gui.shell import MainWindow
+    w = MainWindow()
+    qtbot.addWidget(w)
+    w.bar.select_game("ds")
+    assert w.library.export.mp3_enabled() is False
+    assert w.library.export.dump_enabled() is False
+    assert w.library.export.catalog_enabled() is False
+
+
+def test_export_buttons_enabled_when_workspace_set(qtbot, tmp_path):
+    _make_ds_playlist(str(tmp_path))
+    src = os.path.join(str(tmp_path), "out", "catalog.csv")
+    with open(src, "w", encoding="utf-8") as f:
+        f.write("line_id\na\n")
+    w = _mainwindow(qtbot, tmp_path, "ds")
+    assert w.library.export.mp3_enabled() is True
+    assert w.library.export.dump_enabled() is True
+    assert w.library.export.catalog_enabled() is True
+
+
+def test_export_mp3_skipped_when_no_workspace(qtbot, monkeypatch):
+    from deciwaves.gui.job_controller import JobController
+    from deciwaves.gui.shell import MainWindow
+    w = MainWindow()
+    qtbot.addWidget(w)
+    w.bar.select_game("ds")
+    monkeypatch.setattr("deciwaves.gui.shell.config.load", lambda: {"ds_install": r"C:\DS"})
+    calls = []
+    monkeypatch.setattr(JobController, "start_export_mp3",
+                        lambda self, *a, **k: calls.append(a) or None)
+    w.library.export.export_mp3_requested.emit(128)
+    assert calls == []
+
+
+def test_export_catalog_skipped_when_no_workspace(qtbot, monkeypatch):
+    from deciwaves.gui.job_controller import JobController
+    from deciwaves.gui.shell import MainWindow
+    w = MainWindow()
+    qtbot.addWidget(w)
+    w.bar.select_game("ds")
+    calls = []
+    monkeypatch.setattr(JobController, "start_catalog_copy",
+                        lambda self, *a, **k: calls.append(a) or None)
+    w.library.export.export_catalog_requested.emit("/some/path.csv")
+    assert calls == []
+
+
+def test_export_dump_skipped_when_no_workspace(qtbot, monkeypatch):
+    from deciwaves.gui.job_controller import JobController
+    from deciwaves.gui.shell import MainWindow
+    w = MainWindow()
+    qtbot.addWidget(w)
+    w.bar.select_game("ds")
+    calls = []
+    monkeypatch.setattr(JobController, "start_dump_wav",
+                        lambda self, *a, **k: calls.append(a) or None)
+    w.library.export.dump_wav_requested.emit("/some/dest")
+    assert calls == []
 
 
 # --- async Catalog-copy worker ---------------------------------------------
