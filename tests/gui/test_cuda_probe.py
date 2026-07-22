@@ -75,9 +75,10 @@ def test_display_text_unknown_no_doctor_run():
 
 
 def test_display_text_torch_not_installed():
-    payload = _payload("unavailable", "CUDA: torch not installed (informational; see ASR extra)")
-    assert "acceleration not installed" in cuda_display_text(payload)
-    assert "see ASR extra" in cuda_display_text(payload)
+    payload = _payload("unavailable", "CUDA: torch not installed (informational)")
+    text = cuda_display_text(payload)
+    assert "acceleration not installed" in text
+    assert "see ASR extra" not in text
 
 
 def test_display_text_no_gpu_visible():
@@ -91,7 +92,7 @@ def test_display_text_torch_import_failed():
 
 
 def test_display_text_torch_not_installed_does_not_say_no_gpu():
-    payload = _payload("unavailable", "CUDA: torch not installed (informational; see ASR extra)")
+    payload = _payload("unavailable", "CUDA: torch not installed (informational)")
     text = cuda_display_text(payload)
     assert "no CUDA GPU" not in text
     assert "acceleration not installed" in text

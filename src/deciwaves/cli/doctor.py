@@ -257,7 +257,7 @@ def check_cuda() -> Check:
                      "CUDA: torch installed but no GPU visible (informational)")
     except ImportError:
         return Check("cuda", Availability.UNAVAILABLE,
-                     "CUDA: torch not installed (informational; see ASR extra)")
+                     "CUDA: torch not installed (informational)")
     except Exception as exc:  # torch can fail to import for env reasons (locked DLLs,
         # broken install); doctor's contract is to report, never traceback.
         reason = str(exc).splitlines()[0][:80]
