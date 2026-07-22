@@ -22,6 +22,7 @@ from deciwaves.gui.progress_model import probe_progress
 from deciwaves.gui.preview_model import PreviewResolver
 from deciwaves.gui.views import GamePanel, LibraryView, PipelineView
 from deciwaves.gui.views.guide_rail import GuideRail
+from deciwaves.gui.widgets import flash_highlight
 
 # game key -> its doctor install/config check (reused from the CLI, issue #67 / spec §3).
 _CHECKS = {
@@ -238,19 +239,30 @@ class MainWindow(QMainWindow):
             workspace=self.bar.workspace()))
 
     def _on_guide_action(self, target) -> None:
-        """Navigate to the live step's control -- tab-switch + focus only, never a
-        job launch (#112). The user still clicks the real Scan/Bind/etc. button."""
+        """Navigate to the live step's control — tab-switch, expand collapsed sections,
+        scroll into view, flash a brief highlight, then focus. Never launches a job
+        (#112). The user still clicks the real Scan/Bind/etc. button."""
         if target is ActionTarget.CURATE:
             self._tabs.setCurrentIndex(1)  # Library
             return
         self._tabs.setCurrentIndex(0)      # Pipeline for the rest
         if target is ActionTarget.SETUP:
-            self.pipeline.setup_doctor.setup.focus_run()
+            sd = self.pipeline.setup_doctor
+            if sd.setup_section.is_collapsed():
+                sd.setup_section.expand()
+            self.pipeline.scroll_to_widget(sd.setup._run_btn)
+            flash_highlight(sd.setup._run_btn)
+            sd.setup.focus_run()
         elif target is ActionTarget.WORKSPACE:
+            flash_highlight(self.bar._workspace)
             self.bar.focus_workspace()
         elif target is ActionTarget.SCAN:
+            self.pipeline.scroll_to_widget(self.pipeline.controls._scan_btn)
+            flash_highlight(self.pipeline.controls._scan_btn)
             self.pipeline.controls.focus_scan()
         elif target is ActionTarget.BIND:
+            self.pipeline.scroll_to_widget(self.pipeline.controls._bind_btn)
+            flash_highlight(self.pipeline.controls._bind_btn)
             self.pipeline.controls.focus_bind()
 
     def _on_tab_changed(self, index: int) -> None:
