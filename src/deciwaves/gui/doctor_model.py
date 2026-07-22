@@ -152,15 +152,14 @@ def severity(item: DoctorItem, game: str) -> str:
         return SEV_ERROR
     if item.status == STATUS_NOT_CONFIGURED:
         return SEV_NEUTRAL  # unowned/unconfigured -> neutral, never a failure (spec §3)
-    # The GPU extras are first-class readiness ONLY for the GPU games; for DS (no GPU
-    # stage in its default chain) they stay purely informational -- neutral whether
-    # present or absent, never a green readiness tick (spec §3).
-    if item.name in _GPU_READINESS and game not in _GPU_GAMES:
-        return SEV_NEUTRAL
+    # Installed & working reads GREEN for every game -- an actually-present tool should
+    # never show a bare grey dash just because the current game doesn't require it (the
+    # DS dogfooding confusion: installed CUDA/ASR showing "---" under DS). The per-game
+    # "is this optional here?" framing is carried by pill_for(), not by greying the node.
     if item.status == STATUS_OK:
         return SEV_OK
-    # UNAVAILABLE (or anything else): a real readiness gap for a promoted GPU extra on a
-    # GPU game; otherwise just informational.
+    # Not OK (unavailable/absent): a real readiness gap for a promoted GPU extra ONLY on a
+    # GPU game; for DS (no GPU stage in its default chain) it stays informational (spec §3).
     if item.name in _GPU_READINESS and game in _GPU_GAMES:
         return SEV_WARN
     return SEV_NEUTRAL
