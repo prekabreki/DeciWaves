@@ -16,6 +16,36 @@ CSV_COLUMNS = ["line_id", "core_path", "line_index", "category", "scene",
                "speaker_code", "speaker_name", "subtitle_en", "wem_path_en", "language"]
 
 
+class CsvFormatError(ValueError):
+    """A CSV file is missing required columns or has a format issue."""
+
+
+def read_csv_rows(path, *, required=None):
+    """Open a CSV with BOM-safe encoding (``utf-8-sig``) and return ``list[dict]``
+    via ``csv.DictReader``.
+
+    ``required`` (an iterable of column names): validates the header contains
+    all required columns and raises ``CsvFormatError`` listing the missing
+    column(s) and the actual header. Pass ``None`` (default) for no validation.
+
+    BOM-safety (issue #84, #229): ``utf-8-sig`` transparently strips a UTF-8 BOM
+    that PowerShell 5.1's ``Set-Content -Encoding utf8`` writes, which would
+    otherwise fuse ``\\ufeff`` into the first header key and cause a ``KeyError``.
+    BOM-less (plain-utf8) manifests are a subset and are unaffected.
+    """
+    with open(path, newline="", encoding="utf-8-sig") as f:
+        reader = csv.DictReader(f)
+        fields = reader.fieldnames or []
+        if required is not None:
+            missing = [c for c in required if c not in fields]
+            if missing:
+                raise CsvFormatError(
+                    f"manifest {path} is missing required column(s) "
+                    f"{', '.join(missing)} (header has: "
+                    f"{', '.join(fields) or 'nothing'}).")
+        return list(reader)
+
+
 def done_core_paths(csv_path):
     if not os.path.isfile(csv_path):
         return set()

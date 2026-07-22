@@ -20,12 +20,12 @@ clip from package.01 by (offset, length) via VGAudio.
 from __future__ import annotations
 
 import argparse
-import csv
 import os
 import re
 import wave
 from dataclasses import dataclass
 
+from deciwaves.engine.catalog_io import read_csv_rows
 from deciwaves.engine.render import (
     accumulate_episode_seconds, assemble_reels, budget_seconds, format_ts, ReelColumns,
     DEFAULT_BITRATE_KBPS,
@@ -189,11 +189,6 @@ def decode_spine_clips(spine, dsar, cache_dir, errors_path, jobs=1):
     return decoded, ep_secs, skipped
 
 
-def _load_csv(path):
-    with open(path, newline="", encoding="utf-8") as f:
-        return list(csv.DictReader(f))
-
-
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Render HZD main-quest spine to MP3")
     ap.add_argument("--package", required=True)
@@ -232,7 +227,7 @@ def main(argv=None):
     else:
         from deciwaves.games.hzd.episode_map import HZD_EPISODE_MAP
         episode_map = HZD_EPISODE_MAP
-    manifest_rows = _load_csv(a.manifest)
+    manifest_rows = read_csv_rows(a.manifest)
     spine = build_spine(manifest_rows, catalog, clip_index, episode_map=episode_map)
     kind = "main-quest spine" if a.spine_only else "full story reel"
     print(f"{kind}: {len(spine)} lines across {len({s.episode for s in spine})} scenes")

@@ -123,12 +123,6 @@ def build_rows(binds):
     } for b in binds]
 
 
-def _load_csv(path):
-    import csv
-    with open(path, newline="", encoding="utf-8") as f:
-        return list(csv.DictReader(f))
-
-
 def main(argv=None):  # pragma: no cover - integration glue
     import argparse
     import csv
@@ -149,7 +143,8 @@ def main(argv=None):  # pragma: no cover - integration glue
     ap.add_argument("--min-words", type=int, default=4)
     a = ap.parse_args(argv)
 
-    manifest = _load_csv(a.manifest)
+    from deciwaves.engine.catalog_io import read_csv_rows
+    manifest = read_csv_rows(a.manifest)
     script_lines = parse_file(a.gamescript)
     binds = match_subtitles(manifest, script_lines, strong=a.strong,
                             accept=a.accept, min_words=a.min_words)

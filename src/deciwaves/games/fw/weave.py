@@ -22,6 +22,7 @@ import os
 import re
 import statistics
 
+from deciwaves.engine.catalog_io import read_csv_rows
 from deciwaves.games.fw.manifest import MANIFEST_COLS
 from deciwaves.games.fw.subtitle_bind import DEFAULT_OUT as _SUBTITLE_MANIFEST
 
@@ -107,11 +108,6 @@ def build_woven_rows(matched_rows, clip_rows, transcripts_by_id,
     return rows
 
 
-def _load_csv(path):
-    with open(path, newline="", encoding="utf-8") as f:
-        return list(csv.DictReader(f))
-
-
 def main(argv=None):
     ap = argparse.ArgumentParser(description="FW story weave: scene dialogue, no barks")
     ap.add_argument("--manifest", default="out/fw/story-manifest.csv",
@@ -126,12 +122,12 @@ def main(argv=None):
     ap.add_argument("--max-span", type=int, default=120)
     a = ap.parse_args(argv)
 
-    matched = _load_csv(a.manifest)
-    clips = [c for c in _load_csv(a.clip_index) if c["file_index"] in ("15", "16")]
-    tx = {r["line_id"]: r for r in _load_csv(a.transcripts)}
+    matched = read_csv_rows(a.manifest)
+    clips = [c for c in read_csv_rows(a.clip_index) if c["file_index"] in ("15", "16")]
+    tx = {r["line_id"]: r for r in read_csv_rows(a.transcripts)}
     subs = None
     if a.subtitles and os.path.isfile(a.subtitles):
-        subs = {r["line_id"]: r["subtitle"] for r in _load_csv(a.subtitles)}
+        subs = {r["line_id"]: r["subtitle"] for r in read_csv_rows(a.subtitles)}
     rows = build_woven_rows(matched, clips, tx, min_anchors=a.min_anchors,
                             max_span=a.max_span, subtitles_by_id=subs)
 

@@ -1,6 +1,7 @@
 import csv
 
 from deciwaves.cli import run as run_mod
+from deciwaves.engine.catalog_io import read_csv_rows
 from deciwaves.games.fw import render, story_full
 
 
@@ -210,7 +211,7 @@ def test_fw_render_load_csv_strips_utf8_bom_header(tmp_path):
     manifest = tmp_path / "full-reel-manifest.csv"
     _write_manifest_encoded(manifest, [_row("c0", 1, "Q1")], encoding="utf-8-sig")
 
-    rows = render._load_csv(str(manifest))
+    rows = read_csv_rows(str(manifest))
 
     assert list(rows[0]) == ["line_id", "gamescript_index", "quest", "tier",
                              "speaker", "subtitle", "wav"]   # not "\ufeffline_id"
