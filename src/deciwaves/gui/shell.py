@@ -130,6 +130,10 @@ class MainWindow(QMainWindow):
             lambda p: self.pipeline.setup_doctor.setup.run(fw_gamescript=p, skip_downloads=True))
         self.game_panel.types_picked.connect(
             lambda p: self.pipeline.setup_doctor.setup.run(fw_types=p, skip_downloads=True))
+        # "I've installed it — re-check" in the ASR hint re-runs Doctor offline; its
+        # `refreshed` (wired below) re-grades GPU/ASR readiness and hides the hint.
+        self.game_panel.asr_recheck_requested.connect(
+            lambda: self.pipeline.setup_doctor.doctor.recheck())
         # a finished doctor run (incl. the one setup triggers) re-grades the panel's types.json
         # + GPU/CUDA readiness from the fresh payload.
         self.pipeline.setup_doctor.doctor.refreshed.connect(self._refresh_game_panel)

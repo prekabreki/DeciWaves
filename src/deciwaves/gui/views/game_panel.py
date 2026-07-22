@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import os
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QFileDialog,
@@ -44,10 +44,19 @@ from deciwaves.gui.game_panel_model import (
     render_scope_defaults,
     scan_warning,
     types_status,
-    validate_fw_tiers,
 )
 
 _SAMPLE_CAP_MAX = 100000   # generous ceiling; 0 = unlimited (special value text below)
+
+# FW --tiers, as user-facing checkboxes. (token, plain label) in canonical order;
+# render_scope() joins the checked tokens back into the CSV the CLI expects.
+_FW_TIER_CHECKS = [
+    ("1", "Confident subtitle match (1)"),
+    ("2", "Lower-confidence match (2)"),
+    ("S", "Subtitle-only lines (S)"),
+    ("W", "Scene-recovered story lines (W)"),
+    ("D", "DLC — Burning Shores (D)"),
+]
 
 
 class GamePanel(QWidget):
@@ -55,6 +64,7 @@ class GamePanel(QWidget):
     :meth:`set_context` refreshes the FW types.json grade and the GPU/CUDA readiness label."""
 
     render_scope_changed = Signal()
+    asr_recheck_requested = Signal()           # ASR hint: re-run Doctor after install
     transcript_order_requested = Signal(str)   # DS: standalone `ds order --transcript <abs>`
     gamescript_picked = Signal(str)            # FW: persist via setup --fw-gamescript
     types_picked = Signal(str)                 # FW: persist via setup --fw-types
@@ -72,6 +82,7 @@ class GamePanel(QWidget):
         # --- ASR install hint (shown only when missing for GPU games) ---
         self._asr_hint = AsrInstallHint()
         self._asr_hint.setVisible(False)
+        self._asr_hint.recheck_requested.connect(self.asr_recheck_requested)
 
         # --- HZD sample cap: transcribe-first-N-lines for test runs ---
         self._sample_cap = QSpinBox()
@@ -95,25 +106,28 @@ class GamePanel(QWidget):
         self._spine_only = QCheckBox("Main-quest spine only (--spine-only)")
         spine_box = self._wrap(self._row(self._spine_only))
 
-        # --- render scope: FW --tiers ---
-        self._tiers_edit = QLineEdit(FW_TIERS_DEFAULT)
-        self._tiers_edit.setMaximumWidth(120)
-        self._tiers_hint = QLabel(FW_TIERS_HINT)
-        self._tiers_hint.setStyleSheet(f"color: {NEUTRAL}; font-style: italic;")
-        self._tiers_warning = QLabel("")
-        self._tiers_warning.setStyleSheet(f"color: {ERROR};")
-        self._tiers_warning.setVisible(False)
+        # --- render scope: FW --tiers (checkboxes, not a raw token box) ---
+        self._tiers_blurb = QLabel(
+            "Which voice lines to include, grouped by how each line was "
+            "identified:")
+        self._tiers_blurb.setWordWrap(True)
+        self._tiers_checks: dict[str, QCheckBox] = {}
+        _tier_default = set(FW_TIERS_DEFAULT.split(","))
         tiers_box = QWidget()
         v = QVBoxLayout(tiers_box)
         v.setContentsMargins(0, 0, 0, 0)
-        v.addLayout(self._row(QLabel("Tiers (--tiers):"), HelpIcon(
-            "Tier tokens: 1 = confident match, 2 = lower-confidence match, "
-            "S = subtitle-only (most of a full reel), W = Weave "
-            "(scene-recovered clip), D = DLC (Burning Shores). "
-            'Default "1,2,S" excludes W and D \u2014 '
-            "which is what the drop-warning is about."), self._tiers_edit))
-        v.addLayout(self._row(self._tiers_hint))
-        v.addLayout(self._row(self._tiers_warning))
+        v.addWidget(QLabel("Tiers (--tiers):"))
+        v.addWidget(self._tiers_blurb)
+        for token, label in _FW_TIER_CHECKS:
+            cb = QCheckBox(label)
+            cb.setChecked(token in _tier_default)
+            cb.toggled.connect(lambda _c: self.render_scope_changed.emit())
+            self._tiers_checks[token] = cb
+            v.addWidget(cb)
+        self._tiers_hint = QLabel(FW_TIERS_HINT)
+        self._tiers_hint.setStyleSheet(f"color: {NEUTRAL}; font-style: italic;")
+        self._tiers_hint.setWordWrap(True)
+        v.addWidget(self._tiers_hint)
 
         # --- DS transcript picker + re-order affordance (transient, NOT persisted) ---
         self._transcript_edit = QLineEdit()
@@ -138,15 +152,26 @@ class GamePanel(QWidget):
         self._types_browse = QPushButton("Browse…")
         self._types_browse.setToolTip("Browse for types.json")
         self._types_status = QLabel("")
-        types_box = self._wrap(
-            self._row(QLabel("types.json (required):"), HelpIcon(
-                "FW\u2019s RTTI (run-time type information) type database, "
-                "dumped to JSON. Required for subtitle-bind "
-                "(scan + preview work without it). Generate it yourself with "
-                "odradek from your own FW install. DeciWaves never ships or "
-                "downloads it. Place in the workspace root."),
-                self._types_edit, self._types_browse),
-            self._row(self._types_status))
+        # Help text inline below the field (not behind a HelpIcon tooltip) so a
+        # first-time user sees what types.json is without hunting for a hover.
+        self._types_help = QLabel(
+            "FW\u2019s RTTI (run-time type information) type database, "
+            "dumped to JSON. Required for subtitle-bind "
+            "(scan + preview work without it). Generate it yourself with "
+            "odradek from your own FW install. DeciWaves never ships or "
+            "downloads it. Place in the workspace root.")
+        self._types_help.setWordWrap(True)
+        self._types_help.setStyleSheet(f"color: {NEUTRAL};")
+        self._types_help.setTextInteractionFlags(
+            Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
+        types_box = QWidget()
+        _types_v = QVBoxLayout(types_box)
+        _types_v.setContentsMargins(0, 0, 0, 0)
+        _types_v.addLayout(
+            self._row(QLabel("types.json (required):"),
+                      self._types_edit, self._types_browse))
+        _types_v.addWidget(self._types_help)  # full-width, wraps
+        _types_v.addLayout(self._row(self._types_status))
 
         # --- FW optional gamescript picker ---
         self._gamescript_edit = QLineEdit()
@@ -192,7 +217,7 @@ class GamePanel(QWidget):
         self._gamescript_browse.clicked.connect(self._on_gamescript_browse)
         self._main_story.toggled.connect(lambda _c: self.render_scope_changed.emit())
         self._spine_only.toggled.connect(lambda _c: self.render_scope_changed.emit())
-        self._tiers_edit.textChanged.connect(self._on_tiers_changed)
+        # tier checkboxes wire their own render_scope_changed at construction.
 
         self.set_game("ds")
 
@@ -228,14 +253,16 @@ class GamePanel(QWidget):
         self._scan_warning.setText(scan_warning(game))
 
         defaults = render_scope_defaults(game)
+        tier_default = set(defaults.get("tiers", FW_TIERS_DEFAULT).split(","))
+        scope_widgets = [self._main_story, self._spine_only, *self._tiers_checks.values()]
         # block scope signals so applying defaults doesn't fire render_scope_changed spuriously
-        for w in (self._main_story, self._spine_only, self._tiers_edit):
+        for w in scope_widgets:
             w.blockSignals(True)
         self._main_story.setChecked(bool(defaults.get("main_story", False)))
         self._spine_only.setChecked(bool(defaults.get("spine_only", False)))
-        self._tiers_edit.setText(defaults.get("tiers", FW_TIERS_DEFAULT))
-        self._tiers_warning.setVisible(False)
-        for w in (self._main_story, self._spine_only, self._tiers_edit):
+        for token, cb in self._tiers_checks.items():
+            cb.setChecked(token in tier_default)
+        for w in scope_widgets:
             w.blockSignals(False)
 
     def set_context(self, workspace: str, cfg: dict, payload: dict | None) -> None:
@@ -308,24 +335,20 @@ class GamePanel(QWidget):
         """The set of control names currently shown (the others are hidden, not disabled)."""
         return {name for name, w in self._widgets.items() if w.isVisibleTo(self)}
 
-    def _on_tiers_changed(self, text: str) -> None:
-        is_valid, unknown = validate_fw_tiers(text)
-        if not is_valid and unknown:
-            self._tiers_warning.setText(f"Unknown tier(s): {', '.join(unknown)}")
-            self._tiers_warning.setVisible(True)
-        else:
-            self._tiers_warning.setVisible(False)
-        self.render_scope_changed.emit()
-
     def render_scope(self) -> dict:
         """The current render scope for the shell to thread into ``render_selection_argv``:
-        DS ``{"main_story": bool}``, HZD ``{"spine_only": bool}``, FW ``{"tiers": str}``."""
+        DS ``{"main_story": bool}``, HZD ``{"spine_only": bool}``, FW ``{"tiers": str}``.
+
+        FW tiers are collected from the checkboxes in canonical order and joined
+        into the CSV the CLI expects; if nothing is checked, falls back to the
+        shipped default (matching the old empty-field behaviour)."""
         if self._game == "ds":
             return {"main_story": self._main_story.isChecked()}
         if self._game == "hzd":
             return {"spine_only": self._spine_only.isChecked()}
         if self._game == "fw":
-            return {"tiers": self._tiers_edit.text().strip() or FW_TIERS_DEFAULT}
+            checked = [t for t, _ in _FW_TIER_CHECKS if self._tiers_checks[t].isChecked()]
+            return {"tiers": ",".join(checked) or FW_TIERS_DEFAULT}
         return {}
 
     def set_reorder_enabled(self, enabled: bool) -> None:

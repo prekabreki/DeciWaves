@@ -54,8 +54,11 @@ def test_collapsible_shows_summary_text(qtbot):
 def test_asr_install_hint_shows_why_text(qtbot):
     hint = AsrInstallHint()
     qtbot.addWidget(hint)
-    assert "whisperx" in hint._why.text().lower()
-    assert "GPU acceleration" in hint._why.text()
+    why = hint._why.text().lower()
+    assert "whisperx" in why
+    # Explains what it does and *when* it's needed (not a flat "optional").
+    assert "bind" in why
+    assert "preview" in why
 
 
 def test_asr_install_hint_shows_pytorch_link_and_optional_note(qtbot):
@@ -64,32 +67,54 @@ def test_asr_install_hint_shows_pytorch_link_and_optional_note(qtbot):
     labels = hint.findChildren(QLabel)
     texts = " ".join(l.text().lower() for l in labels)
     assert "pytorch.org" in texts
-    assert "optional — the pipeline runs without it" in texts
+    assert "needed to finish" in texts
 
 
-def test_asr_install_hint_command_is_selectable(qtbot):
+def _gpu_result():
+    from deciwaves.gui.gpu_probe import GpuProbeResult
+    return GpuProbeResult(
+        has_nvidia_gpu=True, gpu_name="NVIDIA GeForce RTX 4080",
+        wheel_tag="cu124", index_url="https://download.pytorch.org/whl/cu124")
+
+
+def test_asr_install_hint_renders_gpu_command_selectable(qtbot, monkeypatch):
+    monkeypatch.setattr("deciwaves.gui.gpu_probe.probe_gpu", _gpu_result)
     hint = AsrInstallHint()
     qtbot.addWidget(hint)
-    assert hint._cmd_label.textInteractionFlags() & Qt.TextSelectableByMouse
-    assert hint._cmd_label.textInteractionFlags() & Qt.TextSelectableByKeyboard
+    cmds = hint.commands()   # triggers probe + renders the step row(s)
+    assert len(cmds) == 1    # GPU → one --extra-index-url command
+    assert "--extra-index-url" in cmds[0]
+    assert len(hint._cmd_labels) == 1
+    for lbl in hint._cmd_labels:
+        assert lbl.textInteractionFlags() & Qt.TextSelectableByMouse
+        assert lbl.textInteractionFlags() & Qt.TextSelectableByKeyboard
 
 
-def test_asr_install_hint_copy_button_exists(qtbot):
+def test_asr_install_hint_each_step_has_a_copy_button(qtbot, monkeypatch):
+    monkeypatch.setattr("deciwaves.gui.gpu_probe.probe_gpu", _gpu_result)
     hint = AsrInstallHint()
     qtbot.addWidget(hint)
-    assert hint._copy_btn.toolTip(), "Copy button should have a non-empty tooltip"
+    hint.commands()
+    assert len(hint._copy_btns) == 1
+    assert all(b.toolTip() for b in hint._copy_btns)
 
 
-def test_asr_install_hint_command_text_needs_probe(monkeypatch, qtbot):
+def test_asr_install_hint_commands_need_probe(monkeypatch, qtbot):
     from deciwaves.gui.gpu_probe import CPU_RESULT
-    monkeypatch.setattr(
-        "deciwaves.gui.gpu_probe.probe_gpu",
-        lambda: CPU_RESULT)
+    monkeypatch.setattr("deciwaves.gui.gpu_probe.probe_gpu", lambda: CPU_RESULT)
     hint = AsrInstallHint()
     qtbot.addWidget(hint)
-    assert hint.command_text() != ""
-    assert "pip install" in hint.command_text()
-    assert "[asr]" in hint.command_text()
+    cmds = hint.commands()
+    assert cmds
+    assert all("pip install" in c for c in cmds)
+    assert any("[asr]" in c for c in cmds)
+
+
+def test_asr_install_hint_recheck_button_emits_signal(qtbot):
+    hint = AsrInstallHint()
+    qtbot.addWidget(hint)
+    with qtbot.waitSignal(hint.recheck_requested, timeout=500):
+        hint._recheck_btn.click()
 
 
 def test_asr_install_hint_starts_hidden(qtbot):
@@ -112,4 +137,4 @@ def test_asr_install_hint_probes_only_once_on_show(qtbot, monkeypatch):
     hint.hide()
     hint.show()
     assert len(calls) == 1
-    assert hint.command_text() != ""
+    assert hint.commands()
