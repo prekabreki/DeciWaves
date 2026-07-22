@@ -26,6 +26,7 @@ import os
 import re
 import statistics
 
+from deciwaves.engine.catalog_io import read_csv_rows
 from deciwaves.games.fw.manifest import MANIFEST_COLS
 from deciwaves.games.fw.subtitle_bind import DEFAULT_OUT as _SUBTITLE_MANIFEST
 
@@ -104,11 +105,6 @@ def build_full_reel(subtitle_rows, anchor_rows, dlc_line_ids,
     return out, anchored_count
 
 
-def _load_csv(path):
-    with open(path, newline="", encoding="utf-8") as f:
-        return list(csv.DictReader(f))
-
-
 def main(argv=None):  # pragma: no cover - integration glue
     ap = argparse.ArgumentParser(description="FW full 16.7h subtitled reel assembler")
     ap.add_argument("--subtitles", default=_SUBTITLE_MANIFEST)
@@ -117,9 +113,9 @@ def main(argv=None):  # pragma: no cover - integration glue
     ap.add_argument("--out", default="out/fw/full-reel-manifest.csv")
     a = ap.parse_args(argv)
 
-    subs = _load_csv(a.subtitles)
-    anchors = _load_csv(a.anchors)
-    dlc = {r["line_id"] for r in _load_csv(a.clip_index) if r.get("file_index") == "101"}
+    subs = read_csv_rows(a.subtitles)
+    anchors = read_csv_rows(a.anchors)
+    dlc = {r["line_id"] for r in read_csv_rows(a.clip_index) if r.get("file_index") == "101"}
     rows, anchored = build_full_reel(subs, anchors, dlc)
 
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)

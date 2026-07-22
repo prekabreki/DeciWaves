@@ -27,6 +27,7 @@ import csv
 import os
 import re
 
+from deciwaves.engine.catalog_io import read_csv_rows
 from deciwaves.engine.text_normalize import normalize
 from deciwaves.games.fw.manifest import MANIFEST_COLS
 
@@ -180,11 +181,6 @@ def scan_arith_clean_groups(graph, reader, store, transcripts_by_id,
                     return
 
 
-def _load_csv(path):
-    with open(path, newline="", encoding="utf-8") as f:
-        return list(csv.DictReader(f))
-
-
 def types_json_error(path: str) -> str | None:
     """Return an actionable error message if *path* (the BYO Decima RTTI type
     map for Forbidden West) doesn't exist, else ``None``. Kept separate from
@@ -233,8 +229,8 @@ def main(argv=None):  # pragma: no cover - integration glue
     store = FwStreamStore(a.package_dir, graph.files)
     reader = GroupReader(graph, reg)
 
-    clip_index = {r["line_id"]: r for r in _load_csv(a.clip_index)}
-    transcripts = {r["line_id"]: r["transcript"] for r in _load_csv(a.transcripts)}
+    clip_index = {r["line_id"]: r for r in read_csv_rows(a.clip_index, required=["line_id"])}
+    transcripts = {r["line_id"]: r["transcript"] for r in read_csv_rows(a.transcripts, required=["line_id", "transcript"])}
 
     groups = list(scan_arith_clean_groups(graph, reader, store, transcripts,
                                           max_objects=a.max_objects, limit=a.limit))

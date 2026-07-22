@@ -7,6 +7,7 @@ import sys
 import tempfile
 import wave
 from deciwaves.engine import asr
+from deciwaves.engine.catalog_io import read_csv_rows
 from deciwaves.engine.coverage import (
     clear_stage_coverage, default_coverage_path, write_stage_coverage,
 )
@@ -34,11 +35,6 @@ TRANSCRIPTS_COLS = ["clip_row", "transcript"]
 # going would just burn the whole run logging N identical failures. Disarmed permanently
 # after the first success; failures after that keep the existing per-clip fail-soft.
 BREAKER_K = 5
-
-
-def _load_csv(path):
-    with open(path, newline="", encoding="utf-8") as f:
-        return list(csv.DictReader(f))
 
 
 def _load_transcripts_sidecar(path):
@@ -130,8 +126,8 @@ def main(argv=None):
     story_ids = {lid for lid, r in cat.items()
                  if r.get("category") != "ambient" and r.get("subtitle_en", "").strip()}
     lines = [{**m, **{"subtitle_en": cat.get(m["line_id"], {}).get("subtitle_en", "")}}
-             for m in _load_csv(a.wem_metadata)]
-    clips = _load_csv(a.clip_index)
+             for m in read_csv_rows(a.wem_metadata)]
+    clips = read_csv_rows(a.clip_index)
     buckets = build_buckets(lines, clips)
 
     rows = []

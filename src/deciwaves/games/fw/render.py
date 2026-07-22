@@ -12,13 +12,13 @@ pack to <=290 MB MP3s, and concat with gaps. Reuses the game-agnostic assembly k
 from __future__ import annotations
 
 import argparse
-import csv
 import os
 import wave
 from dataclasses import dataclass
 
 import subprocess
 
+from deciwaves.engine.catalog_io import read_csv_rows, CsvFormatError
 from deciwaves.engine.render import (
     SR, DEFAULT_BITRATE_KBPS, accumulate_episode_seconds, assemble_reels,
     budget_seconds, format_ts, ReelColumns,
@@ -128,23 +128,6 @@ class ManifestError(Exception):
     """A manifest that can't be rendered (missing/garbled required columns)."""
 
 
-def _load_csv(path):
-    # utf-8-sig transparently strips a UTF-8 BOM -- PowerShell 5.1's
-    # `Set-Content -Encoding utf8` writes one, which would otherwise fuse into
-    # the first header (a "\ufeffline_id" key) and KeyError in build_spine
-    # (issue #84). BOM-less (plain-utf8) manifests are a subset, unaffected.
-    with open(path, newline="", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
-        fields = reader.fieldnames or []
-        missing = [c for c in REQUIRED_COLS if c not in fields]
-        if missing:
-            raise ManifestError(
-                f"manifest {path} is missing required column(s) "
-                f"{', '.join(missing)} (header has: {', '.join(fields) or 'nothing'}). "
-                f"Expected a full-reel manifest -- run `deciwaves fw full-reel`.")
-        return list(reader)
-
-
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Render FW story reel to MP3")
     ap.add_argument("--manifest", default=DEFAULT_MANIFEST)
@@ -169,9 +152,10 @@ def main(argv=None):
 
     tiers = {t.strip() for t in a.tiers.split(",") if t.strip()}
     try:
-        manifest_rows = _load_csv(a.manifest)
-    except ManifestError as e:
-        print(f"render: ERROR - {e}")
+        manifest_rows = read_csv_rows(a.manifest, required=REQUIRED_COLS)
+    except CsvFormatError as e:
+        print(f"render: ERROR - {e}. Expected a full-reel manifest -- run "
+              f"`deciwaves fw full-reel`.")
         return 1
     spine = build_spine(manifest_rows, bound_tiers=tiers)
     print(f"FW reel ({a.stem}): {len(spine)} lines across "

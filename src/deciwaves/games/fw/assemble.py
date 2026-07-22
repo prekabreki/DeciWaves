@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import csv
 
+from deciwaves.engine.catalog_io import read_csv_rows
 from deciwaves.games.fw.manifest import MANIFEST_COLS
 
 
@@ -35,18 +36,13 @@ def combine(manifests):
     return rows
 
 
-def _load_csv(path):
-    with open(path, newline="", encoding="utf-8") as f:
-        return list(csv.DictReader(f))
-
-
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Assemble continuous FW deliverable (story + DLC epilogue)")
     ap.add_argument("manifests", nargs="+", help="manifest CSVs, in play order (story first)")
     ap.add_argument("--out", default="out/fw/combined-manifest.csv")
     a = ap.parse_args(argv)
 
-    rows = combine([_load_csv(m) for m in a.manifests])
+    rows = combine([read_csv_rows(m) for m in a.manifests])
 
     import os
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)

@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import csv
 
+from deciwaves.engine.catalog_io import read_csv_rows
 from deciwaves.games.fw.manifest import MANIFEST_COLS
 
 DLC_FILE_INDEX = "101"
@@ -59,11 +60,6 @@ def build_dlc_rows(dlc_clips, transcripts_by_id, min_words, quest=DLC_QUEST):
     return rows
 
 
-def _load_csv(path):
-    with open(path, newline="", encoding="utf-8") as f:
-        return list(csv.DictReader(f))
-
-
 def main(argv=None):
     ap = argparse.ArgumentParser(description="FW DLC ASR-labeled manifest")
     ap.add_argument("--clip-index", default="out/fw/clip-index.csv")
@@ -74,8 +70,8 @@ def main(argv=None):
     ap.add_argument("--quest", default="Burning Shores (Epilogue)")
     a = ap.parse_args(argv)
 
-    dlc_clips = [c for c in _load_csv(a.clip_index) if is_dlc(c)]
-    tx = {r["line_id"]: r for r in _load_csv(a.transcripts)}
+    dlc_clips = [c for c in read_csv_rows(a.clip_index) if is_dlc(c)]
+    tx = {r["line_id"]: r for r in read_csv_rows(a.transcripts)}
     rows = build_dlc_rows(dlc_clips, tx, min_words=a.min_words, quest=a.quest)
 
     import os
