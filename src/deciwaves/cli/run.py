@@ -38,6 +38,7 @@ from typing import Callable
 from deciwaves import data
 from deciwaves.cli.config import resolve_ds_install
 from deciwaves.cli.main import STAGES, _import_stage  # noqa: F401 -- re-exported for monkeypatching
+from deciwaves.engine.asr import cuda_available
 from deciwaves.engine.coverage import clear_sections, clear_stage_coverage, default_coverage_path
 from deciwaves.games.hzd import asr_bind
 
@@ -60,6 +61,12 @@ def _gpu_gate_message(stage_name: str) -> str:
     return (f"{stage_name}: needs the GPU ASR extra -- install it with "
             f"`pip install deciwaves[asr]`, plus PyTorch for your CUDA version "
             f"(see https://pytorch.org/get-started/locally/).")
+
+
+def _cuda_gate_message(stage_name: str) -> str:
+    return (f"{stage_name}: whisperx is installed but no CUDA GPU is available. "
+            f"GPU stages require a CUDA-capable GPU. Pass --allow-cpu to run on "
+            f"CPU instead (much slower).")
 
 
 def _done_marker(game: str, stage_name: str) -> str:
@@ -126,13 +133,19 @@ def _invalidate_downstream_markers(game: str, full_chain: list[Stage], stage_nam
 
 
 def _blocking_gpu_stage(game: str, chain: list[Stage],
-                        full_chain: list[Stage] | None = None) -> Stage | None:
+                        full_chain: list[Stage] | None = None,
+                        *, allow_cpu: bool = False) -> Stage | None:
     """The first GPU-gated stage in ``chain`` that WILL effectively run yet would
-    fail for lack of the ASR extra, or ``None`` if none would.
+    fail, or ``None`` if none would.
 
     Used to scan the whole chain UPFRONT, before any stage runs, instead of
     discovering the gate mid-chain after earlier (possibly hours-long) stages
     already ran (issue #33).
+
+    Two gate conditions:
+    1. whisperx not installed (existing gating, blocked via _gpu_gate_message).
+    2. whisperx installed but no CUDA device available (new gating, blocked via
+       _cuda_gate_message). ``--allow-cpu`` bypasses only condition 2.
 
     Crucially, the scan is invalidation-aware (finding 1): a GPU stage
     effectively runs not only when its OWN done-marker is absent, but also when
@@ -147,9 +160,15 @@ def _blocking_gpu_stage(game: str, chain: list[Stage],
     calls, so "earlier stage will run" must still see stages before the split);
     it defaults to ``chain`` for single-call pipelines. Only a GPU stage that is
     actually part of ``chain`` (this call's slice) is returned.
+
+    ``cuda_available()`` is only called when a GPU stage that would effectively
+    run is found AND whisperx is importable — a pre-GPU ``--until`` slice
+    neither imports torch nor blocks (issue #247).
     """
-    if importlib.util.find_spec("whisperx") is not None:
+    whisperx_present = importlib.util.find_spec("whisperx") is not None
+    if whisperx_present and allow_cpu:
         return None
+
     full_chain = chain if full_chain is None else full_chain
     chain_names = {s.name for s in chain}
     upstream_will_run = False
@@ -157,13 +176,19 @@ def _blocking_gpu_stage(game: str, chain: list[Stage],
         own_absent = not os.path.isfile(_done_marker(game, st.name))
         effectively_runs = own_absent or upstream_will_run
         if st.gpu and effectively_runs and st.name in chain_names:
-            return st
+            if not whisperx_present:
+                return st
+            if not cuda_available():
+                return st
+            return None
         if own_absent:
             upstream_will_run = True
     return None
 
 
-def _run_chain(game: str, chain: list[Stage], ctx: dict, full_chain: list[Stage] | None = None) -> int:
+def _run_chain(game: str, chain: list[Stage], ctx: dict,
+               full_chain: list[Stage] | None = None,
+               *, allow_cpu: bool = False) -> int:
     """Run ``chain`` in order, skipping stages whose done-marker already exists.
 
     ``full_chain`` is the game's complete declared stage order, used only to
@@ -176,9 +201,12 @@ def _run_chain(game: str, chain: list[Stage], ctx: dict, full_chain: list[Stage]
     after wasting however long the earlier stages take.
     """
     full_chain = chain if full_chain is None else full_chain
-    blocking = _blocking_gpu_stage(game, chain, full_chain)
+    blocking = _blocking_gpu_stage(game, chain, full_chain, allow_cpu=allow_cpu)
     if blocking is not None:
-        print(_gpu_gate_message(blocking.name))
+        if importlib.util.find_spec("whisperx") is None:
+            print(_gpu_gate_message(blocking.name))
+        else:
+            print(_cuda_gate_message(blocking.name))
         return 1
     for st in chain:
         marker = _done_marker(game, st.name)
@@ -218,6 +246,9 @@ def _add_slice_flags(ap: argparse.ArgumentParser, chain: list[Stage]) -> None:
                          "running, so it re-executes (and later stages re-run too, "
                          "via the usual cascade invalidation); earlier stages "
                          "still skip via their own markers")
+    ap.add_argument("--allow-cpu", action="store_true",
+                    help="bypass the no-CUDA GPU gate and run ASR stages on CPU "
+                         "(much slower; missing-whisperx still blocks regardless)")
 
 
 def _slice_bounds(game: str, chain: list[Stage], from_stage: str | None,
@@ -294,7 +325,8 @@ def _run_pipeline(game: str, chain: list[Stage], ctx: dict, ns: argparse.Namespa
         return rc
     if ns.from_stage:
         _remove_marker(game, ns.from_stage)  # --from's contract: delete, then run normally
-    return _run_chain(game, chain[:last_idx + 1], ctx, full_chain=full_chain or chain)
+    return _run_chain(game, chain[:last_idx + 1], ctx,
+                      full_chain=full_chain or chain, allow_cpu=ns.allow_cpu)
 
 
 # ---------------------------------------------------------------------------
@@ -607,7 +639,7 @@ def _run_fw(cfg: dict, extra_argv: list) -> int:
     chunk1 = full_chain[:min(last_idx + 1, gate_idx)]
     chunk2 = full_chain[gate_idx:last_idx + 1]
 
-    rc = _run_chain("fw", chunk1, ctx, full_chain=full_chain)
+    rc = _run_chain("fw", chunk1, ctx, full_chain=full_chain, allow_cpu=ns.allow_cpu)
     if rc:
         return rc
     if not chunk2:
@@ -620,7 +652,8 @@ def _run_fw(cfg: dict, extra_argv: list) -> int:
         print(_fw_byo_message(package))
         return 0
 
-    return _run_chain("fw", chunk2, ctx, full_chain=full_chain)  # already --until-sliced
+    return _run_chain("fw", chunk2, ctx, full_chain=full_chain,
+                      allow_cpu=ns.allow_cpu)  # already --until-sliced
 
 
 # ---------------------------------------------------------------------------

@@ -368,6 +368,7 @@ def _hzd_outputs(mods):
 def test_hzd_chain_order_and_injection(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    monkeypatch.setattr(run_mod, "cuda_available", lambda: True)
     mods = _mods("hzd")
     calls = []
     monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _hzd_outputs(mods)))
@@ -386,6 +387,7 @@ def test_hzd_bind_argv_omits_transcripts_when_sidecar_absent(tmp_path, monkeypat
     bind's argv must not include --transcripts."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    monkeypatch.setattr(run_mod, "cuda_available", lambda: True)
     mods = _mods("hzd")
     calls = []
     monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _hzd_outputs(mods)))
@@ -406,6 +408,7 @@ def test_hzd_bind_argv_includes_transcripts_when_sidecar_present(tmp_path, monke
     --transcripts ...` invocation."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    monkeypatch.setattr(run_mod, "cuda_available", lambda: True)
     sidecar = Path(run_mod.asr_bind.DEFAULT_TRANSCRIPTS_OUT)
     sidecar.parent.mkdir(parents=True, exist_ok=True)
     sidecar.write_text("clip_row,transcript\n0,prior ok\n", encoding="utf-8")
@@ -426,6 +429,7 @@ def test_hzd_bind_argv_omits_sample_cap_when_not_given(tmp_path, monkeypatch):
     the bind stage falls back to its own bounded default (300) -- issue #35."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    monkeypatch.setattr(run_mod, "cuda_available", lambda: True)
     mods = _mods("hzd")
     calls = []
     monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _hzd_outputs(mods)))
@@ -443,6 +447,7 @@ def test_hzd_bind_argv_forwards_sample_cap_when_given(tmp_path, monkeypatch):
     forwarding, a user-supplied cap would be silently ignored by the chain."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    monkeypatch.setattr(run_mod, "cuda_available", lambda: True)
     mods = _mods("hzd")
     calls = []
     monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _hzd_outputs(mods)))
@@ -460,6 +465,7 @@ def test_hzd_bind_argv_forwards_sample_cap_zero_for_full_pass(tmp_path, monkeypa
     understands (issue #35)."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    monkeypatch.setattr(run_mod, "cuda_available", lambda: True)
     mods = _mods("hzd")
     calls = []
     monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _hzd_outputs(mods)))
@@ -588,6 +594,69 @@ def test_fw_gpu_gate_fires_upfront_when_extract_marker_deleted_forces_asr_rerun(
     assert "pip install deciwaves[asr]" in out
 
 
+def test_hzd_gpu_gate_passes_with_whisperx_and_cuda(tmp_path, monkeypatch):
+    """whisperx present + CUDA available -> gate passes, chain runs normally."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    monkeypatch.setattr(run_mod, "cuda_available", lambda: True)
+    mods = _mods("hzd")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _hzd_outputs(mods)))
+
+    rc = run_mod.run_game("hzd", {"hzd_package": "PKG"}, [])
+    assert rc == 0
+    called = [m for m, _ in calls]
+    assert called == [mods["catalog"], mods["clip-index"], mods["wem-metadata"], mods["bind"], mods["render"]]
+
+
+def test_hzd_gpu_gate_blocks_with_whisperx_and_no_cuda(tmp_path, monkeypatch, capsys):
+    """whisperx present but CUDA unavailable -> gate blocks upfront, zero stages run."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    monkeypatch.setattr(run_mod, "cuda_available", lambda: False)
+    mods = _mods("hzd")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _hzd_outputs(mods)))
+
+    rc = run_mod.run_game("hzd", {"hzd_package": "PKG"}, [])
+    assert rc == 1
+    assert [m for m, _ in calls] == []
+    out = capsys.readouterr().out
+    assert "whisperx is installed but no CUDA" in out
+    assert "--allow-cpu" in out
+
+
+def test_hzd_gpu_gate_bypasses_no_cuda_with_allow_cpu_flag(tmp_path, monkeypatch):
+    """whisperx present + no CUDA + --allow-cpu -> gate passes, chain runs normally."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    monkeypatch.setattr(run_mod, "cuda_available", lambda: False)
+    mods = _mods("hzd")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _hzd_outputs(mods)))
+
+    rc = run_mod.run_game("hzd", {"hzd_package": "PKG"}, ["--allow-cpu"])
+    assert rc == 0
+    called = [m for m, _ in calls]
+    assert called == [mods["catalog"], mods["clip-index"], mods["wem-metadata"], mods["bind"], mods["render"]]
+
+
+def test_hzd_gpu_gate_blocks_missing_whisperx_even_with_allow_cpu(tmp_path, monkeypatch, capsys):
+    """--allow-cpu bypasses only the no-CUDA gate; missing whisperx still blocks."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: None)
+    mods = _mods("hzd")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _hzd_outputs(mods)))
+
+    rc = run_mod.run_game("hzd", {"hzd_package": "PKG"}, ["--allow-cpu"])
+    assert rc == 1
+    assert [m for m, _ in calls] == []
+    out = capsys.readouterr().out
+    assert "pip install deciwaves[asr]" in out
+    assert "pytorch.org" in out
+
+
 def test_hzd_missing_config_errors(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     rc = run_mod.run_game("hzd", {}, [])
@@ -661,6 +730,7 @@ def test_fw_render_runs_despite_extract_creating_audio_dir(tmp_path, monkeypatch
     """
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    monkeypatch.setattr(run_mod, "cuda_available", lambda: True)
     gamescript = tmp_path / "gamescript.md"
     gamescript.write_text("Aloy: Hello.\n", encoding="utf-8")
 
@@ -686,6 +756,7 @@ def test_fw_run_missing_types_json_aborts_chain_cleanly(tmp_path, monkeypatch, c
     """
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    monkeypatch.setattr(run_mod, "cuda_available", lambda: True)
     mods = _mods("fw")
     calls = []
     fake_import_stage = _make_fake_import_stage(calls, _fw_outputs(mods))
@@ -716,6 +787,7 @@ def test_fw_run_missing_types_json_aborts_chain_cleanly(tmp_path, monkeypatch, c
 def test_fw_byo_stop_without_gamescript(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    monkeypatch.setattr(run_mod, "cuda_available", lambda: True)
     mods = _mods("fw")
     calls = []
     monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _fw_outputs(mods)))
@@ -741,6 +813,7 @@ def test_fw_gamescript_path_missing_exits_nonzero_and_names_path(tmp_path, monke
     GPU asr pass's) hours are spent, so fail before them, not after."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    monkeypatch.setattr(run_mod, "cuda_available", lambda: True)
     mods = _mods("fw")
     calls = []
     monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _fw_outputs(mods)))
@@ -758,6 +831,7 @@ def test_fw_gamescript_path_missing_exits_nonzero_and_names_path(tmp_path, monke
 def test_fw_full_chain_with_gamescript(tmp_path, monkeypatch, parsed_stage_args):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    monkeypatch.setattr(run_mod, "cuda_available", lambda: True)
     gamescript = tmp_path / "gamescript.md"
     gamescript.write_text("Aloy: Hello.\n", encoding="utf-8")
 
@@ -797,6 +871,7 @@ def test_fw_extract_rerun_invalidates_downstream_across_gamescript_gate(tmp_path
     later stage that happens to share extract's own _run_chain call)."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    monkeypatch.setattr(run_mod, "cuda_available", lambda: True)
     gamescript = tmp_path / "gamescript.md"
     gamescript.write_text("Aloy: Hello.\n", encoding="utf-8")
 
@@ -829,6 +904,7 @@ def test_fw_run_uses_configured_gamescript_when_no_flag(tmp_path, monkeypatch):
     the same precedence pattern as ds_install/hzd_package/fw_package (#23)."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    monkeypatch.setattr(run_mod, "cuda_available", lambda: True)
     gamescript = tmp_path / "gamescript.md"
     gamescript.write_text("Aloy: Hello.\n", encoding="utf-8")
 
@@ -851,6 +927,7 @@ def test_fw_explicit_gamescript_flag_overrides_configured(tmp_path, monkeypatch)
     """An explicit --gamescript beats a saved fw_gamescript config value."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    monkeypatch.setattr(run_mod, "cuda_available", lambda: True)
     configured = tmp_path / "configured-gamescript.md"
     configured.write_text("Aloy: Hello.\n", encoding="utf-8")
     explicit = tmp_path / "explicit-gamescript.md"
@@ -874,6 +951,7 @@ def test_fw_configured_gamescript_missing_exits_nonzero_and_names_path(tmp_path,
     explicitly configured, just earlier, via `deciwaves setup --fw-gamescript`."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    monkeypatch.setattr(run_mod, "cuda_available", lambda: True)
     mods = _mods("fw")
     calls = []
     monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _fw_outputs(mods)))
@@ -897,6 +975,7 @@ def test_fw_byo_message_shows_exact_rerun_command(tmp_path, monkeypatch, capsys)
     gamescript -- not just a generic "pass --gamescript" hint."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    monkeypatch.setattr(run_mod, "cuda_available", lambda: True)
     mods = _mods("fw")
     calls = []
     monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _fw_outputs(mods)))
@@ -925,6 +1004,7 @@ def test_fw_subtitle_bind_forwards_configured_types_json(tmp_path, monkeypatch):
     fw_gamescript reaches the match stage as --gamescript."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    monkeypatch.setattr(run_mod, "cuda_available", lambda: True)
     types_json = tmp_path / "types.json"
     types_json.write_text("{}", encoding="utf-8")
 
@@ -946,6 +1026,7 @@ def test_fw_subtitle_bind_omits_types_json_when_unset(tmp_path, monkeypatch):
     it keeps its own types.json-in-workspace-root default."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    monkeypatch.setattr(run_mod, "cuda_available", lambda: True)
 
     mods = _mods("fw")
     calls = []
@@ -1195,6 +1276,7 @@ def test_fw_until_subtitle_bind_skips_byo_message(tmp_path, monkeypatch, capsys)
     explicitly didn't ask for -- printing it would misreport why the run ended."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    monkeypatch.setattr(run_mod, "cuda_available", lambda: True)
     mods = _mods("fw")
     calls = []
     monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _fw_outputs(mods)))
@@ -1211,6 +1293,7 @@ def test_fw_until_match_with_gamescript_stops_before_full_reel(tmp_path, monkeyp
     usual, then stops after the named stage."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    monkeypatch.setattr(run_mod, "cuda_available", lambda: True)
     gamescript = tmp_path / "gamescript.md"
     gamescript.write_text("Aloy: Hello.\n", encoding="utf-8")
     mods = _mods("fw")
@@ -1232,6 +1315,7 @@ def test_fw_from_match_reruns_post_gate_slice(tmp_path, monkeypatch):
     skip, the named stage and everything after it re-run."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    monkeypatch.setattr(run_mod, "cuda_available", lambda: True)
     gamescript = tmp_path / "gamescript.md"
     gamescript.write_text("Aloy: Hello.\n", encoding="utf-8")
     mods = _mods("fw")
@@ -1255,6 +1339,7 @@ def test_hzd_from_after_until_is_usage_error_and_deletes_nothing(tmp_path, monke
     any stage."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    monkeypatch.setattr(run_mod, "cuda_available", lambda: True)
     _seed_markers("hzd", ["render"])
     mods = _mods("hzd")
     calls = []
@@ -1318,6 +1403,7 @@ def test_fw_until_match_without_gamescript_fails_upfront(tmp_path, monkeypatch, 
     the slice flag (a plain re-run would run MORE than the user asked for)."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    monkeypatch.setattr(run_mod, "cuda_available", lambda: True)
     mods = _mods("fw")
     calls = []
     monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _fw_outputs(mods)))
@@ -1338,6 +1424,7 @@ def test_fw_from_match_without_gamescript_fails_upfront_and_keeps_marker(tmp_pat
     its way out."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    monkeypatch.setattr(run_mod, "cuda_available", lambda: True)
     _seed_markers("fw", ["extract", "asr", "subtitle-bind", "match", "full-reel", "render"])
     mods = _mods("fw")
     calls = []
@@ -1361,6 +1448,7 @@ def test_fw_until_subtitle_bind_ignores_broken_configured_gamescript(tmp_path, m
     still fails upfront on it (tests above)."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    monkeypatch.setattr(run_mod, "cuda_available", lambda: True)
     mods = _mods("fw")
     calls = []
     monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _fw_outputs(mods)))
@@ -1380,6 +1468,7 @@ def test_hzd_from_equals_until_reruns_exactly_one_stage(tmp_path, monkeypatch):
     now)."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    monkeypatch.setattr(run_mod, "cuda_available", lambda: True)
     _seed_markers("hzd", ["catalog", "clip-index", "wem-metadata", "bind", "render"])
     mods = _mods("hzd")
     calls = []
@@ -1408,6 +1497,7 @@ def test_hzd_from_clears_stage_coverage_sections_with_markers(tmp_path, monkeypa
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    monkeypatch.setattr(run_mod, "cuda_available", lambda: True)
     _seed_markers("hzd", ["catalog", "clip-index", "wem-metadata", "bind", "render"])
     cov = default_coverage_path("hzd")
     write_stage_coverage(cov, "wem-metadata", {"coverage_pct": 100.0})

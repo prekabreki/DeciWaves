@@ -13,6 +13,20 @@ class Transcript:
     speech_ratio: float
 
 
+def cuda_available():
+    """Return True if torch is importable and reports a CUDA device.
+
+    Lazy-imports torch (never at module load) -- safe to call without CUDA
+    tooling installed. Returns False on any import or availability failure.
+    Callers decide the message/behaviour.
+    """
+    try:
+        import torch
+        return torch.cuda.is_available()
+    except Exception:
+        return False
+
+
 def _prefer_copy_over_symlink():
     """Windows non-admin: huggingface_hub's symlink probe races under its threaded
     download and calls os.symlink in a window where it wrongly believes symlinks
