@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
 from deciwaves.gui.theme import ERROR, NEUTRAL, OK, WARN
 from deciwaves.gui.widgets import HelpIcon
 from deciwaves.gui.cuda_probe import asr_extra_installed, cuda_display_text
+from deciwaves.gui import ASR_INSTALL_HINT
 from deciwaves.gui.game_panel_model import (
     FW_TIERS_DEFAULT,
     FW_TIERS_HINT,
@@ -264,7 +265,7 @@ class GamePanel(QWidget):
             self._asr_hint_label.setText(
                 "ASR extra (whisperx) not installed — needed for GPU "
                 "acceleration on the Bind stage.\n"
-                "Install: pip install deciwaves[asr]\n"
+                f"Install: {ASR_INSTALL_HINT}\n"
                 "PyTorch must match your CUDA version. "
                 "See https://pytorch.org/get-started/locally/")
             self._asr_hint_label.setVisible(True)
