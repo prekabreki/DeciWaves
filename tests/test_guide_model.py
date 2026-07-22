@@ -18,7 +18,7 @@ def _payload(*names_ok):
         for n in names_ok]}
 
 
-_ALL_TOOLS = ("vgmstream", "VGAudio", "ffmpeg")
+_ALL_TOOLS = ("vgmstream-cli", "VGAudioCli", "ffmpeg")
 
 
 def _journey(**kw):
@@ -32,6 +32,12 @@ def test_tools_ready_true_only_when_all_three_present():
     assert tools_ready(_payload(*_ALL_TOOLS)) is True
     assert tools_ready(_payload("vgmstream", "VGAudio")) is False
     assert tools_ready(None) is False
+
+
+def test_tools_ready_matches_doctor_display_names():
+    payload = _payload("vgmstream-cli", "VGAudioCli", "ffmpeg")
+    assert tools_ready(payload) is True
+    assert tools_ready(_payload("vgmstream", "VGAudio")) is False
 
 
 def test_not_owned_game_yields_neutral_line_no_steps():

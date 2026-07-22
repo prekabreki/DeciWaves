@@ -37,13 +37,13 @@ def test_setup_header_has_byo_help_icon(qtbot):
 
 
 _ALL_READY = {"ok": True, "checks": [
-    {"name": "vgmstream", "ok": True, "status": "ok", "message": "", "fix": ""},
-    {"name": "VGAudio", "ok": True, "status": "ok", "message": "", "fix": ""},
+    {"name": "vgmstream-cli", "ok": True, "status": "ok", "message": "", "fix": ""},
+    {"name": "VGAudioCli", "ok": True, "status": "ok", "message": "", "fix": ""},
     {"name": "ffmpeg", "ok": True, "status": "ok", "message": "", "fix": ""},
     {"name": "cuda", "ok": True, "status": "unavailable", "message": "", "fix": ""},
 ]}
 _TOOL_MISSING = {"ok": False, "checks": [
-    {"name": "vgmstream", "ok": False, "status": "broken", "message": "", "fix": "run setup"},
+    {"name": "vgmstream-cli", "ok": False, "status": "broken", "message": "", "fix": "run setup"},
 ]}
 
 

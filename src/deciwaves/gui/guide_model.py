@@ -13,11 +13,11 @@ import os
 from dataclasses import dataclass
 from enum import Enum
 
+from deciwaves.cli.config import TOOLS
 from deciwaves.cli.doctor import Availability
 from deciwaves.gui.pipeline_model import scan_target, stage_states
 
-# The audio tools setup fetches -- the doctor check `name`s (config.TOOLS[*].display).
-REQUIRED_TOOLS = ("vgmstream", "VGAudio", "ffmpeg")
+REQUIRED_TOOLS = tuple(t.display for t in TOOLS)
 
 
 class StepId(Enum):
