@@ -125,18 +125,21 @@ git commit -m "feat(gui): imported-order override path helpers"
 import os
 from deciwaves.gui import export_model as em
 
-def _write_csv(path, header="line_id\n", body="a\n"):
+def _write_minimal_csv(path, header="line_id\n", body="a\n"):
+    # NB: distinct name from the existing _write_csv(path, fieldnames, rows) at
+    # test_export_model.py:35 -- a same-name redefinition would shadow it module-wide
+    # and corrupt every other test's fixtures.
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", newline="", encoding="utf-8") as f:
         f.write(header + body)
 
 def test_render_input_source_prefers_override(tmp_path):
     ws = str(tmp_path)
-    _write_csv(os.path.join(ws, "out", "playlist.csv"))
+    _write_minimal_csv(os.path.join(ws, "out", "playlist.csv"))
     # no override yet -> pipeline artifact
     assert em.render_input_source(ws, "ds").endswith(os.path.join("out", "playlist.csv"))
     # override present -> override wins; pipeline resolver still sees playlist
-    _write_csv(em.imported_order_path(ws, "ds"))
+    _write_minimal_csv(em.imported_order_path(ws, "ds"))
     assert em.render_input_source(ws, "ds") == em.imported_order_path(ws, "ds")
     assert em._pipeline_input_source(ws, "ds").endswith(os.path.join("out", "playlist.csv"))
 ```
@@ -283,6 +286,27 @@ def test_import_order_bom_and_accents(tmp_path):
     with open(em.imported_order_path(ws, "ds"), "rb") as f:
         head = f.read(3)
     assert head != b"\xef\xbb\xbf"  # BOM-free write
+
+def test_import_order_malformed_encoding_rejected(tmp_path):
+    ws = str(tmp_path); _write_playlist(ws, ["a"])
+    src = os.path.join(ws, "e.csv")
+    with open(src, "wb") as f:                       # cp1252 accents, NOT utf-8 (Excel "CSV")
+        f.write("line_id\ncafé\n".encode("cp1252"))
+    res = em.import_order(ws, "ds", src)
+    assert not res.ok and not em.has_imported_order(ws, "ds")
+    assert res.errors and "UTF-8" in res.errors[0]
+
+def test_round_trip_export_reorder_import_render_selection(tmp_path):
+    # Integration lynchpin (spec testing section): import writes an override that
+    # write_render_selection consumes via render_input_source, so the filtered
+    # render-selection reflects the imported order.
+    ws = str(tmp_path); _write_playlist(ws, ["a", "b", "c"])
+    src = os.path.join(ws, "edited.csv"); _write_user_csv(src, ["c", "a"])  # reorder+subset
+    assert em.import_order(ws, "ds", src).ok
+    sel = em.write_render_selection(ws, "ds", unchecked=set())  # nothing unchecked
+    with open(sel, encoding="utf-8-sig") as f:
+        rows = list(csv.DictReader(f))
+    assert [r["line_id"] for r in rows] == ["c", "a"]  # override order flows through to render
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -307,6 +331,10 @@ ROUND_TRIP_INSTRUCTIONS = (
     "rendered. Click Export MP3 to render in your new order.\n"
     "• Revert to auto order any time; your imported file is discarded and the app's story "
     "order returns.\n"
+    "• While a custom order is active, Export order CSV gives you your CURRENT (subset) "
+    "order, not the full list -- Revert first if you want every line back.\n"
+    "• If you re-run the pipeline (Scan/Bind) after importing, your custom order can go "
+    "stale (it is a snapshot of the earlier lines); Revert and re-import to refresh it.\n"
     "• Save as CSV UTF-8 so accented names survive."
 )
 
@@ -346,8 +374,12 @@ def import_order(workspace: str, game: str, src_csv: str) -> ImportResult:
             # enumerate from 2: row 1 is the header, so row numbers match the spreadsheet
             ordered = [((r.get("line_id") or "").strip(), n)
                        for n, r in enumerate(reader, start=2)]
-    except OSError as exc:
-        return ImportResult(False, None, 0, [f"Could not read CSV: {exc}"])
+    except (OSError, UnicodeDecodeError, csv.Error) as exc:
+        # UnicodeDecodeError is the LIKELY real failure: Excel's plain "CSV (comma
+        # delimited)" saves cp1252, so any accented char blows up the utf-8-sig read.
+        return ImportResult(False, None, 0, [
+            "Could not read the CSV -- is it saved as UTF-8? (Excel's plain "
+            f"'CSV (comma delimited)' is not; use 'CSV UTF-8'.) Details: {exc}"])
 
     ordered = [(lid, n) for lid, n in ordered if lid]  # drop blank-id rows (trailing lines)
     if not ordered:
@@ -559,7 +591,7 @@ def test_round_trip_signals(panel, qtbot, tmp_path, monkeypatch):
     with qtbot.waitSignal(panel.import_order_requested):
         panel._on_import_clicked()
     with qtbot.waitSignal(panel.revert_order_requested):
-        panel._revert_btn.click()
+        panel._order_revert_btn.click()
 
 def test_instructions_present(panel):
     assert panel._instructions.text()
@@ -757,15 +789,14 @@ Locate `start_catalog_copy` (job_controller.py:151) and add a sibling right afte
 
 ```python
     def start_order_copy(self, game: str, workspace: str, dest: str) -> None:
-        from deciwaves.gui.export import _CatalogCopyWorker, _CatalogCopySignals
         signals = _CatalogCopySignals()
         signals.finished.connect(self._on_catalog_copy_finished)
         worker = _CatalogCopyWorker(game, workspace, dest, signals, kind="order")
         self._catalog_signals = signals
-        self._pool.start(worker)
+        QThreadPool.globalInstance().start(worker)
 ```
 
-(Match how `start_catalog_copy` obtains its pool/imports — mirror it exactly, only adding `kind="order"`.)
+This mirrors the real `start_catalog_copy` (job_controller.py:151-156) EXACTLY, only adding `kind="order"`: `_CatalogCopyWorker`/`_CatalogCopySignals` are already module-top imports in `job_controller.py` (no local import), the pool is `QThreadPool.globalInstance()` (there is no `self._pool`), and `self._on_catalog_copy_finished` is reused verbatim. Note the `self._catalog_signals` slot is shared with the catalog copy — a concurrent catalog+order copy would clobber it, but the panel's running-state already mutually-excludes the two, so the shared single slot is fine (pre-existing design).
 
 - [ ] **Step 5: Run tests to verify pass (incl. existing catalog-copy test)**
 
@@ -791,19 +822,33 @@ git commit -m "feat(gui): start_order_copy exports the ordered render-input arti
 **Interfaces:**
 - Consumes: `export_model.import_order`, `export_model.has_imported_order`, `export_model.revert_imported_order`, `JobController.start_order_copy` (Task 6), `ExportPanel` signals (Task 5).
 
-- [ ] **Step 1: Pass order-state into the export panel from the Library**
+- [ ] **Step 1: Cache order-state at refresh; pass it from `_sync_export`**
 
-In `library.py`, find where `self.export.set_context(...)` is called during `refresh`/`_update_export_context` and add the override state. Add an import `from deciwaves.gui.export_model import has_imported_order`, and pass:
+⚠ `_sync_export` (`views/library.py:655`) runs on EVERY status update — including per-toggle selection edits — and its docstring guarantees *"no filesystem access per call (issue #133 L3)"*. So do NOT call `has_imported_order` (an `os.path.isfile`) there. Cache it during `refresh()` (where `load_lines` already runs), exactly like `self._can_export_mp3` / `self._has_catalog`.
+
+In `__init__`, initialise: `self._order_active = False` and `self._order_count = 0`.
+
+In `refresh()`, after the rows are loaded, add:
 
 ```python
-        order_active = has_imported_order(self._workspace, self._game) if self._game else False
-        self.export.set_context(self._game, self._workspace, self._checked_count,
-                                self._can_export_mp3, self._can_catalog,
-                                order_active=order_active,
-                                order_count=len(self._rows) if order_active else 0)
+        from deciwaves.gui.export_model import has_imported_order
+        self._order_active = has_imported_order(workspace, game) if game else False
+        self._order_count = len(self._rows) if self._order_active else 0
 ```
 
-(`len(self._rows)` is the loaded row count, which — when an override is active — is the override's row count, exactly what the status line reports.)
+Then extend the existing `_sync_export` call to pass the cached values (the real attribute is `self._has_catalog`, NOT `_can_catalog`):
+
+```python
+    def _sync_export(self) -> None:
+        if self._game is None:
+            return
+        self.export.set_context(
+            self._game, self._workspace, self.checked_count(),
+            self._can_export_mp3, self._has_catalog,
+            order_active=self._order_active, order_count=self._order_count)
+```
+
+The import/revert handlers (Step 2) trigger `refresh()` via the shell's `_refresh_library()`, which recomputes the cached state — so the `isfile` check runs only on refresh, never per toggle.
 
 - [ ] **Step 2: Wire the three export-panel intents in the shell**
 

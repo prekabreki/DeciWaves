@@ -150,10 +150,23 @@ Validation lives in the Qt-free `export_model` and is unit-tested without Qt.
   uncheck to trim, and export drops unchecked as usual. Revert keeps prior auto-order
   curation intact. *(Considered and rejected: forcing a clean all-checked slate on
   import, which would discard curation on revert.)*
-- **Staleness:** import does **not** auto-render or invalidate `.done-render`. The
+- **Staleness (reels):** import does **not** auto-render or invalidate `.done-render`. The
   Library updates instantly; already-rendered reels persist until the user clicks
   **Export MP3**. The status line and gotcha bullet communicate this — no intrusive
   long job is started implicitly.
+- **Override goes stale after a pipeline re-run (known gap):** the override is a frozen
+  snapshot. If the user re-runs order/bind/extract, the pipeline artifact changes but the
+  override still wins, with possibly dangling `stream_path`/wav values or dropped lines.
+  Mitigation: a gotcha bullet in the instructions warns to Revert + re-import; an optional
+  mtime staleness note in the status line is a cheap follow-up. Not auto-invalidated (would
+  surprise a user mid-curation).
+- **Export-of-order is override-aware (one-way subset):** re-exporting while an override is
+  active yields the *current subset*, not the full list — the only route back to dropped
+  lines is Revert. Chosen to support iterative reordering; documented in the instructions.
+- **Malformed / wrong-encoding CSV:** `import_order` catches `(OSError, UnicodeDecodeError,
+  csv.Error)` — `UnicodeDecodeError` is the likely real failure (Excel's plain "CSV (comma
+  delimited)" is cp1252, not UTF-8) — and returns a friendly "save as CSV UTF-8" message
+  rather than propagating an unhandled exception through the shell.
 
 ## Testing
 
