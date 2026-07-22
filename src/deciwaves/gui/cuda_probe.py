@@ -47,6 +47,14 @@ def cuda_display_text(payload: dict | None) -> str:
     return "GPU: no CUDA GPU detected"
 
 
+def asr_extra_installed(payload: dict | None) -> bool:
+    """True if the ``asr_extra`` check in *payload* has status ``"ok"``."""
+    for c in (payload or {}).get("checks", []):
+        if c.get("name") == "asr_extra":
+            return c.get("status", "") == "ok"
+    return False
+
+
 def needs_gpu_warning(game: str, payload: dict | None) -> bool:
     """True when starting a GPU stage for HZD/FW without doctor confirming a CUDA GPU."""
     if game not in _GPU_GAMES:
