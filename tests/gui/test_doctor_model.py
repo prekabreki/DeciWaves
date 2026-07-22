@@ -74,13 +74,21 @@ def test_asr_and_cuda_promoted_to_warn_for_hzd_and_fw_when_unavailable():
     assert severity(_item("cuda", "unavailable"), "fw") == SEV_WARN
 
 
-def test_asr_and_cuda_stay_neutral_for_ds():
-    # DS's default chain needs no GPU, so the GPU extras are only informational --
-    # neutral whether present or absent, never a green first-class readiness item.
+def test_absent_asr_and_cuda_stay_neutral_for_ds():
+    # DS's default chain needs no GPU, so an ABSENT GPU extra is only informational
+    # for DS -- neutral, never a warning/failure.
     assert severity(_item("asr_extra", "unavailable"), "ds") == SEV_NEUTRAL
     assert severity(_item("cuda", "unavailable"), "ds") == SEV_NEUTRAL
-    assert severity(_item("asr_extra", "ok"), "ds") == SEV_NEUTRAL
-    assert severity(_item("cuda", "ok"), "ds") == SEV_NEUTRAL
+
+
+def test_installed_asr_and_cuda_are_green_even_for_ds():
+    # But once actually installed they read GREEN for every game (an actually-present
+    # tool must not show a grey "---" just because DS doesn't require it). The
+    # optional-for-DS framing is carried by the pill, not by greying the node.
+    assert severity(_item("asr_extra", "ok"), "ds") == SEV_OK
+    assert severity(_item("cuda", "ok"), "ds") == SEV_OK
+    # ...and the "Optional" pill still marks them optional under DS.
+    assert pill_for(_item("cuda", "ok"), "ds") == ("Optional", "optional")
 
 
 def test_available_cuda_is_ok_even_for_hzd():
