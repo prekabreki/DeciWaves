@@ -30,6 +30,8 @@ class IssueGroup:
     path: str          # absolute-ish path for the "open file" affordance
     count: int
     sample: list[str]  # first few lines, for an inline preview
+    benign: bool = False  # housekeeping, NOT an error (e.g. render-dupes.csv): the panel
+    # must present these separately so a successful run never reports them as "Issues".
 
 
 def _read_error_lines(path: str) -> list[str]:
@@ -63,5 +65,15 @@ def gather_issues(workspace: str, game: str) -> list[IssueGroup]:
         path = os.path.join(out, dupes)
         n = _csv_data_rows(path)
         if n > 0:
-            groups.append(IssueGroup(source=dupes, path=path, count=n, sample=[]))
+            groups.append(IssueGroup(source=dupes, path=path, count=n, sample=[],
+                                     benign=True))
     return groups
+
+
+def split_issues(groups: list[IssueGroup]) -> tuple[list[IssueGroup], list[IssueGroup]]:
+    """Partition *groups* into ``(errors, housekeeping)``. Errors are real dropped/failed
+    lines the user may want to act on; housekeeping (``benign=True``, e.g. de-duplicated
+    repeated VO) is expected pipeline behaviour and must never be counted as an "Issue"."""
+    errors = [g for g in groups if not g.benign]
+    housekeeping = [g for g in groups if g.benign]
+    return errors, housekeeping

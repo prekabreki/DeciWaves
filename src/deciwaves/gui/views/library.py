@@ -119,6 +119,10 @@ class _TableModel(QAbstractTableModel):
         if role == Qt.CheckStateRole and col == self.COL_CHECK:
             checked = row.line_id not in self._view._unchecked
             return Qt.Checked if checked else Qt.Unchecked
+        # Center the ▶ glyph in its cell -- left-aligned (the Qt default) a lone glyph
+        # reads as a tree/list disclosure arrow rather than a play control (dogfooding).
+        if role == Qt.TextAlignmentRole and col == self.COL_PREVIEW:
+            return int(Qt.AlignCenter)
         if role == Qt.DisplayRole:
             if col == self.COL_PREVIEW:
                 return "▶"
@@ -265,7 +269,18 @@ class LibraryView(QWidget):
         self._speaker = QComboBox()
         self._speaker.addItem("all")
         self._hide_dupes = QCheckBox("Hide duplicates")
+        self._hide_dupes.setToolTip(
+            "Hides repeated lines within a scene — the 2nd+ time the exact same "
+            "subtitle recurs (e.g. a stock line reused). This mirrors the "
+            "de-duplication the exported reel already does, so it only declutters the "
+            "list; it does not change what you export.")
         self._hide_nosub = QCheckBox("Hide no-subtitle")
+        self._hide_nosub.setToolTip(
+            "Hides voice lines that have audio but no on-screen subtitle — grunts, "
+            "breaths, PA announcements, radio bleed, and lines the game never "
+            "captioned. It's real audio, not silence. Useful because blank-subtitle "
+            "rows can't be identified without playing them and are usually non-story "
+            "noise; leave it off if you want incidental vocalizations too.")
 
         filters = QHBoxLayout()
         filters.addWidget(QLabel("Search:"))
@@ -283,6 +298,12 @@ class LibraryView(QWidget):
         self._short_secs.setSuffix(" s")
         self._uncheck_short_btn = QPushButton("Uncheck shorter than")
         self._uncheck_barks_btn = QPushButton("Uncheck barks")
+        self._uncheck_barks_btn.setToolTip(
+            "Barks are short, incidental voice lines — ambient NPC chatter, combat "
+            "callouts and the like — rather than story dialogue. This unchecks them "
+            "across the whole list (not just the filtered view), using a per-game "
+            "heuristic: DS = lines with no subtitle; HZD = ambient-category or "
+            "no-subtitle lines; FW = no subtitle or one-word lines.")
         self._check_all_btn = QPushButton("Check all")
         self._check_none_btn = QPushButton("Check none")
         self._undo_btn = QPushButton("Undo")
