@@ -111,7 +111,12 @@ class GamePanel(QWidget):
         tiers_box = QWidget()
         v = QVBoxLayout(tiers_box)
         v.setContentsMargins(0, 0, 0, 0)
-        v.addLayout(self._row(QLabel("Tiers (--tiers):"), self._tiers_edit))
+        v.addLayout(self._row(QLabel("Tiers (--tiers):"), HelpIcon(
+            "Tier tokens: 1 = confident match, 2 = lower-confidence match, "
+            "S = subtitle-only (most of a full reel), W = Weave "
+            "(scene-recovered clip), D = DLC (Burning Shores). "
+            'Default "1,2,S" excludes W and D \u2014 '
+            "which is what the drop-warning is about."), self._tiers_edit))
         v.addLayout(self._row(self._tiers_hint))
         v.addLayout(self._row(self._tiers_warning))
 
@@ -139,7 +144,13 @@ class GamePanel(QWidget):
         self._types_browse.setToolTip("Browse for types.json")
         self._types_status = QLabel("")
         types_box = self._wrap(
-            self._row(QLabel("types.json (required):"), self._types_edit, self._types_browse),
+            self._row(QLabel("types.json (required):"), HelpIcon(
+                "FW\u2019s RTTI (run-time type information) type database, "
+                "dumped to JSON. Required for subtitle-bind "
+                "(scan + preview work without it). Generate it yourself with "
+                "odradek from your own FW install. DeciWaves never ships or "
+                "downloads it. Place in the workspace root."),
+                self._types_edit, self._types_browse),
             self._row(self._types_status))
 
         # --- FW optional gamescript picker ---
@@ -150,7 +161,11 @@ class GamePanel(QWidget):
         self._gamescript_browse = QPushButton("Browse…")
         self._gamescript_browse.setToolTip("Browse for a gamescript file")
         gamescript_box = self._wrap(self._row(
-            QLabel("Gamescript:"), self._gamescript_edit, self._gamescript_browse))
+            QLabel("Gamescript:"), HelpIcon(
+                "BYO (Bring Your Own): an optional file that adds speaker "
+                "labels + story ordering when supplied. Persisted via setup. "
+                "Same file as deciwaves fw run --gamescript."),
+            self._gamescript_edit, self._gamescript_browse))
 
         # control-name -> its container widget (the hide-not-grey unit, spec §7)
         self._widgets = {

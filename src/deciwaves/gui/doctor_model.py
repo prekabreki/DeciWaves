@@ -57,6 +57,41 @@ def install_status_attrs(status: Availability) -> tuple[str, str]:
 _GPU_READINESS = frozenset({"asr_extra", "cuda"})
 _GPU_GAMES = frozenset({"hzd", "fw"})
 
+# Per-game doctor check names — path checks scoped to each game (mirrors
+# game_panel_model._CONTROLS). Non-path checks (asr_extra, cuda, config_file,
+# and the tool checks) stay visible for every game.
+_CHECK_NAMES = {
+    "ds": frozenset({"ds_install", "oodle"}),
+    "hzd": frozenset({"hzd_package"}),
+    "fw": frozenset({"fw_package", "fw_gamescript"}),
+}
+
+_ALWAYS_SHOWN = frozenset({
+    "asr_extra", "cuda", "config_file",
+    "vgmstream-cli", "VGAudioCli", "ffmpeg",
+    "doctor",  # fallback error check when --json output is unparseable
+})
+
+# Setup path-summary labels per game (parallel to _CHECK_NAMES, using the
+# labels setup.py prints — ds_install, oodle_dll, hzd_pkg, fw_pkg, fw_script).
+_SETUP_PATH_LABELS = {
+    "ds": frozenset({"ds_install", "oodle_dll"}),
+    "hzd": frozenset({"hzd_pkg"}),
+    "fw": frozenset({"fw_pkg", "fw_script"}),
+}
+
+
+def checks_for(game: str) -> frozenset[str]:
+    """Doctor check names visible for *game*: the game's own path checks plus
+    always-relevant checks. Unknown/empty game → always-relevant only."""
+    return _ALWAYS_SHOWN | _CHECK_NAMES.get(game, frozenset())
+
+
+def setup_path_labels_for(game: str) -> frozenset[str]:
+    """Setup path-summary labels visible for *game* (mirrors *checks_for* but
+    uses setup's summary-row identifiers). Unknown/empty game → empty set."""
+    return _SETUP_PATH_LABELS.get(game, frozenset())
+
 
 @dataclass(frozen=True)
 class DoctorItem:

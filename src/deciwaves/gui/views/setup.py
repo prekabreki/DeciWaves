@@ -31,10 +31,12 @@ from deciwaves.gui.doctor_model import (
     SEV_OK,
     SEV_WARN,
     DoctorItem,
+    checks_for,
     load_doctor_payload,
     overall_ok,
     parse_doctor_payload,
     pill_for,
+    setup_path_labels_for,
     severity,
 )
 from deciwaves.gui.guide_model import tools_ready
@@ -125,6 +127,8 @@ class DoctorPanel(QWidget):
     def render_payload(self, payload: dict) -> None:
         self._payload = payload
         self._items = parse_doctor_payload(payload)
+        visible = checks_for(self._game)
+        self._items = [item for item in self._items if item.name in visible]
         _clear(self._rows_layout)
         for item in self._items:
             self._rows_layout.addWidget(self._row_widget(item))
@@ -194,6 +198,7 @@ class SetupScreen(QWidget):
         self._base = base or default_base()
         self._busy = False
         self._pipeline_busy = False
+        self._game = "ds"
         self._rows: list = []
         self._warnings: list[str] = []
 
@@ -277,6 +282,17 @@ class SetupScreen(QWidget):
             self._tool_status[tool].setVisible(False)
         return True
 
+    def set_game(self, game: str) -> None:
+        self._game = game
+        self._refresh_paths()
+
+    def _refresh_paths(self) -> None:
+        visible = setup_path_labels_for(self._game)
+        path_rows = [r for r in self._rows
+                     if r.label not in _SETUP_TOOLS and r.label in visible]
+        self._paths_label.setText(
+            "\n".join(f"{r.label}: {r.detail}" for r in path_rows))
+
     def cancel(self) -> None:
         self._runner.cancel()
 
@@ -346,8 +362,7 @@ class SetupScreen(QWidget):
         if code != 0 and not self._rows:
             self._paths_label.setText("setup exited with code {}".format(code))
         else:
-            path_rows = [r for r in self._rows if r.label not in _SETUP_TOOLS]
-            self._paths_label.setText("\n".join(f"{r.label}: {r.detail}" for r in path_rows))
+            self._refresh_paths()
         self._warnings_label.setText("\n".join(self._warnings))
         self.finished.emit(int(code))
 
@@ -381,6 +396,7 @@ class SetupDoctorView(QFrame):
 
     def set_game(self, game: str) -> None:
         self.doctor.set_game(game)
+        self.setup.set_game(game)
 
     def apply_readiness_summary(self) -> None:
         """Derive each section's one-line summary and default collapse from the
