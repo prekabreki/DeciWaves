@@ -19,7 +19,7 @@ _CUDA_OK = {"ok": True, "checks": [
 
 def _capture_jobs(w):
     calls = []
-    w.runner.start = lambda argv, cwd=None: calls.append(argv) or True
+    w._controller.runner.start = lambda argv, cwd=None: calls.append(argv) or True
     return calls
 
 

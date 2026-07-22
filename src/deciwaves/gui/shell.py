@@ -284,31 +284,6 @@ class MainWindow(QMainWindow):
 
     # --- job control -------------------------------------------------------
 
-    # Thin delegating properties for backward-compat (tests reach these directly)
-    @property
-    def runner(self):
-        return self._controller.runner
-
-    @property
-    def dump(self):
-        return self._controller.dump
-
-    @property
-    def _job_kind(self) -> str | None:
-        return self._controller._job_kind
-
-    @_job_kind.setter
-    def _job_kind(self, value: str | None) -> None:
-        self._controller._job_kind = value
-
-    @property
-    def _job_game(self) -> str | None:
-        return self._controller._job_game
-
-    @_job_game.setter
-    def _job_game(self, value: str | None) -> None:
-        self._controller._job_game = value
-
     # -- pipeline dispatch (delegates to the controller) ---------------------
 
     def _on_scan(self) -> None:
@@ -355,12 +330,6 @@ class MainWindow(QMainWindow):
         self._refresh_game_panel()
         self._refresh_guide()
 
-    # -- delegate for tests that call _on_job_finished directly ---------------
-
-    def _on_job_finished(self, code: int) -> None:
-        self._controller._on_job_finished(code)
-        self._on_pipe_job_finished(code)
-
     def _sync_running(self) -> None:
         self._controller._sync_running()
         self._on_busy_changed(self._controller.runner.is_running
@@ -397,11 +366,6 @@ class MainWindow(QMainWindow):
         self.library.export.set_dump_progress(done, total)
 
     def _on_dump_widget_finished(self, ok: int, failed: int) -> None:
-        self.library.export.dump_finished(ok, failed)
-
-    def _on_dump_finished(self, ok: int, failed: int) -> None:
-        """Backward-compat delegate: tests call this directly."""
-        self._controller._on_dump_finished(ok, failed)
         self.library.export.dump_finished(ok, failed)
 
     def _on_export_catalog(self, dest: str) -> None:
