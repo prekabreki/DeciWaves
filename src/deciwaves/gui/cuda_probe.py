@@ -39,7 +39,7 @@ def cuda_display_text(payload: dict | None) -> str:
 
     message = cuda_message(payload)
     if "not installed" in message:
-        return "GPU: acceleration not installed — see ASR extra"
+        return "GPU: acceleration not installed"
     if "no GPU visible" in message:
         return "GPU: no CUDA GPU visible"
     if "import failed" in message:

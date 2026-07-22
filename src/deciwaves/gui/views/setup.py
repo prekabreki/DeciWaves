@@ -40,7 +40,7 @@ from deciwaves.gui.doctor_model import (
     severity,
 )
 from deciwaves.gui.guide_model import tools_ready
-from deciwaves.gui.widgets import CollapsibleSection, HelpIcon, Pill
+from deciwaves.gui.widgets import AsrInstallHint, CollapsibleSection, HelpIcon, Pill
 from deciwaves.gui.setup_model import (
     build_setup_argv,
     parse_setup_summary,
@@ -124,6 +124,8 @@ class DoctorPanel(QWidget):
         super().showEvent(event)
         self.auto_check()
 
+    _GPU_GAMES = frozenset({"hzd", "fw"})
+
     def render_payload(self, payload: dict) -> None:
         self._payload = payload
         self._items = parse_doctor_payload(payload)
@@ -132,6 +134,10 @@ class DoctorPanel(QWidget):
         _clear(self._rows_layout)
         for item in self._items:
             self._rows_layout.addWidget(self._row_widget(item))
+            if (item.name == "asr_extra"
+                    and item.status == "unavailable"
+                    and self._game in self._GPU_GAMES):
+                self._rows_layout.addWidget(AsrInstallHint())
 
     def items(self) -> list[DoctorItem]:
         return list(self._items)
@@ -249,6 +255,15 @@ class SetupScreen(QWidget):
             header.addWidget(btn)
         header.addWidget(self._cancel_btn)
         layout.addLayout(header)
+
+        _asr_note = QLabel(
+            "Run setup installs only the audio decoders (vgmstream, VGAudio, "
+            "ffmpeg). It does NOT install ASR/GPU support — see the Doctor "
+            "panel for that.")
+        _asr_note.setStyleSheet(f"color: {NEUTRAL}; font-style: italic;")
+        _asr_note.setWordWrap(True)
+        layout.addWidget(_asr_note)
+
         layout.addLayout(tools_box)
         layout.addWidget(self._paths_label)
         layout.addWidget(self._warnings_label)

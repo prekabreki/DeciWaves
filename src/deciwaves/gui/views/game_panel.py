@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import os
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QFileDialog,
@@ -34,9 +34,8 @@ from PySide6.QtWidgets import (
 )
 
 from deciwaves.gui.theme import ERROR, NEUTRAL, OK, WARN
-from deciwaves.gui.widgets import HelpIcon
+from deciwaves.gui.widgets import AsrInstallHint, HelpIcon
 from deciwaves.gui.cuda_probe import asr_extra_installed, cuda_display_text
-from deciwaves.gui import ASR_INSTALL_HINT
 from deciwaves.gui.game_panel_model import (
     FW_TIERS_DEFAULT,
     FW_TIERS_HINT,
@@ -71,12 +70,8 @@ class GamePanel(QWidget):
         gpu_box = self._wrap(self._row(self._gpu_label))
 
         # --- ASR install hint (shown only when missing for GPU games) ---
-        self._asr_hint_label = QLabel()
-        self._asr_hint_label.setWordWrap(True)
-        self._asr_hint_label.setTextInteractionFlags(
-            Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
-        self._asr_hint_label.setStyleSheet(f"color: {WARN};")
-        self._asr_hint_label.setVisible(False)
+        self._asr_hint = AsrInstallHint()
+        self._asr_hint.setVisible(False)
 
         # --- HZD sample cap: transcribe-first-N-lines for test runs ---
         self._sample_cap = QSpinBox()
@@ -187,7 +182,7 @@ class GamePanel(QWidget):
         for name, w in self._widgets.items():
             layout.addWidget(w)
             if name == "gpu":
-                layout.addWidget(self._asr_hint_label)
+                layout.addWidget(self._asr_hint)
         layout.addWidget(self._scan_warning)
 
         # wiring
@@ -277,15 +272,9 @@ class GamePanel(QWidget):
 
         _GPU_GAMES = frozenset({"hzd", "fw"})
         if self._game in _GPU_GAMES and not asr_extra_installed(payload):
-            self._asr_hint_label.setText(
-                "ASR extra (whisperx) not installed — needed for GPU "
-                "acceleration on the Bind stage.\n"
-                f"Install: {ASR_INSTALL_HINT}\n"
-                "PyTorch must match your CUDA version. "
-                "See https://pytorch.org/get-started/locally/")
-            self._asr_hint_label.setVisible(True)
+            self._asr_hint.setVisible(True)
         else:
-            self._asr_hint_label.setVisible(False)
+            self._asr_hint.setVisible(False)
 
     # --- picker intents (dialogs opened here; the shell does the work) ------
 

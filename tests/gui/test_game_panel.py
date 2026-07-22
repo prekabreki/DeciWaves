@@ -19,7 +19,7 @@ _CUDA_NO_GPU = {"ok": True, "checks": [
      "message": "CUDA: torch installed but no GPU visible (informational)", "fix": ""}]}
 _CUDA_NOT_INSTALLED = {"ok": True, "checks": [
     {"name": "cuda", "ok": True, "status": "unavailable",
-     "message": "CUDA: torch not installed (informational; see ASR extra)", "fix": ""}]}
+     "message": "CUDA: torch not installed (informational)", "fix": ""}]}
 _CUDA_IMPORT_FAILED = {"ok": True, "checks": [
     {"name": "cuda", "ok": True, "status": "unavailable",
      "message": "CUDA: torch import failed (DLL load failed) (informational)", "fix": ""}]}
@@ -193,7 +193,7 @@ def test_gpu_label_distinguishes_torch_not_installed_from_no_device(qtbot, tmp_p
     p.set_context(str(tmp_path), {}, _CUDA_NOT_INSTALLED)
     text = p.gpu_status_text()
     assert "acceleration not installed" in text
-    assert "see ASR extra" in text
+    assert "see ASR extra" not in text
     assert "no CUDA GPU" not in text
 
     p.set_context(str(tmp_path), {}, _CUDA_NO_GPU)
