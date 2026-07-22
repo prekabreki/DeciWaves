@@ -77,14 +77,18 @@ class GamePanel(QWidget):
         self._asr_hint_label.setStyleSheet(f"color: {WARN};")
         self._asr_hint_label.setVisible(False)
 
-        # --- ASR sample cap (HZD) ---
+        # --- HZD sample cap: transcribe-first-N-lines for test runs ---
         self._sample_cap = QSpinBox()
         self._sample_cap.setRange(0, _SAMPLE_CAP_MAX)
         self._sample_cap.setValue(SAMPLE_CAP_DEFAULT)
         self._sample_cap.setSpecialValueText("unlimited")   # shown when value == 0
+        self._sample_cap.setToolTip(
+            "ASR (Automatic Speech Recognition) sample cap for the first bind. "
+            "Use a small number (e.g. 300) for a quick test run, "
+            "or 0 to transcribe all lines (may take hours).")
         sample_box = self._wrap(self._row(
-            QLabel("ASR sample cap:"), self._sample_cap,
-            QLabel("(first bind; 0 = unlimited)")))
+            QLabel("Transcribe first N lines (test run):"), self._sample_cap,
+            QLabel("(0 = unlimited)")))
 
         # --- render scope: DS --main-story ---
         self._main_story = QCheckBox("Main story only (--main-story)")
