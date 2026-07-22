@@ -59,9 +59,13 @@ class PipelineView(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setWidget(content)
+        self._scroll = scroll
 
         outer = QVBoxLayout(self)
         outer.addWidget(scroll)
+
+    def scroll_to_widget(self, widget: QWidget) -> None:
+        self._scroll.ensureWidgetVisible(widget)
 
     def refresh_panels(self, game: str, workspace: str, running_stage: str | None = None,
                        progress: list[StageProgress] | None = None) -> None:

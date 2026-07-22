@@ -9,7 +9,7 @@ issues/game-panel so the look and behaviour are defined and tested once.
   hides on collapse, for the first-run declutter of the long Setup/Doctor panels."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QToolButton, QVBoxLayout, QWidget
 
 from deciwaves.gui.theme import NEUTRAL, WARN
@@ -93,3 +93,15 @@ class CollapsibleSection(QWidget):
 
     def is_collapsed(self) -> bool:
         return not self._toggle.isChecked()
+
+    def expand(self) -> None:
+        self._toggle.setChecked(True)
+
+
+_HIGHLIGHT_COLOUR = "#1b6ec2"
+_HIGHLIGHT_DURATION_MS = 800
+
+
+def flash_highlight(widget: QWidget) -> None:
+    widget.setStyleSheet(f"border: 2px solid {_HIGHLIGHT_COLOUR};")
+    QTimer.singleShot(_HIGHLIGHT_DURATION_MS, lambda: widget.setStyleSheet(""))
