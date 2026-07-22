@@ -209,7 +209,8 @@ def main(argv=None):
     # entry) = "coverage unknown", since it couldn't be computed.
     try:
         report = coverage_report(a.out, a.catalog)
-        print(report)
+        print(f"story coverage: {report['with_ab']:,} / {report['story_lines']:,} "
+              f"lines have audio ({report['coverage_pct']}%)")
         # Persist what the report prints (issue #63): coverage numbers were
         # stdout-only, so a partial scan looked complete on disk.
         write_stage_coverage(a.coverage_out, "wem-metadata", {
