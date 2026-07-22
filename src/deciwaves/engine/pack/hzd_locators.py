@@ -16,6 +16,8 @@ import struct
 import sys
 from dataclasses import dataclass
 
+_warned_trailing = set()
+
 
 @dataclass(frozen=True)
 class Locator:
@@ -70,7 +72,8 @@ class HzdLocators:
                 # first packfile wins on duplicate hash (mirror DS PackIndex.setdefault)
                 self._by_hash.setdefault(h, Locator(name, off, length))
         self.trailing_bytes = len(data) - pos
-        if self.trailing_bytes:
+        if self.trailing_bytes and self.trailing_bytes not in _warned_trailing:
+            _warned_trailing.add(self.trailing_bytes)
             print(
                 f"WARNING: PackFileLocators parse left {self.trailing_bytes} "
                 f"unconsumed trailing bytes ({len(self._archives)} archives / "

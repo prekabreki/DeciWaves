@@ -14,6 +14,7 @@ from dataclasses import dataclass
 class StageProgress:
     current: int
     total: int | None = None
+    context: str = ""
 
     @property
     def pct(self) -> float | None:
@@ -25,8 +26,12 @@ class StageProgress:
     def label(self) -> str:
         if self.total is not None:
             pct_str = f"({self.pct:.0f}%)"
-            return f"{self.current:,} / {self.total:,} {pct_str}"
-        return f"{self.current:,}"
+            base = f"{self.current:,} / {self.total:,} {pct_str}"
+        else:
+            base = f"{self.current:,}"
+        if self.context:
+            return f"{self.context}: {base}"
+        return base
 
 
 def _out_dir(workspace: str, game: str) -> str:
@@ -60,7 +65,7 @@ def _wav_count(dir_path: str) -> int:
 
 def catalog_progress(workspace: str, game: str) -> StageProgress:
     path = os.path.join(_out_dir(workspace, game), "catalog-processed.txt")
-    return StageProgress(current=_line_count(path))
+    return StageProgress(current=_line_count(path), context="catalog")
 
 
 def asr_transcript_progress(workspace: str) -> StageProgress:
@@ -80,17 +85,17 @@ def asr_transcript_progress(workspace: str) -> StageProgress:
                 total = None
     except (OSError, ValueError):
         pass
-    return StageProgress(current=n, total=total)
+    return StageProgress(current=n, total=total, context="ASR transcript")
 
 
 def wav_cache_progress(workspace: str, game: str) -> StageProgress:
     d = os.path.join(_out_dir(workspace, game), "wav-cache")
-    return StageProgress(current=_wav_count(d))
+    return StageProgress(current=_wav_count(d), context="WAV cache")
 
 
 def csv_output_progress(workspace: str, game: str, csv_name: str) -> StageProgress:
     path = os.path.join(_out_dir(workspace, game), csv_name)
-    return StageProgress(current=_csv_row_count(path))
+    return StageProgress(current=_csv_row_count(path), context=csv_name)
 
 
 def probe_progress(workspace: str, game: str, stage: str) -> list[StageProgress]:
