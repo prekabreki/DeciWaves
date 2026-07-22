@@ -113,6 +113,9 @@ class PipelineControls(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._running = False
+        self._workspace_empty = False
+        self._bind_visible = True
         self._scan_btn = QPushButton("Scan")
         self._bind_btn = QPushButton("Bind / Process")
         self._cancel_btn = QPushButton("Cancel")
@@ -128,6 +131,7 @@ class PipelineControls(QWidget):
         row.addWidget(self._cancel_btn)
 
     def set_game_has_gpu(self, has_gpu: bool) -> None:
+        self._bind_visible = has_gpu
         self._bind_btn.setVisible(has_gpu)
 
     def bind_shown(self) -> bool:
@@ -137,9 +141,21 @@ class PipelineControls(QWidget):
         return self._cancel_btn.isVisibleTo(self)
 
     def set_running(self, running: bool) -> None:
-        self._scan_btn.setEnabled(not running)
-        self._bind_btn.setEnabled(not running)
+        self._running = running
         self._cancel_btn.setVisible(running)
+        self._apply_enable()
+
+    def set_workspace_empty(self, empty: bool) -> None:
+        self._workspace_empty = empty
+        self._apply_enable()
+
+    def _apply_enable(self) -> None:
+        enabled = not self._running and not self._workspace_empty
+        self._scan_btn.setEnabled(enabled)
+        self._bind_btn.setEnabled(enabled)
+
+    def workspace_empty(self) -> bool:
+        return self._workspace_empty
 
     def focus_scan(self) -> None:
         self._scan_btn.setFocus()

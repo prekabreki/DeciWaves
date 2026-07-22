@@ -150,10 +150,11 @@ def test_panels_refresh_on_game_change(qtbot, tmp_path):
     assert states["catalog"].done
 
 
-def test_cancel_button_terminates_job_and_resets_ui(qtbot):
+def test_cancel_button_terminates_job_and_resets_ui(qtbot, tmp_path):
     import sys
     w = MainWindow()
     qtbot.addWidget(w)
+    w.bar.set_workspace(str(tmp_path))
     w.bar.select_game("ds")
     w.pipeline.controls.set_game_has_gpu(False)   # DS: no GPU -> bind hidden
     assert not w.pipeline.controls.cancel_shown()

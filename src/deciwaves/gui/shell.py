@@ -143,6 +143,7 @@ class MainWindow(QMainWindow):
         self.bar.workspace_changed.connect(lambda _ws: self._refresh_guide())
         self.pipeline.setup_doctor.doctor.refreshed.connect(self._refresh_guide)
 
+        self.bar.workspace_changed.connect(lambda _ws: self._refresh_controls_workspace())
         self.bar.workspace_changed.connect(lambda _ws: self._refresh_status())
         self.bar.workspace_changed.connect(lambda _ws: self._refresh_panels())
         self.bar.workspace_changed.connect(lambda _ws: self._refresh_library())
@@ -188,10 +189,18 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0, lambda h=saved_header: (
                 self.library._table.horizontalHeader().restoreState(h)))
 
+        self._refresh_controls_workspace()
+
     # --- status + panels ---------------------------------------------------
 
     def _workspace(self) -> str:
         return self.bar.workspace() or "."
+
+    def _has_workspace(self) -> bool:
+        return bool(self.bar.workspace().strip())
+
+    def _refresh_controls_workspace(self) -> None:
+        self.pipeline.controls.set_workspace_empty(not self._has_workspace())
 
     def _refresh_status(self) -> None:
         cfg = config.load()
@@ -287,9 +296,13 @@ class MainWindow(QMainWindow):
     # -- pipeline dispatch (delegates to the controller) ---------------------
 
     def _on_scan(self) -> None:
+        if not self._has_workspace():
+            return
         self._controller.start_scan(self.bar.current_game(), self._workspace())
 
     def _on_process(self) -> None:
+        if not self._has_workspace():
+            return
         self._controller.start_process(
             self.bar.current_game(), self._workspace(),
             self.game_panel.sample_cap(),
@@ -302,11 +315,15 @@ class MainWindow(QMainWindow):
             self.pipeline.append_log("re-order: a job is already running.\n")
 
     def _on_rerun(self, stage: str) -> None:
+        if not self._has_workspace():
+            return
         self._controller.start_rerun(
             self.bar.current_game(), self._workspace(), stage,
             self.pipeline.setup_doctor.doctor.last_payload())
 
     def _on_escalate(self) -> None:
+        if not self._has_workspace():
+            return
         self._controller.start_escalate(
             self.bar.current_game(), self._workspace(),
             self.pipeline.setup_doctor.doctor.last_payload())
