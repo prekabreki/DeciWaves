@@ -8,7 +8,6 @@ import pytest
 
 pytest.importorskip("PySide6")
 from deciwaves.gui.doctor_model import (  # noqa: E402
-    SEV_ERROR,
     SEV_NEUTRAL,
     SEV_OK,
     SEV_WARN,
@@ -42,13 +41,13 @@ _DOCTOR_PAYLOAD = {
 
 # --- DoctorPanel -----------------------------------------------------------
 
-def test_doctor_panel_renders_a_row_per_check_with_severities(qtbot):
+def test_doctor_panel_shows_only_active_games_checks(qtbot):
     p = DoctorPanel()
     qtbot.addWidget(p)
     p.set_game("hzd")
     p.render_payload(_DOCTOR_PAYLOAD)
-    assert len(p.items()) == 4
-    assert p.severity_of("ds_install") == SEV_ERROR
+    # HZD shows hzd_package + always-relevant checks; ds_install is hidden.
+    assert len(p.items()) == 3
     assert p.severity_of("hzd_package") == SEV_NEUTRAL
     assert p.severity_of("asr_extra") == SEV_WARN       # promoted for HZD (spec §3)
     assert p.severity_of("cuda") == SEV_OK
