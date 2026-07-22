@@ -38,6 +38,7 @@ from typing import NamedTuple
 
 from deciwaves.cli import config
 from deciwaves.engine import tool_paths
+from deciwaves.engine.asr import cuda_available
 from deciwaves.games.hzd import profile as hzd_profile
 
 
@@ -245,10 +246,12 @@ def check_asr_extra() -> Check:
 
 def check_cuda() -> Check:
     try:
-        import torch
-        if torch.cuda.is_available():
+        if cuda_available():
+            import torch
             return Check("cuda", Availability.OK,
                          f"CUDA: available ({torch.cuda.get_device_name(0)})")
+        import torch
+        _ = torch.cuda  # module accessed successfully — just no devices
         return Check("cuda", Availability.UNAVAILABLE,
                      "CUDA: torch installed but no GPU visible (informational)")
     except ImportError:
