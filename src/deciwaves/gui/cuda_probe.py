@@ -20,6 +20,33 @@ def cuda_status(payload: dict | None) -> str:
     return ""
 
 
+def cuda_message(payload: dict | None) -> str:
+    """The ``message`` of doctor's ``cuda`` check, or ``""`` if absent."""
+    for c in (payload or {}).get("checks", []):
+        if c.get("name") == "cuda":
+            return c.get("message", "")
+    return ""
+
+
+def cuda_display_text(payload: dict | None) -> str:
+    """Human-readable GPU status line for the GUI, distinguishing all four
+    doctor cuda outcomes plus the no-doctor-yet case."""
+    status = cuda_status(payload)
+    if status == "ok":
+        return "GPU: CUDA ready"
+    if status == "":
+        return "GPU: unknown — run Doctor to check CUDA"
+
+    message = cuda_message(payload)
+    if "not installed" in message:
+        return "GPU: acceleration not installed — see ASR extra"
+    if "no GPU visible" in message:
+        return "GPU: no CUDA GPU visible"
+    if "import failed" in message:
+        return "GPU: torch import failed"
+    return "GPU: no CUDA GPU detected"
+
+
 def needs_gpu_warning(game: str, payload: dict | None) -> bool:
     """True when starting a GPU stage for HZD/FW without doctor confirming a CUDA GPU."""
     if game not in _GPU_GAMES:

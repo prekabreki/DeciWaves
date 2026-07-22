@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
 
 from deciwaves.gui.theme import ERROR, NEUTRAL, OK, WARN
 from deciwaves.gui.widgets import HelpIcon
-from deciwaves.gui.cuda_probe import cuda_status
+from deciwaves.gui.cuda_probe import cuda_display_text
 from deciwaves.gui.game_panel_model import (
     FW_TIERS_DEFAULT,
     FW_TIERS_HINT,
@@ -236,16 +236,13 @@ class GamePanel(QWidget):
             self._types_status.setStyleSheet(f"color: {ERROR};")
 
     def _refresh_gpu_status(self, payload: dict | None) -> None:
-        status = cuda_status(payload)
-        if status == "ok":
-            self._gpu_label.setText("GPU: CUDA ready")
+        text = cuda_display_text(payload)
+        self._gpu_label.setText(text)
+        if "CUDA ready" in text:
             self._gpu_label.setStyleSheet(f"color: {OK};")
-        elif status == "":
-            self._gpu_label.setText("GPU: unknown — run Doctor to check CUDA")
+        elif "unknown" in text:
             self._gpu_label.setStyleSheet(f"color: {NEUTRAL};")
         else:
-            self._gpu_label.setText(
-                "GPU: no CUDA GPU detected — this stage may take days on CPU")
             self._gpu_label.setStyleSheet(f"color: {WARN};")
 
     # --- picker intents (dialogs opened here; the shell does the work) ------
