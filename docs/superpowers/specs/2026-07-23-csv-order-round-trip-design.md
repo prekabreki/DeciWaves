@@ -43,7 +43,7 @@ that renders.
 existing `render-selection.csv` in the GUI namespace.
 
 ```
-Export order CSV  (exists today as "Export catalog CSV" → writes the story-order artifact)
+Export order CSV  (NEW button → writes the ordered render-input artifact, playlist.csv)
         │  user edits in a spreadsheet: drag rows to reorder, delete rows to drop
         ▼
 Import order CSV ──► validate + join each line_id, in the user's row order, against
@@ -84,9 +84,11 @@ on the base `[test]` install):
 Library displays the override.
 
 **`export.py`** (thin widget): new group **"Custom reel order (CSV round-trip)"** in
-the Export panel containing the regrouped export button, an import button, a revert
-button, the active-override status line, and the inline instructions label. Emits
-`import_order_requested(path)` and `revert_order_requested`.
+the Export panel containing a NEW "Export order CSV" button (writes
+`render_input_source`), an import button, a revert button, the active-override status
+line, and the inline instructions label. The existing "Export catalog CSV" button is
+untouched. Emits `export_order_requested(path)`, `import_order_requested(path)`, and
+`revert_order_requested`.
 
 **`shell.py`**: wires the two intents to the model, shows validation results (modal +
 log), and calls the existing `_refresh_library()` on success.
@@ -95,8 +97,10 @@ log), and calls the existing `_refresh_library()` on success.
 
 **Home:** the **Export panel** (Library tab), grouped under a heading **"Custom reel
 order (CSV round-trip)"**:
-- **"Export order CSV…"** — the existing catalog-export button, regrouped (it already
-  writes the ordered artifact).
+- **"Export order CSV…"** — NEW button; writes the ordered render-input artifact
+  (`render_input_source`, i.e. `playlist.csv` for DS) so the exported rows are already
+  in story order and every id re-imports cleanly. Distinct from the existing "Export
+  catalog CSV" (raw `catalog.csv`), which is left unchanged for its own use.
 - **"Import order CSV…"** — file dialog; on success writes the override and refreshes
   the Library.
 - **"Revert to auto order"** — enabled only when an override is active; deletes it.
