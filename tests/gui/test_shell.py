@@ -23,23 +23,23 @@ def test_game_change_updates_install_status(qtbot):
 
 def test_runner_output_appends_to_log(qtbot):
     w = MainWindow(); qtbot.addWidget(w)
-    w.runner.output.emit("hello-log\n")
+    w._controller.runner.output.emit("hello-log\n")
     assert "hello-log" in w.pipeline.log_text()
 
 
 def test_job_chip_reflects_running_then_idle(qtbot):
     w = MainWindow(); qtbot.addWidget(w)
-    w.runner.started.emit()
+    w._controller.runner.started.emit()
     assert w.bar._chip.text() != "idle"
-    w.runner.finished.emit(0)
+    w._controller.runner.finished.emit(0)
     assert w.bar._chip.text() == "idle"
 
 
 def test_pipeline_job_failure_shows_failed_chip_and_message(qtbot):
     w = MainWindow(); qtbot.addWidget(w)
-    w.runner.started.emit()
+    w._controller.runner.started.emit()
     assert w.bar._chip.text() != "idle"
-    w.runner.finished.emit(1)
+    w._controller.runner.finished.emit(1)
     assert w.bar._chip.text() == "failed"
     assert "failed (rc 1)" in w.pipeline.log_text()
 
@@ -57,19 +57,19 @@ def test_pipeline_log_console_is_collapsible(qtbot):
 
 def test_real_command_streams_into_log_console(qtbot):
     w = MainWindow(); qtbot.addWidget(w)
-    with qtbot.waitSignal(w.runner.finished, timeout=5000):
-        assert w.runner.start([sys.executable, "-c", "print('into-console', flush=True)"]) is True
+    with qtbot.waitSignal(w._controller.runner.finished, timeout=5000):
+        assert w._controller.runner.start([sys.executable, "-c", "print('into-console', flush=True)"]) is True
     assert "into-console" in w.pipeline.log_text()
     assert w.bar._chip.text() == "idle"                # chip reset when the job finishes
 
 
 def test_cancel_from_shell_stops_the_job_and_resets_chip(qtbot):
     w = MainWindow(); qtbot.addWidget(w)
-    w.runner.start([sys.executable, "-c", _SLOW])
+    w._controller.runner.start([sys.executable, "-c", _SLOW])
     assert w.bar._chip.text() != "idle"                # running: chip shows the job
-    with qtbot.waitSignal(w.runner.finished, timeout=5000):
-        w.runner.cancel()
-    assert w.runner.is_running is False
+    with qtbot.waitSignal(w._controller.runner.finished, timeout=5000):
+        w._controller.runner.cancel()
+    assert w._controller.runner.is_running is False
     assert w.bar._chip.text() == "idle"
 
 

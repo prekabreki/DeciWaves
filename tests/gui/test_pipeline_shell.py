@@ -18,7 +18,7 @@ _CUDA_OK = {"ok": True, "checks": [
 
 def _capture_jobs(w):
     calls = []
-    w.runner.start = lambda argv, cwd=None: calls.append(argv) or True
+    w._controller.runner.start = lambda argv, cwd=None: calls.append(argv) or True
     return calls
 
 
@@ -157,19 +157,19 @@ def test_cancel_button_terminates_job_and_resets_ui(qtbot):
     w.bar.select_game("ds")
     w.pipeline.controls.set_game_has_gpu(False)   # DS: no GPU -> bind hidden
     assert not w.pipeline.controls.cancel_shown()
-    assert w.runner.start([sys.executable, "-c", "import time; time.sleep(30)"])
-    assert w.runner.is_running
+    assert w._controller.runner.start([sys.executable, "-c", "import time; time.sleep(30)"])
+    assert w._controller.runner.is_running
     assert w.pipeline.controls.cancel_shown()
     assert not w.pipeline.controls._scan_btn.isEnabled()
-    with qtbot.waitSignal(w.runner.finished, timeout=5000):
+    with qtbot.waitSignal(w._controller.runner.finished, timeout=5000):
         w.pipeline.controls.cancel_requested.emit()
-    assert not w.runner.is_running
-    assert w.runner.was_cancelled is False   # reset by _on_finished
+    assert not w._controller.runner.is_running
+    assert w._controller.runner.was_cancelled is False   # reset by _on_finished
     assert not w.pipeline.controls.cancel_shown()
     assert w.pipeline.controls._scan_btn.isEnabled()
     # a second job can start after cancel (one-job-global restored)
-    assert w.runner.start([sys.executable, "-c", "print('ok')"])
-    with qtbot.waitSignal(w.runner.finished, timeout=5000):
+    assert w._controller.runner.start([sys.executable, "-c", "print('ok')"])
+    with qtbot.waitSignal(w._controller.runner.finished, timeout=5000):
         pass
 
 

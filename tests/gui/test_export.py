@@ -286,7 +286,7 @@ def test_shell_export_mp3_writes_selection_and_starts_runner(qtbot, tmp_path, mo
     w = _mainwindow(qtbot, tmp_path, "ds")
     monkeypatch.setattr("deciwaves.gui.shell.config.load", lambda: {"ds_install": r"C:\DS"})
     calls = []
-    w.runner.start = lambda argv, cwd=None: calls.append(argv) or True
+    w._controller.runner.start = lambda argv, cwd=None: calls.append(argv) or True
 
     w.library.export.export_mp3_requested.emit(96)
 
@@ -294,7 +294,7 @@ def test_shell_export_mp3_writes_selection_and_starts_runner(qtbot, tmp_path, mo
     argv = calls[0]
     assert "render" in argv and "--playlist" in argv and "--bitrate" in argv
     assert argv[argv.index("--bitrate") + 1] == "96"
-    assert w._job_kind == "export"
+    assert w._controller._job_kind == "export"
     # the filtered selection was actually written
     assert os.path.isfile(os.path.join(ws, "out", "ds", "gui", "render-selection.csv"))
 
@@ -306,7 +306,7 @@ def test_shell_export_mp3_surfaces_error_without_starting(qtbot, tmp_path, monke
     w = _mainwindow(qtbot, tmp_path, "ds")
     monkeypatch.setattr("deciwaves.gui.shell.config.load", lambda: {})
     calls = []
-    w.runner.start = lambda argv, cwd=None: calls.append(argv) or True
+    w._controller.runner.start = lambda argv, cwd=None: calls.append(argv) or True
     w.library.export.export_mp3_requested.emit(128)
     assert calls == []
     assert "not configured" in w.pipeline.log_text().lower()
@@ -314,15 +314,15 @@ def test_shell_export_mp3_surfaces_error_without_starting(qtbot, tmp_path, monke
 
 def test_shell_export_finish_reports_success_vs_failure(qtbot, tmp_path):
     w = _mainwindow(qtbot, tmp_path, "ds")
-    w._job_kind = "export"
-    w._job_game = "ds"
-    w._on_job_finished(0)
+    w._controller._job_kind = "export"
+    w._controller._job_game = "ds"
+    w._controller._on_job_finished(0)
     assert "export" in w.pipeline.log_text().lower()
     log_after_success = w.pipeline.log_text()
 
-    w._job_kind = "export"
-    w._job_game = "ds"
-    w._on_job_finished(1)
+    w._controller._job_kind = "export"
+    w._controller._job_game = "ds"
+    w._controller._on_job_finished(1)
     new = w.pipeline.log_text()[len(log_after_success):]
     assert "fail" in new.lower() or "error" in new.lower()
 
@@ -361,10 +361,10 @@ def test_shell_dump_starts_batch_and_excludes_pipeline(qtbot, tmp_path, monkeypa
 
     def _fake_start(resolver, rows, dest):
         started.append((rows, dest))
-        w.dump._running = True             # mirror DumpRunner.start flipping is_running
+        w._controller.dump._running = True             # mirror DumpRunner.start flipping is_running
         return True
 
-    monkeypatch.setattr(w.dump, "start", _fake_start)
+    monkeypatch.setattr(w._controller.dump, "start", _fake_start)
     w.library.export.dump_wav_requested.emit(str(tmp_path / "dumpdir"))
     assert started, "expected the dump batch to start on the thread pool"
     # While the dump runs the pipeline is mutually excluded (spec §5.3): both the
@@ -377,9 +377,9 @@ def test_shell_dump_running_blocks_pipeline_start(qtbot, tmp_path):
     # A live dump must refuse a pipeline start even if the handler is invoked directly
     # (e.g. via the strip's context menu) -- runner.start must never be reached.
     w = _mainwindow(qtbot, tmp_path, "ds")
-    w.dump._running = True                  # a dump batch is live (is_running -> True)
+    w._controller.dump._running = True                  # a dump batch is live (is_running -> True)
     calls = []
-    w.runner.start = lambda argv, cwd=None: calls.append(argv) or True
+    w._controller.runner.start = lambda argv, cwd=None: calls.append(argv) or True
     w._on_scan()
     w._on_rerun("order")
     assert calls == [], "a pipeline start must be refused while a dump is running"
@@ -390,22 +390,22 @@ def test_shell_dump_running_blocks_export_mp3(qtbot, tmp_path, monkeypatch):
     _make_ds_playlist(ws)
     w = _mainwindow(qtbot, tmp_path, "ds")
     monkeypatch.setattr("deciwaves.gui.shell.config.load", lambda: {"ds_install": r"C:\DS"})
-    w.dump._running = True                  # a dump batch is live
+    w._controller.dump._running = True                  # a dump batch is live
     calls = []
-    w.runner.start = lambda argv, cwd=None: calls.append(argv) or True
+    w._controller.runner.start = lambda argv, cwd=None: calls.append(argv) or True
     w.library.export.export_mp3_requested.emit(128)
     assert calls == [], "export MP3 must be refused while a dump is running"
 
 
 def test_shell_dump_disables_then_reenables_pipeline_and_strip(qtbot, tmp_path):
     w = _mainwindow(qtbot, tmp_path, "ds")
-    w.dump._running = True
+    w._controller.dump._running = True
     w._sync_running()
     assert w.pipeline.controls._scan_btn.isEnabled() is False
     assert w.pipeline.strip.rerun_enabled() is False
     # DumpRunner clears is_running before emitting finished; simulate the same order.
-    w.dump._running = False
-    w._on_dump_finished(2, 0)
+    w._controller.dump._running = False
+    w._controller._on_dump_finished(2, 0)
     assert w.pipeline.controls._scan_btn.isEnabled() is True
     assert w.pipeline.strip.rerun_enabled() is True
 

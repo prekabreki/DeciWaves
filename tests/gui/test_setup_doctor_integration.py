@@ -34,7 +34,7 @@ def test_log_console_still_present_after_adding_setup_doctor(qtbot):
     # the skeleton's collapsible log console (#67) must survive the new section
     w = MainWindow()
     qtbot.addWidget(w)
-    w.runner.output.emit("still-here\n")
+    w._controller.runner.output.emit("still-here\n")
     assert "still-here" in w.pipeline.log_text()
 
 
@@ -76,7 +76,7 @@ def test_pipeline_busy_disables_setup_buttons(qtbot, monkeypatch):
     w = MainWindow()
     qtbot.addWidget(w)
     setup = w.pipeline.setup_doctor.setup
-    monkeypatch.setattr(type(w.runner), "is_running", property(lambda _self: True))
+    monkeypatch.setattr(type(w._controller.runner), "is_running", property(lambda _self: True))
     w._sync_running()
     assert setup._run_btn.isEnabled() is False
     assert setup._redownload_btn.isEnabled() is False
@@ -87,10 +87,10 @@ def test_pipeline_idle_re_enables_setup_buttons(qtbot, monkeypatch):
     w = MainWindow()
     qtbot.addWidget(w)
     setup = w.pipeline.setup_doctor.setup
-    monkeypatch.setattr(type(w.runner), "is_running", property(lambda _self: True))
+    monkeypatch.setattr(type(w._controller.runner), "is_running", property(lambda _self: True))
     w._sync_running()
     assert setup._run_btn.isEnabled() is False
-    monkeypatch.setattr(type(w.runner), "is_running", property(lambda _self: False))
+    monkeypatch.setattr(type(w._controller.runner), "is_running", property(lambda _self: False))
     w._sync_running()
     assert setup._run_btn.isEnabled() is True
     assert setup._redownload_btn.isEnabled() is True
@@ -109,6 +109,6 @@ def test_busy_setup_blocks_pipeline_and_strip(qtbot):
 def test_busy_pipeline_blocks_export(qtbot, monkeypatch):
     w = MainWindow()
     qtbot.addWidget(w)
-    monkeypatch.setattr(type(w.runner), "is_running", property(lambda _self: True))
+    monkeypatch.setattr(type(w._controller.runner), "is_running", property(lambda _self: True))
     w._sync_running()
     assert w.library.export._mp3_btn.isEnabled() is False
