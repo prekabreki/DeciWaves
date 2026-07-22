@@ -332,6 +332,67 @@ def assemble_reels(spine, ep_secs, durations, *, out_dir, cache_dir, stem, colum
     return n_files
 
 
+def finish_render(spine, empty_input, errors_path,
+                    msg_empty_input, msg_empty_selection,
+                    msg_nothing_decoded, msg_zero_files,
+                    durations, ep_secs, out_dir, cache_dir, stem, columns, budget, gap_key,
+                    _assemble=assemble_reels,
+                    **assemble_kwargs):
+    """Shared exit-code contract tail for HZD and FW render ``main()`` functions.
+
+    Consolidates the empty-state / exit-code bookkeeping that was verbatim-duplicated
+    across ``games/hzd/render.py`` and ``games/fw/render.py`` (#231). Every branch
+    preserves the precise rc contract ``run`` / the GUI stage strip trust (#64/#85):
+
+    * **Empty spine** (``not spine``): drops a stale *errors_path* from a prior run
+      (decode/measure — its only writer — never runs on either branch below, so a
+      leftover log would otherwise be misread as this run's failures). Then:
+
+        * **Empty INPUT** (``empty_input`` is True, meaning a header-only manifest):
+          rc 1, loud — an upstream stage produced nothing, not a deliberate selection.
+        * **Empty SELECTION** (rows present, none bound/in-scope): rc 0, no-op — a
+          legitimate narrowing (e.g. ``--spine-only`` with only side scenes bound, or
+          ``--tiers D`` against the standard full-reel manifest).
+
+    * **Nothing decoded** (``not durations``): rc 1 — ``spine`` is known non-empty
+      (the no-op case returned above), so zero successful decodes/measurements is a
+      decode-toolchain failure, not a zero-clip "success" (#64).
+
+    * **Zero reel files** (``assemble_reels`` returns 0): rc 1 — defensive backstop
+      (#64). With the ``not durations`` guard above a non-empty ``durations`` always
+      packs ≥1 reel, so this is unreachable today; kept as a cheap honest-exit-code
+      guard in case ``assemble_reels``' contract ever changes, since ``run``/the
+      GUI trust this stage's rc.
+
+    Game-specific message strings (``msg_*``) are supplied by each caller; the control
+    flow is identical. ``_assemble`` defaults to this module's :func:`assemble_reels`;
+    callers that need testability pass their own import of it (so a monkeypatch on
+    the caller's namespace intercepts the call). ``**assemble_kwargs`` is forwarded
+    to ``_assemble`` (e.g. ``concat_fn``, ``silence_fn``, ``concat_kwargs``).
+    """
+    if not spine:
+        try:
+            os.remove(errors_path)
+        except OSError:
+            pass
+        if empty_input:
+            print(msg_empty_input)
+            return 1
+        print(msg_empty_selection)
+        return 0
+    if not durations:
+        print(msg_nothing_decoded)
+        return 1
+    n_files = _assemble(
+        spine, ep_secs, durations, out_dir=out_dir, cache_dir=cache_dir,
+        stem=stem, columns=columns, budget=budget, gap_key=gap_key,
+        **assemble_kwargs)
+    if n_files == 0:
+        print(msg_zero_files)
+        return 1
+    return 0
+
+
 def main(argv=None):
     import argparse
     ap = argparse.ArgumentParser(description="Render Phase D story audio")
@@ -430,6 +491,14 @@ def main(argv=None):
 
     n_decoded = len(decoded)
     print(f"render: decoded {n_decoded} clips, {n_failed} failed (see {args.errors})")
+    # DS engine.render main() does NOT use finish_render (issue #231): its
+    # pipeline — PackIndex, speech-trim/keepspan pre-pass, no manifest/tier
+    # system — has no empty-input-vs-empty-selection branch the helper
+    # expects. The zero-decode guard below is the same contract (#64),
+    # expressed as n_attempted>0 rather than the empty-input/manifest-rows
+    # check that drives the helper's branches. Contorting DS to fit the
+    # shared helper would couple unrelated concerns; the per-game callers
+    # (hzd, fw) that DO share the exact empty-state contract use it instead.
     if n_decoded == 0 and n_attempted > 0:
         print(f"render: ERROR - no audio could be decoded out of {n_attempted} "
               f"segment(s) attempted. See {args.errors} for the per-clip failures. "

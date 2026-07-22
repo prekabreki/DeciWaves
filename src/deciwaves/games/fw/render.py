@@ -21,7 +21,7 @@ import subprocess
 from deciwaves.engine.catalog_io import read_csv_rows, CsvFormatError
 from deciwaves.engine.render import (
     SR, DEFAULT_BITRATE_KBPS, accumulate_episode_seconds, assemble_reels,
-    budget_seconds, format_ts, ReelColumns,
+    budget_seconds, finish_render, format_ts, ReelColumns,
 )
 
 # Default --manifest: the full-reel stage (story_full.py)'s own default --out.
@@ -158,82 +158,57 @@ def main(argv=None):
     spine = build_spine(manifest_rows, bound_tiers=tiers)
     print(f"FW reel ({a.stem}): {len(spine)} lines across "
           f"{len({s.episode for s in spine})} episodes")
-    if not spine:
-        # Checked HERE, before measure/assemble side effects (cache writes,
-        # pack read). Drop a stale render-errors.log from a PRIOR run: measure
-        # (its only writer, which rewrites it each run) never runs on either
-        # branch below, so a leftover log would otherwise be misread as this
-        # run's failures.
-        try:
-            os.remove(a.errors)
-        except OSError:
-            pass
-        if not manifest_rows:
-            # Empty INPUT: a header-only manifest means an upstream stage
-            # produced nothing -- a broken/empty pipeline, not a selection.
-            # Fail LOUD (issue #85) so `fw run`/the GUI stage strip can't show
-            # render green with zero audio end-to-end -- the empty-input
-            # sub-case of the partial-rip-looks-complete failure #64/#63/#81
-            # exist to kill.
-            print(f"render: ERROR - {a.manifest} has no rows -- upstream "
-                  f"produced no lines to render. Re-run `deciwaves fw "
-                  f"full-reel`; no reels written to {a.out_dir}.")
-            return 1
-        # Empty SELECTION: rows present, none matched the tier filter. A
-        # legitimate NO-OP, not a failure -- DS's empty-playlist precedent
-        # (review of #64: `--tiers D` is endorsed by the flag's help yet never
-        # matches the standard full-reel manifest, DLC ships via
-        # games/fw/dlc.py's own manifest; failing would make a deliberate no-op
-        # indistinguishable from a broken pipeline).
-        print(f"render: nothing to render: none of the {len(manifest_rows)} "
-              f"rows in {a.manifest} match --tiers {a.tiers} -- no reels "
-              f"written to {a.out_dir}.")
-        return 0
 
-    os.makedirs(a.out_dir, exist_ok=True)
-
-    # measure each existing clip once; accumulate per-episode duration (incl. gaps)
-    def dur_of(s):
-        wav = os.path.join(a.audio_root, s.wav)
-        with wave.open(wav) as w:
-            dur = w.getnframes() / float(w.getframerate())
-        return wav, dur
-
-    durations, ep_secs, n_failed = accumulate_episode_seconds(
-        spine, dur_of, gap_key=lambda s: s.quest, err_key=lambda s: s.wav,
-        errors_path=a.errors, catch=(OSError, wave.Error))
-    if n_failed:
-        print(f"measure: {n_failed} clip(s) failed (see {a.errors})")
-    # Empty-render guard (issue #64), same contract as engine/render.py's DS
-    # guard: a spine where NOTHING could be measured (typically: the manifest's
-    # wav paths don't exist on disk) is a failure, not a zero-clip "success".
-    # (spine is known non-empty here -- the no-op case returned 0 above.)
-    if not durations:
-        print(f"render: ERROR - none of the {len(spine)} manifest clips could "
-              f"be measured (see {a.errors}). Are the "
-              f"manifest's wav paths present under --audio-root "
-              f"({a.audio_root})? Run `deciwaves fw extract` first if this "
-              f"workspace has no decoded audio yet.")
-        return 1
+    if spine:
+        os.makedirs(a.out_dir, exist_ok=True)
+        def dur_of(s):
+            wav = os.path.join(a.audio_root, s.wav)
+            with wave.open(wav) as w:
+                dur = w.getnframes() / float(w.getframerate())
+            return wav, dur
+        durations, ep_secs, n_failed = accumulate_episode_seconds(
+            spine, dur_of, gap_key=lambda s: s.quest, err_key=lambda s: s.wav,
+            errors_path=a.errors, catch=(OSError, wave.Error))
+        if n_failed:
+            print(f"measure: {n_failed} clip(s) failed (see {a.errors})")
+    else:
+        durations, ep_secs, n_failed = {}, {}, 0
 
     columns = ReelColumns(
         header=["timestamp", "quest", "speaker", "subtitle", "line_id"],
         row_of=lambda s, t: [format_ts(t), s.quest, s.speaker, s.subtitle, s.line_id])
-    n_files = assemble_reels(
-        spine, ep_secs, durations, out_dir=a.out_dir, cache_dir=a.cache, stem=a.stem,
-        columns=columns, budget=budget_seconds(target_mb=a.target_mb, kbps=a.bitrate), gap_key=lambda s: s.quest,
+
+    return finish_render(
+        spine, not manifest_rows, a.errors,
+        msg_empty_input=(
+            f"render: ERROR - {a.manifest} has no rows -- upstream "
+            f"produced no lines to render. Re-run `deciwaves fw "
+            f"full-reel`; no reels written to {a.out_dir}."
+        ),
+        msg_empty_selection=(
+            f"render: nothing to render: none of the {len(manifest_rows)} "
+            f"rows in {a.manifest} match --tiers {a.tiers} -- no reels "
+            f"written to {a.out_dir}."
+        ),
+        msg_nothing_decoded=(
+            f"render: ERROR - none of the {len(spine)} manifest clips could "
+            f"be measured (see {a.errors}). Are the "
+            f"manifest's wav paths present under --audio-root "
+            f"({a.audio_root})? Run `deciwaves fw extract` first if this "
+            f"workspace has no decoded audio yet."
+        ),
+        msg_zero_files=(
+            f"render: ERROR - 0 reel files written to {a.out_dir} from "
+            f"{len(spine)} spine lines -- see {a.errors}."
+        ),
+        durations=durations, ep_secs=ep_secs,
+        out_dir=a.out_dir, cache_dir=a.cache, stem=a.stem, columns=columns,
+        budget=budget_seconds(target_mb=a.target_mb, kbps=a.bitrate),
+        gap_key=lambda s: s.quest,
+        _assemble=assemble_reels,
         concat_fn=_concat_uniform if a.uniform_mono else None,
         silence_fn=mono_silence_wav if a.uniform_mono else None,
         concat_kwargs={"kbps": a.bitrate})
-    if n_files == 0:
-        # Defensive backstop (issue #64): with the `not durations` guard above,
-        # a non-empty durations always packs >=1 reel, so this is unreachable
-        # today -- kept as a cheap honest-exit-code guard in case assemble_reels'
-        # contract ever changes, since `run`/the GUI trust this stage's rc.
-        print(f"render: ERROR - 0 reel files written to {a.out_dir} from "
-              f"{len(spine)} spine lines -- see {a.errors}.")
-        return 1
-    return 0
 
 
 if __name__ == "__main__":

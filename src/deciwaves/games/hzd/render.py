@@ -27,8 +27,8 @@ from dataclasses import dataclass
 
 from deciwaves.engine.catalog_io import read_csv_rows
 from deciwaves.engine.render import (
-    accumulate_episode_seconds, assemble_reels, budget_seconds, format_ts, ReelColumns,
-    DEFAULT_BITRATE_KBPS,
+    accumulate_episode_seconds, assemble_reels, budget_seconds, finish_render,
+    format_ts, ReelColumns, DEFAULT_BITRATE_KBPS,
 )
 from deciwaves.engine.parallel import KeyedLocks, default_jobs
 from deciwaves.engine.pack.hzd_package import HzdPackage
@@ -231,78 +231,50 @@ def main(argv=None):
     spine = build_spine(manifest_rows, catalog, clip_index, episode_map=episode_map)
     kind = "main-quest spine" if a.spine_only else "full story reel"
     print(f"{kind}: {len(spine)} lines across {len({s.episode for s in spine})} scenes")
-    if not spine:
-        # Checked here, before the pack is opened. Drop a stale
-        # render-errors.log from a PRIOR run: decode (its only writer, which
-        # rewrites it each run) never runs on either branch below, so a
-        # leftover log would otherwise be misread as this run's failures.
-        # (The --package pre-check above still runs first, so a legit-empty
-        # selection plus an invalid --package returns the package error, not
-        # this no-op -- a documented asymmetry vs FW, issue #85; an invalid
-        # package genuinely can't render, so rc 1 there is defensible.)
-        try:
-            os.remove(a.errors)
-        except OSError:
-            pass
-        if not manifest_rows:
-            # Empty INPUT: a header-only manifest means an upstream stage (bind)
-            # produced nothing -- a broken/empty pipeline, not a selection. Fail
-            # LOUD (issue #85) so `hzd run`/the GUI stage strip can't show
-            # render green with zero audio end-to-end -- the empty-input
-            # sub-case of the partial-rip-looks-complete failure #64/#63/#81
-            # exist to kill.
-            print(f"render: ERROR - {a.manifest} has no rows -- upstream "
-                  f"produced no lines to render. Re-run `deciwaves hzd bind`; "
-                  f"no reels written to {a.out_dir}.")
-            return 1
-        # Empty SELECTION: rows present, none bound/in-scope. A legitimate
-        # NO-OP, not a failure -- DS's empty-playlist precedent (review of #64:
-        # `--spine-only` against a bind that so far bound only side/DLC scenes
-        # legitimately yields zero main-quest rows; failing would give that
-        # deliberate narrowing the same rc as a broken decode toolchain).
-        what = ("bound main-quest rows (--spine-only)" if a.spine_only
-                else "bound story rows")
-        print(f"render: nothing to render: {a.manifest} has no {what} -- "
-              f"no reels written to {a.out_dir}.")
-        return 0
-
-    os.makedirs(a.out_dir, exist_ok=True)
-    os.makedirs(a.cache, exist_ok=True)
-
-    pkg = HzdPackage(a.package)
-    dsar = pkg.dsar_for(ARCHIVE)
-
-    decoded, ep_secs, skipped = decode_spine_clips(spine, dsar, a.cache, a.errors, jobs=a.jobs)
-    if skipped:
-        print(f"decode: {skipped} clips skipped (see {a.errors})")
-    # Empty-render guard (issue #64), same contract as engine/render.py's DS
-    # guard: a spine where NOTHING decoded is a failure, not a zero-clip
-    # "success" -- exit code is what `hzd run` (and the GUI) trusts.
-    # (spine is known non-empty here -- the no-op case returned 0 above.)
-    if not decoded:
-        print(f"render: ERROR - none of the {len(spine)} spine clips could be "
-              f"decoded (see {a.errors} for the per-clip "
-              f"reasons). Try `deciwaves doctor` to check the decode tools "
-              f"(VGAudioCli, ffmpeg).")
-        return 1
+    if spine:
+        os.makedirs(a.out_dir, exist_ok=True)
+        os.makedirs(a.cache, exist_ok=True)
+        pkg = HzdPackage(a.package)
+        dsar = pkg.dsar_for(ARCHIVE)
+        decoded, ep_secs, skipped = decode_spine_clips(spine, dsar, a.cache, a.errors, jobs=a.jobs)
+        if skipped:
+            print(f"decode: {skipped} clips skipped (see {a.errors})")
+    else:
+        decoded, ep_secs, skipped = {}, {}, 0
 
     stem = "hzd_mainquest" if a.spine_only else "hzd_story_reel"
     columns = ReelColumns(
         header=["timestamp", "scene", "speaker", "subtitle", "line_id"],
         row_of=lambda s, t: [format_ts(t), s.scene, s.speaker, s.subtitle, s.line_id])
-    n_files = assemble_reels(
-        spine, ep_secs, decoded, out_dir=a.out_dir, cache_dir=a.cache, stem=stem,
-        columns=columns, budget=budget_seconds(target_mb=a.target_mb, kbps=a.bitrate), gap_key=lambda s: s.scene,
-        concat_kwargs={"kbps": a.bitrate})
-    if n_files == 0:
-        # Defensive backstop (issue #64): with the `not decoded` guard above,
-        # a non-empty decoded always packs >=1 reel, so this is unreachable
-        # today -- kept as a cheap honest-exit-code guard in case assemble_reels'
-        # contract ever changes, since `run`/the GUI trust this stage's rc.
-        print(f"render: ERROR - 0 reel files written to {a.out_dir} from "
-              f"{len(spine)} spine lines -- see {a.errors}.")
-        return 1
-    return 0
+
+    what = ("bound main-quest rows (--spine-only)" if a.spine_only
+            else "bound story rows")
+    return finish_render(
+        spine, not manifest_rows, a.errors,
+        msg_empty_input=(
+            f"render: ERROR - {a.manifest} has no rows -- upstream "
+            f"produced no lines to render. Re-run `deciwaves hzd bind`; "
+            f"no reels written to {a.out_dir}."
+        ),
+        msg_empty_selection=(
+            f"render: nothing to render: {a.manifest} has no {what} -- "
+            f"no reels written to {a.out_dir}."
+        ),
+        msg_nothing_decoded=(
+            f"render: ERROR - none of the {len(spine)} spine clips could be "
+            f"decoded (see {a.errors} for the per-clip "
+            f"reasons). Try `deciwaves doctor` to check the decode tools "
+            f"(VGAudioCli, ffmpeg)."
+        ),
+        msg_zero_files=(
+            f"render: ERROR - 0 reel files written to {a.out_dir} from "
+            f"{len(spine)} spine lines -- see {a.errors}."
+        ),
+        durations=decoded, ep_secs=ep_secs,
+        out_dir=a.out_dir, cache_dir=a.cache, stem=stem, columns=columns,
+        budget=budget_seconds(target_mb=a.target_mb, kbps=a.bitrate),
+        gap_key=lambda s: s.scene,
+        _assemble=assemble_reels, concat_kwargs={"kbps": a.bitrate})
 
 
 if __name__ == "__main__":
