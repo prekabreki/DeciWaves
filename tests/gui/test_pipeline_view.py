@@ -83,6 +83,7 @@ def test_controls_hide_bind_for_ds_show_for_gpu_games(qtbot):
 def test_controls_emit_scan_and_process(qtbot):
     c = PipelineControls()
     qtbot.addWidget(c)
+    c.set_workspace_empty(False)
     with qtbot.waitSignal(c.scan_requested):
         c._scan_btn.click()
     c.set_game_has_gpu(True)
@@ -93,6 +94,7 @@ def test_controls_emit_scan_and_process(qtbot):
 def test_controls_disable_while_running(qtbot):
     c = PipelineControls()
     qtbot.addWidget(c)
+    c.set_workspace_empty(False)
     c.set_running(True)
     assert not c._scan_btn.isEnabled()
     c.set_running(False)

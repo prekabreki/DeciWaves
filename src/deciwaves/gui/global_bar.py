@@ -65,6 +65,7 @@ class GlobalBar(QWidget):
 
     def set_workspace(self, path: str) -> None:
         self._workspace.setText(path)
+        self.workspace_changed.emit(path)
 
     def current_game_label(self) -> str:
         return self._combo.currentText()
