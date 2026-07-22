@@ -323,6 +323,9 @@ class GamePanel(QWidget):
             return {"tiers": self._tiers_edit.text().strip() or FW_TIERS_DEFAULT}
         return {}
 
+    def set_reorder_enabled(self, enabled: bool) -> None:
+        self._reorder_btn.setEnabled(enabled)
+
     def sample_cap(self) -> int | None:
         """The HZD first-bind ASR cap for ``process_argv``; ``None`` for non-HZD games (they
         have no cap to pass). 0 means uncapped."""

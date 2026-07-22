@@ -59,9 +59,10 @@ def test_setup_busy_disables_pipeline_controls(qtbot):
     assert w.pipeline.controls._bind_btn.isEnabled() is False
 
 
-def test_setup_idle_re_enables_pipeline_controls(qtbot):
+def test_setup_idle_re_enables_pipeline_controls(qtbot, tmp_path):
     w = MainWindow()
     qtbot.addWidget(w)
+    w.bar.set_workspace(str(tmp_path))
     setup = w.pipeline.setup_doctor.setup
     setup._busy = True
     setup.busy_changed.emit(True)

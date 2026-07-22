@@ -150,10 +150,11 @@ def test_panels_refresh_on_game_change(qtbot, tmp_path):
     assert states["catalog"].done
 
 
-def test_cancel_button_terminates_job_and_resets_ui(qtbot):
+def test_cancel_button_terminates_job_and_resets_ui(qtbot, tmp_path):
     import sys
     w = MainWindow()
     qtbot.addWidget(w)
+    w.bar.set_workspace(str(tmp_path))
     w.bar.select_game("ds")
     w.pipeline.controls.set_game_has_gpu(False)   # DS: no GPU -> bind hidden
     assert not w.pipeline.controls.cancel_shown()
@@ -180,3 +181,32 @@ def test_ds_hides_bind_hzd_shows_it(qtbot):
     assert w.pipeline.controls.bind_shown() is False
     w.bar.select_game("hzd")
     assert w.pipeline.controls.bind_shown() is True
+
+
+def test_scan_bind_disabled_when_no_workspace(qtbot):
+    w = MainWindow()
+    qtbot.addWidget(w)
+    w.bar.select_game("hzd")
+    assert not w.pipeline.controls._scan_btn.isEnabled()
+    assert not w.pipeline.controls._bind_btn.isEnabled()
+
+
+def test_scan_bind_enabled_when_workspace_set(qtbot, tmp_path):
+    w = MainWindow()
+    qtbot.addWidget(w)
+    w.bar.select_game("hzd")
+    w.bar.set_workspace(str(tmp_path))
+    assert w.pipeline.controls._scan_btn.isEnabled()
+    assert w.pipeline.controls._bind_btn.isEnabled()
+
+
+def test_on_scan_skipped_when_no_workspace(qtbot, monkeypatch):
+    from deciwaves.gui.job_controller import JobController
+    w = MainWindow()
+    qtbot.addWidget(w)
+    w.bar.select_game("ds")
+    called = []
+    monkeypatch.setattr(JobController, "start_scan",
+                        lambda self, game, ws: called.append(game) or None)
+    w._on_scan()
+    assert called == []

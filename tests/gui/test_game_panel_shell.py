@@ -119,3 +119,30 @@ def test_fw_gamescript_pick_persists_via_setup_path(qtbot, tmp_path, monkeypatch
     picked = str(tmp_path / "gamescript.txt")
     w.game_panel.gamescript_picked.emit(picked)
     assert captured.get("fw_gamescript") == picked
+
+
+def test_reorder_btn_disabled_when_no_workspace(qtbot):
+    w = MainWindow()
+    qtbot.addWidget(w)
+    w.bar.select_game("ds")
+    assert not w.game_panel._reorder_btn.isEnabled()
+
+
+def test_reorder_btn_enabled_when_workspace_set(qtbot, tmp_path):
+    w = MainWindow()
+    qtbot.addWidget(w)
+    w.bar.select_game("ds")
+    w.bar.set_workspace(str(tmp_path))
+    assert w.game_panel._reorder_btn.isEnabled()
+
+
+def test_on_transcript_order_skipped_when_no_workspace(qtbot, monkeypatch):
+    from deciwaves.gui.job_controller import JobController
+    w = MainWindow()
+    qtbot.addWidget(w)
+    w.bar.select_game("ds")
+    called = []
+    monkeypatch.setattr(JobController, "start_transcript_order",
+                        lambda self, game, ws, path: called.append(path) or True)
+    w._on_transcript_order("some/path")
+    assert called == []
