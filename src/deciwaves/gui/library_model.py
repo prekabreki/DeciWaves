@@ -34,6 +34,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from deciwaves.engine.atomic_io import atomic_write
+from deciwaves.gui.export_model import imported_order_path
 
 # HZD story voice is 48 kHz mono ATRAC9 (games/hzd/sentence_fw.py comment); b_samples is the
 # decoded fact sample-count, so b_samples / 48000 is a duration proxy (exact value comes at
@@ -116,10 +117,11 @@ def load_lines(workspace: str, game: str) -> list[LineRow]:
 
 def _load_ds(workspace: str) -> list[LineRow]:
     root = _out_dir(workspace, "ds")
-    playlist = os.path.join(root, "playlist.csv")
-    if os.path.isfile(playlist):
+    override = imported_order_path(workspace, "ds")
+    src = override if os.path.isfile(override) else os.path.join(root, "playlist.csv")
+    if os.path.isfile(src):
         out = []
-        for i, r in enumerate(_read_csv(playlist)):
+        for i, r in enumerate(_read_csv(src)):
             sub = r.get("subtitle")
             out.append(LineRow(
                 line_id=r.get("line_id", ""), speaker=r.get("speaker") or None,
@@ -145,11 +147,12 @@ def _load_ds_catalog_shape(path: str) -> list[LineRow]:
 
 def _load_hzd(workspace: str) -> list[LineRow]:
     root = _out_dir(workspace, "hzd")
-    manifest = os.path.join(root, "asr-manifest.csv")
-    if os.path.isfile(manifest):
+    override = imported_order_path(workspace, "hzd")
+    src = override if os.path.isfile(override) else os.path.join(root, "asr-manifest.csv")
+    if os.path.isfile(src):
         b_samples = _hzd_b_samples_by_clip_row(os.path.join(root, "clip-index.csv"))
         out = []
-        for i, r in enumerate(_read_csv(manifest)):
+        for i, r in enumerate(_read_csv(src)):
             sub = r.get("subtitle_en")
             samples = b_samples.get(r.get("clip_row", ""))
             out.append(LineRow(
@@ -177,6 +180,11 @@ def _hzd_b_samples_by_clip_row(clip_index_path: str) -> dict[str, int]:
 
 def _load_fw(workspace: str) -> list[LineRow]:
     root = _out_dir(workspace, "fw")
+    # A manual-order override (out/fw/gui/imported-order.csv) is full-reel-shaped, so it reads
+    # through the same mapping and simply substitutes for the story-order choice.
+    override = imported_order_path(workspace, "fw")
+    if os.path.isfile(override):
+        return _load_fw_manifest(root, override)
     # Both manifests share fw/manifest.py MANIFEST_COLS, so one parse path serves both.
     # full-reel wins (gamescript-anchored story order); else subtitle-manifest-full, which a
     # user with types.json but no BYO gamescript still gets from subtitle-bind and which
