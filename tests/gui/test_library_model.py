@@ -12,6 +12,7 @@ import wave
 
 from conftest import catalog_row
 
+from deciwaves.gui.export_model import imported_order_path
 from deciwaves.gui.library_model import (
     _DURATION_CACHE,
     _cached_wav_duration,
@@ -208,6 +209,124 @@ def test_fw_full_reel_wins_over_subtitle_manifest(tmp_path):
                  "transcript": "x"}])
     rows = load_lines(ws, "fw")
     assert rows[0].speaker == "FromFullReel" and rows[0].subtitle == "full"
+
+
+# --- imported-order override -------------------------------------------------
+#
+# A manual-order override (out/<game>/gui/imported-order.csv) must be preferred over
+# each game's pipeline story-order artifact, with rows returned in override row order
+# (order_index = position in the override file).
+#
+# DS helper: a playlist-shaped CSV with the columns the _load_ds reader maps.
+DS_OVERRIDE_COLS = ["line_id", "subtitle", "speaker", "scene", "category", "stream_path"]
+
+
+def _write_ds_playlist(ws, ids):
+    p = os.path.join(ws, "out", "playlist.csv")
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=DS_OVERRIDE_COLS)
+        w.writeheader()
+        for i in ids:
+            w.writerow({"line_id": i, "subtitle": f"s{i}", "speaker": "",
+                        "scene": "", "category": "", "stream_path": f"{i}.stream"})
+
+
+def test_ds_load_prefers_override_in_its_order(tmp_path):
+    ws = str(tmp_path)
+    _write_ds_playlist(ws, ["a", "b", "c"])
+    ov = imported_order_path(ws, "ds")
+    os.makedirs(os.path.dirname(ov), exist_ok=True)
+    with open(ov, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=DS_OVERRIDE_COLS)
+        w.writeheader()
+        for i in ["c", "a"]:
+            w.writerow({"line_id": i, "subtitle": f"s{i}", "speaker": "",
+                        "scene": "", "category": "", "stream_path": f"{i}.stream"})
+    rows = load_lines(ws, "ds")
+    assert [r.line_id for r in rows] == ["c", "a"]
+    assert [r.order_index for r in rows] == [0, 1]
+
+
+def test_ds_load_falls_back_to_playlist_without_override(tmp_path):
+    ws = str(tmp_path)
+    _write_ds_playlist(ws, ["a", "b", "c"])
+    rows = load_lines(ws, "ds")
+    assert [r.line_id for r in rows] == ["a", "b", "c"]
+
+
+def test_hzd_load_prefers_override_in_its_order(tmp_path):
+    ws = str(tmp_path)
+    # Write the asr-manifest-shaped pipeline artifact (so the override has something to
+    # substitute).
+    asr_path = os.path.join(ws, "out", "hzd", "asr-manifest.csv")
+    HZD_MANIFEST = ["clip_row", "offset", "line_id", "speaker_name", "subtitle_en",
+                    "scene", "tier", "score", "transcript"]
+    os.makedirs(os.path.dirname(asr_path), exist_ok=True)
+    with open(asr_path, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=HZD_MANIFEST)
+        w.writeheader()
+        for i in ["x", "y", "z"]:
+            w.writerow({"clip_row": i, "offset": "0", "line_id": i,
+                        "speaker_name": "Aloy", "subtitle_en": f"s{i}",
+                        "scene": "mq", "tier": "S", "score": "1", "transcript": ""})
+    # Override (asr-manifest-shaped) — subset + reorder
+    ov = imported_order_path(ws, "hzd")
+    os.makedirs(os.path.dirname(ov), exist_ok=True)
+    with open(ov, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=HZD_MANIFEST)
+        w.writeheader()
+        for i in ["z", "x"]:
+            w.writerow({"clip_row": i, "offset": "0", "line_id": i,
+                        "speaker_name": "Aloy", "subtitle_en": f"s{i}",
+                        "scene": "mq", "tier": "S", "score": "1", "transcript": ""})
+    rows = load_lines(ws, "hzd")
+    assert [r.line_id for r in rows] == ["z", "x"]
+    assert rows[0].speaker == "Aloy"
+    assert rows[1].speaker == "Aloy"
+
+
+def test_fw_load_prefers_override_in_its_order(tmp_path):
+    ws = str(tmp_path)
+    # Write the full-reel manifest (pipeline story-order artifact).
+    fw_root = os.path.join(ws, "out", "fw")
+    FW_FULL = ["line_id", "wav", "speaker", "subtitle", "gamescript_index",
+               "quest", "tier", "score", "transcript"]
+    full_path = os.path.join(fw_root, "full-reel-manifest.csv")
+    os.makedirs(fw_root, exist_ok=True)
+    with open(full_path, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=FW_FULL)
+        w.writeheader()
+        for i in ["p", "q", "r"]:
+            w.writerow({"line_id": i, "wav": "", "speaker": "Varl",
+                        "subtitle": f"s{i}", "gamescript_index": "1", "quest": "MQ",
+                        "tier": "S", "score": "9", "transcript": ""})
+    # Override (full-reel-shaped) — subset + reorder
+    ov = imported_order_path(ws, "fw")
+    os.makedirs(os.path.dirname(ov), exist_ok=True)
+    with open(ov, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=FW_FULL)
+        w.writeheader()
+        for i in ["r", "p"]:
+            w.writerow({"line_id": i, "wav": "", "speaker": "Varl",
+                        "subtitle": f"s{i}", "gamescript_index": "1", "quest": "MQ",
+                        "tier": "S", "score": "9", "transcript": ""})
+    rows = load_lines(ws, "fw")
+    assert [r.line_id for r in rows] == ["r", "p"]
+    assert rows[0].speaker == "Varl"
+
+
+def test_fw_load_falls_back_without_override(tmp_path):
+    ws = str(tmp_path)
+    wav_rel = "audio/f1.wav"
+    _write_wav(os.path.join(ws, "out", "fw", wav_rel), seconds=2.0)
+    _write_csv(os.path.join(ws, "out", "fw", "full-reel-manifest.csv"), FW_FULL,
+               [{"line_id": "f1", "wav": wav_rel, "speaker": "Varl", "subtitle": "Hello",
+                 "gamescript_index": "1", "quest": "MQ", "tier": "S", "score": "9",
+                 "transcript": "x"}])
+    rows = load_lines(ws, "fw")
+    assert [r.line_id for r in rows] == ["f1"]
+    assert rows[0].speaker == "Varl"
 
 
 def test_fw_length_none_when_wav_absent(tmp_path):
