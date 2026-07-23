@@ -353,6 +353,8 @@ def distinct_speakers(rows: list[LineRow]) -> list[str]:
 def _value_key(key: str | None):
     """A function returning the comparable value for *key* on a row, or ``None`` when the
     row has no value for that column. Returns ``None`` (the function) for order-based keys."""
+    if key == "order_index":
+        return lambda r: r.order_index
     if key in ("line_id", "id", "name"):
         return lambda r: ((r.name or r.line_id) or "").lower() or None
     if key in ("length", "length_s"):

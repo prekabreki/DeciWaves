@@ -66,7 +66,7 @@ def test_refresh_populates_rows_and_status(qtbot, tmp_path):
     assert v.total_count() == 3
     assert v.visible_count() == 3
     assert v.checked_count() == 3
-    assert v.status_text() == "3 checked · 3 visible · 3 total"
+    assert v.status_text() == "3 checked · 3 visible · 3 total · story order"
     assert [r.line_id for r in v.rows()] == ["a", "b", "c"]
 
 
