@@ -92,6 +92,9 @@ class MainWindow(QMainWindow):
         self.library.export.dump_wav_requested.connect(self._on_dump_wav)
         self.library.export.export_catalog_requested.connect(self._on_export_catalog)
         self.library.export.dump_cancel_requested.connect(self._controller.dump.cancel)
+        self.library.export.export_order_requested.connect(self._on_export_order)
+        self.library.export.import_order_requested.connect(self._on_import_order)
+        self.library.export.revert_order_requested.connect(self._on_revert_order)
 
         # inline audio preview (#71, spec §6.5): the Library's ▷ / enter emits
         # preview_requested(line_id); play it through one app-wide player, off the UI thread.
@@ -437,6 +440,37 @@ class MainWindow(QMainWindow):
             return
         self._controller.start_catalog_copy(
             self.bar.current_game(), self._workspace(), dest)
+
+    def _on_export_order(self, dest: str) -> None:
+        if not self._has_workspace():
+            return
+        self._controller.start_order_copy(
+            self.bar.current_game(), self._workspace(), dest)
+
+    def _on_import_order(self, src: str) -> None:
+        if not self._has_workspace():
+            return
+        from PySide6.QtWidgets import QMessageBox
+
+        from deciwaves.gui.export_model import import_order
+        result = import_order(self._workspace(), self.bar.current_game(), src)
+        if not result.ok:
+            self.pipeline.append_log(
+                "import order failed:\n  " + "\n  ".join(result.errors) + "\n")
+            QMessageBox.warning(self, "Import order", "\n".join(result.errors))
+            return
+        self.pipeline.append_log(
+            f"import order: {result.count} line(s) -> your custom order is now active. "
+            "Click Export MP3 to render in this order.\n")
+        self._refresh_library()
+
+    def _on_revert_order(self) -> None:
+        if not self._has_workspace():
+            return
+        from deciwaves.gui.export_model import revert_imported_order
+        revert_imported_order(self._workspace(), self.bar.current_game())
+        self.pipeline.append_log("reverted to automatic story order.\n")
+        self._refresh_library()
 
     # --- session persistence ------------------------------------------------
 

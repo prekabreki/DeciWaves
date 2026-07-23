@@ -255,6 +255,8 @@ class LibraryView(QWidget):
         self._checked_count = 0
         self._can_export_mp3 = False
         self._has_catalog = False
+        self._order_active = False
+        self._order_count = 0
         self._duration_generation = 0
         self._duration_signaller = _DurationSignaller()
         self._duration_signaller.finished.connect(self._on_durations_ready)
@@ -407,6 +409,9 @@ class LibraryView(QWidget):
         self._unavailable_tooltip = preview_unavailable_tooltip(game, bind_done=self._bind_done)
         self._can_export_mp3 = can_export_mp3(workspace, game)
         self._has_catalog = catalog_source_path(workspace, game) is not None
+        from deciwaves.gui.export_model import has_imported_order
+        self._order_active = has_imported_order(workspace, game) if game else False
+        self._order_count = len(self._rows) if self._order_active else 0
         self._undo.clear()
 
         # Bump the generation so any still-in-flight duration task discards itself on finish.
@@ -673,8 +678,8 @@ class LibraryView(QWidget):
             return
         self.export.set_context(
             self._game, self._workspace, self.checked_count(),
-            self._can_export_mp3,
-            self._has_catalog)
+            self._can_export_mp3, self._has_catalog,
+            order_active=self._order_active, order_count=self._order_count)
 
     def _update_status(self) -> None:
         self._status.setText(self.status_text())
