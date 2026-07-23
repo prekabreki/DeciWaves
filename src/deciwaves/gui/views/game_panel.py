@@ -131,19 +131,35 @@ class GamePanel(QWidget):
 
         # --- DS transcript picker + re-order affordance (transient, NOT persisted) ---
         self._transcript_edit = QLineEdit()
-        self._transcript_edit.setPlaceholderText("Narrative transcript (BYO, optional)")
+        self._transcript_edit.setPlaceholderText(
+            'Narrative transcript — plain text, "Speaker: text" per line (BYO, optional)')
         self._transcript_edit.setToolTip("Path to a narrative transcript file for story ordering")
         self._transcript_browse = QPushButton("Browse…")
         self._transcript_browse.setToolTip("Browse for a narrative transcript file")
         self._reorder_btn = QPushButton("Re-order with transcript")
         self._reorder_btn.setToolTip("Re-order episodes using the selected transcript")
-        transcript_box = self._wrap(self._row(
+        # Inline help below the field (NOT behind a HelpIcon tooltip) -- same pattern
+        # as the FW types.json help above, so a first-time user sees WHY this control
+        # is here, that it's optional, and the exact file format without hunting for a
+        # hover. Copy tracks docs/BYO.md's "Death Stranding: narrative transcript".
+        self._transcript_help = QLabel(
+            "Optional. DS already produces story-ordered reels without this — a "
+            "transcript only sharpens cutscene ordering by anchoring scenes to their "
+            "real position in the story. Format: plain UTF-8 text, one spoken line per "
+            "line as “Speaker: text” (a bare subtitle line works too); a line "
+            "that is just a bracketed marker like “[Chapter 2]” is treated as "
+            "a scene break. BYO — DeciWaves never ships game text. See docs/BYO.md.")
+        self._transcript_help.setWordWrap(True)
+        self._transcript_help.setStyleSheet(f"color: {NEUTRAL};")
+        self._transcript_help.setTextInteractionFlags(
+            Qt.TextSelectableByMouse | Qt.TextSelectableByKeyboard)
+        transcript_box = QWidget()
+        _tr_v = QVBoxLayout(transcript_box)
+        _tr_v.setContentsMargins(0, 0, 0, 0)
+        _tr_v.addLayout(self._row(
             QLabel("Transcript:"), self._transcript_edit,
-            self._transcript_browse, self._reorder_btn,
-            HelpIcon(
-                "BYO (Bring Your Own): an optional narrative transcript you supply "
-                "to improve story ordering. Not required — the app never ships "
-                "game text.")))
+            self._transcript_browse, self._reorder_btn))
+        _tr_v.addWidget(self._transcript_help)  # full-width, wraps
 
         # --- FW required types.json picker ---
         self._types_edit = QLineEdit()

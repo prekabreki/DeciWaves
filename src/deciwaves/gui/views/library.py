@@ -119,6 +119,10 @@ class _TableModel(QAbstractTableModel):
         if role == Qt.CheckStateRole and col == self.COL_CHECK:
             checked = row.line_id not in self._view._unchecked
             return Qt.Checked if checked else Qt.Unchecked
+        # Center the ▶ glyph in its cell -- left-aligned (the Qt default) a lone glyph
+        # reads as a tree/list disclosure arrow rather than a play control (dogfooding).
+        if role == Qt.TextAlignmentRole and col == self.COL_PREVIEW:
+            return int(Qt.AlignCenter)
         if role == Qt.DisplayRole:
             if col == self.COL_PREVIEW:
                 return "▶"
@@ -265,7 +269,18 @@ class LibraryView(QWidget):
         self._speaker = QComboBox()
         self._speaker.addItem("all")
         self._hide_dupes = QCheckBox("Hide duplicates")
+        self._hide_dupes.setToolTip(
+            "Hides repeated lines within a scene — the 2nd+ time the exact same "
+            "subtitle recurs (e.g. a stock line reused). This mirrors the "
+            "de-duplication the exported reel already does, so it only declutters the "
+            "list; it does not change what you export.")
         self._hide_nosub = QCheckBox("Hide no-subtitle")
+        self._hide_nosub.setToolTip(
+            "Hides voice lines that have audio but no on-screen subtitle — grunts, "
+            "breaths, PA announcements, radio bleed, and lines the game never "
+            "captioned. It's real audio, not silence. Useful because blank-subtitle "
+            "rows can't be identified without playing them and are usually non-story "
+            "noise; leave it off if you want incidental vocalizations too.")
 
         filters = QHBoxLayout()
         filters.addWidget(QLabel("Search:"))
@@ -283,6 +298,12 @@ class LibraryView(QWidget):
         self._short_secs.setSuffix(" s")
         self._uncheck_short_btn = QPushButton("Uncheck shorter than")
         self._uncheck_barks_btn = QPushButton("Uncheck barks")
+        self._uncheck_barks_btn.setToolTip(
+            "Barks are short, incidental voice lines — ambient NPC chatter, combat "
+            "callouts and the like — rather than story dialogue. This unchecks them "
+            "across the whole list (not just the filtered view), using a per-game "
+            "heuristic: DS = lines with no subtitle; HZD = ambient-category or "
+            "no-subtitle lines; FW = no subtitle or one-word lines.")
         self._check_all_btn = QPushButton("Check all")
         self._check_none_btn = QPushButton("Check none")
         self._undo_btn = QPushButton("Undo")
@@ -394,9 +415,7 @@ class LibraryView(QWidget):
         self._speaker.setCurrentIndex(restore if restore >= 0 else 0)
         self._speaker.blockSignals(False)
 
-        has_len = has_known_lengths(self._rows)
-        self._short_secs.setEnabled(has_len)
-        self._uncheck_short_btn.setEnabled(has_len)
+        self._set_shortlen_enabled(has_known_lengths(self._rows))
 
         self._apply_filters()
 
@@ -457,9 +476,26 @@ class LibraryView(QWidget):
 
         self._apply_filters()
 
-        has_len = has_known_lengths(self._rows)
+        self._set_shortlen_enabled(has_known_lengths(self._rows))
+
+    def _set_shortlen_enabled(self, has_len: bool) -> None:
+        """Enable/disable the "Uncheck shorter than" control + its spinbox, and set a
+        tooltip that explains WHY when it's disabled -- dogfooding: DS/HZD carry no
+        per-line duration, so the control was permanently greyed with no indication."""
         self._short_secs.setEnabled(has_len)
         self._uncheck_short_btn.setEnabled(has_len)
+        if has_len:
+            tip = ("Unchecks every line shorter than this many seconds "
+                   "(uses each line's decoded audio length).")
+        elif self._game == "fw":
+            tip = ("Line durations are still loading — this filter enables once "
+                   "they're ready.")
+        else:
+            tip = ("Not available for this game: filtering by length needs each line's "
+                   "audio duration, which only Forbidden West provides. DS/HZD lines "
+                   "carry no duration (the Length column shows “—”).")
+        self._short_secs.setToolTip(tip)
+        self._uncheck_short_btn.setToolTip(tip)
 
     def _on_header_clicked(self, section: int) -> None:
         key = self._SORT_KEYS.get(section)

@@ -22,7 +22,7 @@ from deciwaves.gui.coverage_model import (
     load_coverage,
     needs_escalation,
 )
-from deciwaves.gui.issues_model import gather_issues
+from deciwaves.gui.issues_model import gather_issues, split_issues
 from deciwaves.gui.pipeline_model import StageState, has_gpu_stage, stage_states
 
 # Theme colours imported from deciwaves.gui.theme: OK, NEUTRAL, RUNNING, WARN, ERROR
@@ -215,13 +215,14 @@ class IssuesPanel(QWidget):
         super().__init__(parent)
         self._groups: list = []
         self._header = QLabel("<b>Issues</b>")
-        self._header.setToolTip("Errors and warnings found during pipeline stages")
+        self._header.setToolTip("Lines a pipeline stage dropped or failed to process")
         header_row = QHBoxLayout()
         header_row.setContentsMargins(0, 0, 0, 0)
         header_row.addWidget(self._header)
         header_row.addWidget(HelpIcon(
-            "Issues counts per-stage errors and 'dupes' — duplicate lines the same "
-            "audio maps to, which are de-duplicated in the exported reels."))
+            "Issues counts only real problems — lines a stage failed to process or had "
+            "to drop. Expected housekeeping, like de-duplicating repeated voice lines, "
+            "is listed separately below and is not an error."))
         header_row.addStretch(1)
         self._header_host = QWidget()
         self._header_host.setLayout(header_row)
@@ -235,17 +236,32 @@ class IssuesPanel(QWidget):
     def refresh(self, game: str, workspace: str) -> None:
         self._groups = gather_issues(workspace, game)
         _clear(self._body_layout)
-        if not self._groups:
-            self._header.setText("<b>Issues</b> — none")
-            return
-        total = sum(g.count for g in self._groups)
-        self._header.setText(f"<b>Issues</b> — {total:,}")
-        for g in self._groups:
+        errors, housekeeping = split_issues(self._groups)
+
+        # Header counts ONLY real errors -- benign housekeeping (de-dupes) must never
+        # make a successful run read as "Issues — 678" (dogfooding: it scared a user).
+        error_total = sum(g.count for g in errors)
+        self._header.setText("<b>Issues</b> — none" if error_total == 0
+                             else f"<b>Issues</b> — {error_total:,}")
+        for g in errors:
             row = QLabel(f"{g.source}: {g.count:,}")
             row.setStyleSheet(f"color: {WARN};")
             if g.sample:
                 row.setToolTip("\n".join(g.sample))
             self._body_layout.addWidget(row)
+
+        # Housekeeping: neutral, reassuring, and clearly NOT an error.
+        if housekeeping:
+            hk_total = sum(g.count for g in housekeeping)
+            head = QLabel("<b>Housekeeping</b>")
+            head.setStyleSheet(f"color: {NEUTRAL};")
+            self._body_layout.addWidget(head)
+            note = QLabel(
+                f"{hk_total:,} duplicate lines de-duplicated (expected — identical "
+                "repeated voice lines are collapsed in your reels).")
+            note.setWordWrap(True)
+            note.setStyleSheet(f"color: {NEUTRAL};")
+            self._body_layout.addWidget(note)
 
     def groups(self) -> list:
         return list(self._groups)
