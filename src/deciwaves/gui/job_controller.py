@@ -155,6 +155,13 @@ class JobController(QObject):
         self._catalog_signals = signals
         QThreadPool.globalInstance().start(worker)
 
+    def start_order_copy(self, game: str, workspace: str, dest: str) -> None:
+        signals = _CatalogCopySignals()
+        signals.finished.connect(self._on_catalog_copy_finished)
+        worker = _CatalogCopyWorker(game, workspace, dest, signals, kind="order")
+        self._catalog_signals = signals
+        QThreadPool.globalInstance().start(worker)
+
     def _on_catalog_copy_finished(self, msg: str) -> None:
         self.log_message.emit(msg)
         self._catalog_signals = None

@@ -2,6 +2,7 @@
 
 Tests the controller headless (no MainWindow), exercising busy-check gating, confirm
 dialogs, and export flows."""
+import csv
 import os
 
 import pytest
@@ -396,6 +397,22 @@ def test_start_catalog_copy_missing_source_reports_error(qtbot, tmp_path):
     with qtbot.waitSignal(ctrl.log_message, timeout=5000) as blocker:
         ctrl.start_catalog_copy("fw", str(tmp_path), os.path.join(str(tmp_path), "x.csv"))
     assert "no catalog artifact" in blocker.args[0].lower()
+
+
+def test_start_order_copy_copies_render_input(qtbot, tmp_path):
+    ws = str(tmp_path)
+    p = os.path.join(ws, "out", "playlist.csv")
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "w", newline="", encoding="utf-8") as f:
+        csv.writer(f).writerows([["line_id"], ["a"]])
+    ctrl = JobController()
+    dest = os.path.join(ws, "exported-order.csv")
+    with qtbot.waitSignal(ctrl.log_message, timeout=5000) as blocker:
+        ctrl.start_order_copy("ds", ws, dest)
+    assert "copied" in blocker.args[0].lower()
+    assert os.path.isfile(dest)
+    with open(dest, encoding="utf-8-sig") as f:
+        assert "line_id" in f.read()
 
 
 # -- _report_export_result --------------------------------------------------
