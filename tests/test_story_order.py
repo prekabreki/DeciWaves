@@ -1,7 +1,10 @@
 import csv
+import json
+import os
 
 from deciwaves.games.ds import story_order as so
 from deciwaves.games.ds import episode_map as em
+from deciwaves.engine.coverage import default_coverage_path
 from conftest import catalog_row as _row
 
 
@@ -258,3 +261,38 @@ def test_playlist_round_trip(tmp_path):
     p = tmp_path / "pl.csv"
     so.write_playlist(segs, str(p))
     assert so.read_playlist(str(p)) == segs
+
+
+def test_order_invalidates_render_marker_and_coverage(tmp_path, monkeypatch):
+    """Issue #277: standalone ds order must invalidate .done-render and its
+    coverage section so that a later ds run / GUI export re-renders in the
+    new order instead of skipping on the stale marker."""
+    monkeypatch.chdir(tmp_path)
+    cat, tracks = _write_min_catalog_and_tracks(tmp_path)
+
+    # Place a render done-marker and a coverage section, as if a prior
+    # render had completed.
+    marker_dir = tmp_path / "out" / "ds"
+    marker_dir.mkdir(parents=True, exist_ok=True)
+    (marker_dir / ".done-render").write_text("", encoding="utf-8")
+
+    cov_path = default_coverage_path("ds")
+    os.makedirs(os.path.dirname(cov_path), exist_ok=True)
+    (tmp_path / cov_path).write_text(
+        json.dumps({"render": {"reels": 3, "lines": 100}, "order": {"segments": 50}}),
+        encoding="utf-8")
+
+    out = tmp_path / "playlist.csv"
+    rc = so.main(["--catalog", str(cat), "--cutscene-tracks", str(tracks),
+                  "--out", str(out), "--transcript", ""])
+    assert rc == 0
+    assert out.exists()
+
+    # Render marker must be gone.
+    assert not (marker_dir / ".done-render").exists(), (
+        ".done-render should be invalidated after re-order")
+
+    # Coverage: render section must be cleared; sibling sections (order) survive.
+    cov = json.loads((tmp_path / cov_path).read_text(encoding="utf-8"))
+    assert "render" not in cov, "render coverage section must be cleared"
+    assert cov.get("order") == {"segments": 50}, "sibling coverage section must survive"
