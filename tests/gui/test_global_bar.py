@@ -77,3 +77,23 @@ def test_set_install_status_broken(qtbot):
     bar.set_install_status("Broken", Availability.BROKEN)
     assert "✗" in bar._status.text()
     assert "color: #b00020" in bar._status.styleSheet()
+
+
+# --- set_busy: marquee bar + RUNNING chip colour (#278) ---------------------
+
+
+def test_set_busy_shows_marquee_and_running_color(qtbot):
+    bar = GlobalBar()
+    qtbot.addWidget(bar)
+    bar.set_busy(True)
+    assert not bar._busy_bar.isHidden()
+    assert "color: #1b6ec2" in bar._chip.styleSheet()
+    bar.set_busy(False)
+    assert bar._busy_bar.isHidden()
+    assert "color: #666666" in bar._chip.styleSheet()
+
+
+def test_busy_bar_is_indeterminate(qtbot):
+    bar = GlobalBar()
+    qtbot.addWidget(bar)
+    assert bar._busy_bar.minimum() == 0 and bar._busy_bar.maximum() == 0

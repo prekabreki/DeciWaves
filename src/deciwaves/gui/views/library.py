@@ -48,6 +48,7 @@ from deciwaves.gui.library_model import (
     uncheck_shorter_than,
     visible_rows,
 )
+from deciwaves.gui.theme import RUNNING
 
 # Gray foreground for a pending/unavailable ▶ (spec §6.2/§6.5). A value type -- safe to build
 # at import time without a running QApplication.
@@ -347,9 +348,15 @@ class LibraryView(QWidget):
         # intent signals and drives its running-state; the Library keeps its context in sync.
         self.export = ExportPanel()
 
+        self._job_running_banner = QLabel(
+            "A job is running — this list may change when it finishes.")
+        self._job_running_banner.setStyleSheet(f"color: {RUNNING};")
+        self._job_running_banner.hide()
+
         layout = QVBoxLayout(self)
         layout.addLayout(filters)
         layout.addLayout(selection)
+        layout.addWidget(self._job_running_banner)
         layout.addWidget(self._table, 1)
         layout.addWidget(self._status)
         layout.addWidget(self.export)
@@ -690,3 +697,9 @@ class LibraryView(QWidget):
         if self._sort_key is None:
             base += " · story order"
         return base
+
+    def set_job_running(self, running: bool) -> None:
+        if running:
+            self._job_running_banner.show()
+        else:
+            self._job_running_banner.hide()

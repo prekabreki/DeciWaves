@@ -441,3 +441,23 @@ def test_flush_pending_selection_saves_inside_debounce_window(qtbot, tmp_path):
 
     # Second call is a strict no-op (no pending save)
     v.flush_pending_selection()
+
+
+# --- set_job_running banner (#278) -------------------------------------------
+
+
+def test_set_job_running_shows_and_hides_banner(qtbot):
+    v = LibraryView()
+    qtbot.addWidget(v)
+    v.set_job_running(True)
+    assert not v._job_running_banner.isHidden()
+    assert "this list may change" in v._job_running_banner.text()
+    v.set_job_running(False)
+    assert v._job_running_banner.isHidden()
+
+
+def test_table_stays_enabled_while_job_running(qtbot):
+    v = LibraryView()
+    qtbot.addWidget(v)
+    v.set_job_running(True)
+    assert v._table.isEnabled()

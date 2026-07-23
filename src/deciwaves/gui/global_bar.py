@@ -5,11 +5,13 @@ from __future__ import annotations
 
 from PySide6.QtCore import QTimer, Signal
 from PySide6.QtWidgets import (
-    QComboBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidget,
+    QComboBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QProgressBar,
+    QPushButton, QWidget,
 )
 
 from deciwaves.cli.doctor import Availability
 from deciwaves.gui.doctor_model import install_status_attrs
+from deciwaves.gui.theme import NEUTRAL, RUNNING
 
 # (key, menu label) -- keys match the CLI game tokens / doctor check map.
 _GAMES = [("ds", "Death Stranding"),
@@ -37,6 +39,13 @@ class GlobalBar(QWidget):
         self._browse = QPushButton("Browse…")
         self._browse.setToolTip("Browse for the workspace output directory")
         self._chip = QLabel("idle")
+        self._chip.setStyleSheet(f"color: {NEUTRAL};")
+
+        self._busy_bar = QProgressBar()
+        self._busy_bar.setRange(0, 0)
+        self._busy_bar.setTextVisible(False)
+        self._busy_bar.setMaximumWidth(120)
+        self._busy_bar.hide()
 
         layout = QHBoxLayout(self)
         layout.addWidget(QLabel("Game:"))
@@ -45,6 +54,7 @@ class GlobalBar(QWidget):
         layout.addWidget(QLabel("Workspace:"))
         layout.addWidget(self._workspace)
         layout.addWidget(self._browse)
+        layout.addWidget(self._busy_bar)
         layout.addWidget(self._chip)
 
         self._combo.currentIndexChanged.connect(
@@ -97,3 +107,11 @@ class GlobalBar(QWidget):
 
     def set_job_chip(self, text: str) -> None:
         self._chip.setText(text)
+
+    def set_busy(self, busy: bool) -> None:
+        if busy:
+            self._busy_bar.show()
+            self._chip.setStyleSheet(f"color: {RUNNING};")
+        else:
+            self._busy_bar.hide()
+            self._chip.setStyleSheet(f"color: {NEUTRAL};")
