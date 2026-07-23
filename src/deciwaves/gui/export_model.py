@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import csv
 import os
+from dataclasses import dataclass
 
 from deciwaves.cli.config import resolve_ds_install
 from deciwaves.engine.atomic_io import atomic_write
@@ -45,14 +46,11 @@ def _out_dir(workspace: str, game: str) -> str:
     return os.path.join(workspace, "out") if game == "ds" else os.path.join(workspace, "out", game)
 
 
-def render_input_source(workspace: str, game: str) -> str | None:
-    """The path to *game*'s render-input CSV (the file the render stage reads via its
-    ``--playlist``/``--manifest`` flag), or ``None`` if it doesn't exist yet.
-
-    Mirrors :func:`library_model.load_lines`'s source precedence for the story-order artifact:
-    DS ``out/playlist.csv`` (pre-``order`` -> None), HZD ``out/hzd/asr-manifest.csv``
-    (pre-``bind`` -> None), FW ``out/fw/full-reel-manifest.csv`` else
-    ``out/fw/subtitle-manifest-full.csv`` (pre-``subtitle-bind`` -> None)."""
+def _pipeline_input_source(workspace: str, game: str) -> str | None:
+    """The pipeline's own render-input CSV (ignoring any manual-order override): DS
+    ``out/playlist.csv`` (pre-``order`` -> None), HZD ``out/hzd/asr-manifest.csv`` (pre-``bind``
+    -> None), FW ``out/fw/full-reel-manifest.csv`` else ``out/fw/subtitle-manifest-full.csv``
+    (pre-``subtitle-bind`` -> None). This is what :func:`import_order` joins against."""
     root = _out_dir(workspace, game)
     if game == "ds":
         candidates = ["playlist.csv"]
@@ -69,9 +67,41 @@ def render_input_source(workspace: str, game: str) -> str | None:
     return None
 
 
+def render_input_source(workspace: str, game: str) -> str | None:
+    """The render-input CSV the render stage reads, override-aware: a manual-order override
+    (:func:`imported_order_path`) wins when present, else the pipeline artifact
+    (:func:`_pipeline_input_source`). All consumers (Export MP3, the Library) go through this,
+    so an active override drives both display and render."""
+    override = imported_order_path(workspace, game)
+    if os.path.isfile(override):
+        return override
+    return _pipeline_input_source(workspace, game)
+
+
 def can_export_mp3(workspace: str, game: str) -> bool:
     """True iff *game*'s render-input artifact exists on disk -- the gate for Export MP3."""
     return render_input_source(workspace, game) is not None
+
+
+def imported_order_path(workspace: str, game: str) -> str:
+    """The GUI-owned manual-order override for *game*: ``out/<game>/gui/imported-order.csv``
+    (same namespace as :func:`render_selection_path`). When present it is the highest-precedence
+    render-input source -- a reordered/subsetted copy of the pipeline's render-input artifact."""
+    return os.path.join(workspace, "out", game, "gui", "imported-order.csv")
+
+
+def has_imported_order(workspace: str, game: str) -> bool:
+    """True iff a manual-order override exists for *game*."""
+    return os.path.isfile(imported_order_path(workspace, game))
+
+
+def revert_imported_order(workspace: str, game: str) -> None:
+    """Delete *game*'s manual-order override (no-op if absent). Lossless: the pipeline's own
+    ordered artifact is never touched, so this restores automatic story order."""
+    try:
+        os.remove(imported_order_path(workspace, game))
+    except FileNotFoundError:
+        pass
 
 
 def render_selection_path(workspace: str, game: str) -> str:
@@ -245,6 +275,111 @@ def _fw_tiers(csv_path: str) -> str:
     except OSError:
         pass
     return ",".join(tiers) if tiers else _FW_ALL_TIERS
+
+
+ROUND_TRIP_INSTRUCTIONS = (
+    "Custom order — how it works. Export the CSV, open it in a spreadsheet, then drag "
+    "rows to reorder and delete rows to drop those lines. Import it back and your reels "
+    "play in that exact order.\n"
+    "• Only the line_id column matters — reorder/delete whole rows; don't worry about the "
+    "other columns.\n"
+    "• You can reorder or subset the lines that were exported; ids that aren't in the "
+    "current list are rejected on import.\n"
+    "• Import updates the Library and future exports — it does not rewrite reels you already "
+    "rendered. Click Export MP3 to render in your new order.\n"
+    "• Revert to auto order any time; your imported file is discarded and the app's story "
+    "order returns.\n"
+    "• While a custom order is active, Export order CSV gives you your CURRENT (subset) "
+    "order, not the full list -- Revert first if you want every line back.\n"
+    "• If you re-run the pipeline (Scan/Bind) after importing, your custom order can go "
+    "stale (it is a snapshot of the earlier lines); Revert and re-import to refresh it.\n"
+    "• Save as CSV UTF-8 so accented names survive."
+)
+
+
+@dataclass(frozen=True)
+class ImportResult:
+    """Outcome of :func:`import_order`. ``ok`` True -> ``path`` is the written override and
+    ``count`` its row count; ``ok`` False -> ``errors`` holds one friendly line per problem
+    and nothing was written (atomic)."""
+    ok: bool
+    path: str | None
+    count: int
+    errors: list[str]
+
+
+def import_order(workspace: str, game: str, src_csv: str) -> ImportResult:
+    """Turn a user-edited CSV into a manual-order override. Row order = play order; the only
+    required column is ``line_id`` (others are re-joined from the pipeline artifact). Validates
+    atomically -- unknown ids, duplicate ids, a missing ``line_id`` column, an empty file, or a
+    missing pipeline artifact all abort with nothing written. On success writes
+    :func:`imported_order_path` (base schema, base row data, the user's order)."""
+    base_src = _pipeline_input_source(workspace, game)
+    if base_src is None:
+        return ImportResult(False, None, 0, [_missing_source_message(game)])
+
+    with open(base_src, "r", newline="", encoding="utf-8-sig") as f:
+        reader = csv.DictReader(f)
+        fieldnames = reader.fieldnames or []
+        by_id = {r.get("line_id", ""): r for r in reader if r.get("line_id", "")}
+
+    try:
+        with open(src_csv, "r", newline="", encoding="utf-8-sig") as f:
+            reader = csv.DictReader(f)
+            if "line_id" not in (reader.fieldnames or []):
+                return ImportResult(False, None, 0, [
+                    "CSV has no 'line_id' column -- export a fresh copy and keep that column."])
+            # enumerate from 2: row 1 is the header, so row numbers match the spreadsheet
+            ordered = [((r.get("line_id") or "").strip(), n)
+                       for n, r in enumerate(reader, start=2)]
+    except (OSError, UnicodeDecodeError, csv.Error) as exc:
+        # UnicodeDecodeError is the LIKELY real failure: Excel's plain "CSV (comma
+        # delimited)" saves cp1252, so any accented char blows up the utf-8-sig read.
+        return ImportResult(False, None, 0, [
+            "Could not read the CSV -- is it saved as UTF-8? (Excel's plain "
+            f"'CSV (comma delimited)' is not; use 'CSV UTF-8'.) Details: {exc}"])
+
+    ordered = [(lid, n) for lid, n in ordered if lid]  # drop blank-id rows (trailing lines)
+    if not ordered:
+        return ImportResult(False, None, 0, [
+            "no lines to import (the file has no line_id values)."])
+
+    errors: list[str] = []
+    seen: dict[str, int] = {}
+    unknown: list[tuple[str, int]] = []
+    dupes: list[tuple[str, int]] = []
+    for lid, n in ordered:
+        if lid in seen:
+            dupes.append((lid, n))
+        else:
+            seen[lid] = n
+            if lid not in by_id:
+                unknown.append((lid, n))
+
+    if unknown:
+        sample = ", ".join(f"{lid} (row {n})" for lid, n in unknown[:5])
+        msg = f"{len(unknown)} line_id(s) not in {game}'s current lines: {sample}"
+        if len(unknown) == len(seen):  # every distinct id is unknown
+            msg += " -- none match; are you on the right game, and did you Scan first?"
+        errors.append(msg)
+    if dupes:
+        sample = ", ".join(f"{lid} (row {n})" for lid, n in dupes[:5])
+        errors.append(f"{len(dupes)} duplicate line_id(s) (a line can't play twice): {sample}")
+    if errors:
+        return ImportResult(False, None, 0, errors)
+
+    out_path = imported_order_path(workspace, game)
+    rows = [by_id[lid] for lid, _ in ordered]
+
+    def _write(tmp_path: str) -> None:
+        with open(tmp_path, "w", newline="", encoding="utf-8") as out:
+            w = csv.DictWriter(out, fieldnames=fieldnames, extrasaction="ignore")
+            w.writeheader()
+            w.writerows(rows)
+
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    atomic_write(out_path, _write)
+    return ImportResult(True, out_path, len(rows), [])
 
 
 def catalog_source_path(workspace: str, game: str) -> str | None:
