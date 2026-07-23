@@ -75,16 +75,22 @@ class PipelineView(QWidget):
         self.controls.set_game_has_gpu(has_gpu_stage(game))
         self.coverage.refresh(game, workspace)
         self.issues.refresh(game, workspace)
-        self.show_progress(progress)
+        self.show_progress(progress, running_stage)
 
     def _on_toggle(self, shown: bool) -> None:
         self._log.setVisible(shown)
         self._toggle.setText(("▾ " if shown else "▸ ") + "Log console")
 
-    def show_progress(self, progress: list[StageProgress] | None) -> None:
+    def show_progress(self, progress: list[StageProgress] | None,
+                       running_stage: str | None = None) -> None:
         shown = progress is not None and len(progress) > 0
         self._progress_label.setVisible(shown)
         if shown:
+            if running_stage == "render" and len(progress) >= 2:
+                active = _active_render_phase(progress)
+                if active is not None:
+                    self._progress_label.setText(f"<b>Progress:</b> {active.label}")
+                    return
             parts = " · ".join(p.label for p in progress)
             self._progress_label.setText(f"<b>Progress:</b> {parts}")
 
@@ -103,3 +109,16 @@ def _hline() -> QFrame:
     line = QFrame()
     line.setFrameShape(QFrame.HLine)
     return line
+
+
+def _active_render_phase(signals: list[StageProgress]) -> StageProgress | None:
+    """Select the most-advanced non-zero incomplete render sub-phase signal.
+
+    Walk reversed (reels → normalize → decode) and return the first signal
+    that has made progress and is not yet complete. When totals are unknown
+    the first non-zero signal wins."""
+    for sig in reversed(signals):
+        incomplete = sig.total is None or sig.current < sig.total
+        if sig.current > 0 and incomplete:
+            return sig
+    return None
