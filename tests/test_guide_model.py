@@ -61,9 +61,49 @@ def test_workspace_is_live_step_once_tools_ready_but_workspace_blank():
 
 
 def test_scan_is_live_step_once_setup_and_workspace_done(tmp_path):
-    j = _journey(doctor_payload=_payload(*_ALL_TOOLS), workspace=str(tmp_path))
+    """A GPU game (HZD) shows Scan as the next step."""
+    j = _journey(game="hzd", doctor_payload=_payload(*_ALL_TOOLS),
+                  workspace=str(tmp_path))
     assert j.next_action is ActionTarget.SCAN
     assert "catalog" in j.next_hint.lower()
+
+
+def test_gpu_less_game_shows_build_not_scan_bind():
+    """DS (no GPU stage) collapses Scan+Bind into a single Build step."""
+    j = _journey()
+    ids = [s.id for s in j.steps]
+    assert StepId.SCAN not in ids
+    assert StepId.BIND not in ids
+    assert StepId.BUILD in ids
+
+
+def test_gpu_game_keeps_scan_and_bind():
+    j = _journey(game="hzd")
+    ids = [s.id for s in j.steps]
+    assert StepId.SCAN in ids
+    assert StepId.BIND in ids
+    assert StepId.BUILD not in ids
+
+
+def test_running_step_is_propagated_to_step():
+    j = _journey(running_step_id=StepId.BUILD)
+    build = next(s for s in j.steps if s.id == StepId.BUILD)
+    assert build.running
+
+
+def test_running_step_not_set_when_omitted():
+    j = _journey()
+    assert all(not s.running for s in j.steps)
+
+
+def test_hint_shows_in_progress_when_running():
+    j = _journey(running_step_id=StepId.SETUP)
+    assert "In progress:" in j.next_hint
+
+
+def test_hint_shows_next_when_not_running():
+    j = _journey()
+    assert j.next_hint.startswith("Next:")
 
 
 def test_export_done_detects_mp3_in_game_output_dir(tmp_path):
