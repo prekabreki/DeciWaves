@@ -59,8 +59,8 @@ class _TableModel(QAbstractTableModel):
     view's unchecked set (checked is the default), so a bulk selection command only needs a
     ``dataChanged`` over the checkbox column -- never a full model rebuild."""
 
-    COLS = ["▶", "✓", "id / name", "length", "speaker", "subtitle"]
-    COL_PREVIEW, COL_CHECK, COL_ID, COL_LEN, COL_SPEAKER, COL_SUB = range(6)
+    COLS = ["▶", "✓", "#", "id / name", "length", "speaker", "subtitle"]
+    COL_PREVIEW, COL_CHECK, COL_ORDER, COL_ID, COL_LEN, COL_SPEAKER, COL_SUB = range(7)
 
     def __init__(self, view: LibraryView):
         super().__init__()
@@ -126,6 +126,8 @@ class _TableModel(QAbstractTableModel):
         if role == Qt.DisplayRole:
             if col == self.COL_PREVIEW:
                 return "▶"
+            if col == self.COL_ORDER:
+                return str(row.order_index + 1)
             if col == self.COL_ID:
                 return row.name or row.line_id
             if col == self.COL_LEN:
@@ -229,6 +231,7 @@ class LibraryView(QWidget):
 
     # header section -> sort key on LineRow (preview/check columns don't sort)
     _SORT_KEYS = {
+        _TableModel.COL_ORDER: "order_index",
         _TableModel.COL_ID: "line_id",
         _TableModel.COL_LEN: "length_s",
         _TableModel.COL_SPEAKER: "speaker",
@@ -329,9 +332,11 @@ class LibraryView(QWidget):
         header.setStretchLastSection(False)
         header.setSectionResizeMode(_TableModel.COL_SUB, QHeaderView.Stretch)
         header.setSectionResizeMode(_TableModel.COL_PREVIEW, QHeaderView.Fixed)
+        header.setSectionResizeMode(_TableModel.COL_ORDER, QHeaderView.Fixed)
         header.sectionClicked.connect(self._on_header_clicked)
         self._table.setColumnWidth(_TableModel.COL_PREVIEW, 36)
         self._table.setColumnWidth(_TableModel.COL_CHECK, 30)
+        self._table.setColumnWidth(_TableModel.COL_ORDER, 40)
         self._table.setColumnWidth(_TableModel.COL_ID, 140)
         self._table.setColumnWidth(_TableModel.COL_LEN, 65)
         self._table.setColumnWidth(_TableModel.COL_SPEAKER, 110)
@@ -681,4 +686,7 @@ class LibraryView(QWidget):
         return self._checked_count
 
     def status_text(self) -> str:
-        return f"{self.checked_count()} checked · {self.visible_count()} visible · {self.total_count()} total"
+        base = f"{self.checked_count()} checked · {self.visible_count()} visible · {self.total_count()} total"
+        if self._sort_key is None:
+            base += " · story order"
+        return base
