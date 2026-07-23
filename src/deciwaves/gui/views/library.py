@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 from deciwaves.gui.export import ExportPanel
 from deciwaves.gui.export_model import can_export_mp3, catalog_source_path
 from deciwaves.gui.library_model import (
+    STORY_ORDER_HINT,
     LineRow,
     availability_by_id,
     check_all,
@@ -48,7 +49,7 @@ from deciwaves.gui.library_model import (
     uncheck_shorter_than,
     visible_rows,
 )
-from deciwaves.gui.theme import RUNNING
+from deciwaves.gui.theme import NEUTRAL, RUNNING
 
 # Gray foreground for a pending/unavailable ▶ (spec §6.2/§6.5). A value type -- safe to build
 # at import time without a running QApplication.
@@ -350,6 +351,11 @@ class LibraryView(QWidget):
         # intent signals and drives its running-state; the Library keeps its context in sync.
         self.export = ExportPanel()
 
+        self._story_order_hint = QLabel(STORY_ORDER_HINT)
+        self._story_order_hint.setStyleSheet(f"color: {NEUTRAL}; font-style: italic;")
+        self._story_order_hint.setWordWrap(True)
+        self._story_order_hint.hide()
+
         self._job_running_banner = QLabel(
             "A job is running — this list may change when it finishes.")
         self._job_running_banner.setStyleSheet(f"color: {RUNNING};")
@@ -358,6 +364,7 @@ class LibraryView(QWidget):
         layout = QVBoxLayout(self)
         layout.addLayout(filters)
         layout.addLayout(selection)
+        layout.addWidget(self._story_order_hint)
         layout.addWidget(self._job_running_banner)
         layout.addWidget(self._table, 1)
         layout.addWidget(self._status)
@@ -433,6 +440,7 @@ class LibraryView(QWidget):
         self._speaker.blockSignals(False)
 
         self._set_shortlen_enabled(has_known_lengths(self._rows))
+        self._story_order_hint.setVisible(game == "ds")
 
         self._apply_filters()
 

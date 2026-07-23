@@ -43,6 +43,8 @@ _HZD_SAMPLE_RATE = 48000
 
 _NONE_SUBTITLE = "(none)"
 
+STORY_ORDER_HINT = "Story order is approximate without a transcript — use the Transcript control above to sharpen it."
+
 
 @dataclass(frozen=True)
 class LineRow:

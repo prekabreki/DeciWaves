@@ -13,7 +13,7 @@ from PySide6.QtCore import QEvent, Qt  # noqa: E402
 from PySide6.QtGui import QKeyEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from deciwaves.gui.library_model import load_selection  # noqa: E402
+from deciwaves.gui.library_model import STORY_ORDER_HINT, load_selection  # noqa: E402
 from deciwaves.gui.views.library import LibraryView  # noqa: E402
 
 
@@ -461,3 +461,27 @@ def test_table_stays_enabled_while_job_running(qtbot):
     qtbot.addWidget(v)
     v.set_job_running(True)
     assert v._table.isEnabled()
+
+
+def test_story_order_hint_shown_for_ds_only(qtbot, tmp_path):
+    ws = str(tmp_path)
+    _write_ds_catalog(ws, [_cat_row(line_id="a")])
+    _write_csv(os.path.join(ws, "out", "hzd", "catalog.csv"), DS_CAT,
+               [_cat_row(line_id="h")])
+    _write_wav(os.path.join(ws, "out", "fw", "audio", "f1.wav"), seconds=1.0)
+    _write_csv(os.path.join(ws, "out", "fw", "full-reel-manifest.csv"), FW_FULL,
+               [{"line_id": "f1", "wav": "audio/f1.wav", "speaker": "Varl",
+                 "subtitle": "Hello", "gamescript_index": "1", "quest": "MQ", "tier": "S",
+                 "score": "9", "transcript": "x"}])
+    v = LibraryView()
+    qtbot.addWidget(v)
+
+    v.refresh("ds", ws)
+    assert not v._story_order_hint.isHidden()
+    assert v._story_order_hint.text() == STORY_ORDER_HINT
+
+    v.refresh("hzd", ws)
+    assert v._story_order_hint.isHidden()
+
+    v.refresh("fw", ws)
+    assert v._story_order_hint.isHidden()
