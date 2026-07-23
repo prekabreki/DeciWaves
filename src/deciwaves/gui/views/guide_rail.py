@@ -9,7 +9,7 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from deciwaves.gui.guide_model import ActionTarget, Journey, Step
-from deciwaves.gui.theme import NEUTRAL, OK
+from deciwaves.gui.theme import NEUTRAL, OK, RUNNING
 
 
 def _clear(layout) -> None:
@@ -56,6 +56,10 @@ class GuideRail(QWidget):
         return self._action
 
     def _step_widget(self, step: Step, action: ActionTarget | None) -> QWidget:
+        if step.running:
+            label = QLabel(f"▶ {step.label}")
+            label.setStyleSheet(f"color: {RUNNING}; font-weight: bold;")
+            return label
         if step.current and action is not None:
             btn = QPushButton(f"{step.label} →")
             btn.setToolTip("Take me to the next step")

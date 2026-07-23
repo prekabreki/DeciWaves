@@ -15,7 +15,7 @@ from enum import Enum
 
 from deciwaves.cli.config import TOOLS
 from deciwaves.cli.doctor import Availability
-from deciwaves.gui.pipeline_model import scan_target, stage_states
+from deciwaves.gui.pipeline_model import has_gpu_stage, scan_target, stage_states
 
 REQUIRED_TOOLS = tuple(t.display for t in TOOLS)
 
@@ -25,6 +25,7 @@ class StepId(Enum):
     WORKSPACE = "workspace"
     SCAN = "scan"
     BIND = "bind"
+    BUILD = "build"
     CURATE = "curate"
     EXPORT = "export"
 
@@ -35,6 +36,7 @@ class ActionTarget(Enum):
     WORKSPACE = "workspace"
     SCAN = "scan"
     BIND = "bind"
+    BUILD = "build"
     CURATE = "curate"
 
 
@@ -44,6 +46,7 @@ class Step:
     label: str
     done: bool
     current: bool  # the single first-not-done step
+    running: bool = False  # the step a job is actively working on
 
 
 @dataclass(frozen=True)
@@ -91,8 +94,12 @@ def export_done(workspace: str, game: str) -> bool:
     return False
 
 
+_BUILD_HINT = "Run to build your reels"
+
+
 def build_journey(*, doctor_payload: dict | None, game: str, game_label: str,
-                  game_status: Availability, workspace: str) -> Journey:
+                  game_status: Availability, workspace: str,
+                  running_step_id: StepId | None = None) -> Journey:
     if game_status is not Availability.OK:
         return Journey(
             game_owned=False, steps=(), next_action=None,
@@ -101,35 +108,48 @@ def build_journey(*, doctor_payload: dict | None, game: str, game_label: str,
 
     ws = workspace or "."
     states = stage_states(game, ws)
-    scan_name = scan_target(game)
+    all_done = bool(states) and all(s.done for s in states)
     setup_done = tools_ready(doctor_payload)
     workspace_done = bool((workspace or "").strip())
-    scan_done = any(s.name == scan_name and s.done for s in states)
-    bind_done = bool(states) and all(s.done for s in states)
     exported = export_done(ws, game)
 
     _library_hint = "Curate & export your reels in the Library tab"
-    # (StepId, label, done, action-when-live, hint-when-live)
-    raw = [
-        (StepId.SETUP, "Setup", setup_done, ActionTarget.SETUP,
-         "Run setup to download the audio tools"),
-        (StepId.WORKSPACE, "Workspace", workspace_done, ActionTarget.WORKSPACE,
-         "Choose an output folder for your reels"),
-        (StepId.SCAN, "Scan", scan_done, ActionTarget.SCAN,
-         "Scan to build the line catalog"),
-        (StepId.BIND, "Bind", bind_done, ActionTarget.BIND,
-         "Bind to attach audio to each line"),
-        (StepId.CURATE, "Curate", exported, ActionTarget.CURATE, _library_hint),
-        (StepId.EXPORT, "Export", exported, ActionTarget.CURATE, _library_hint),
-    ]
+
+    if has_gpu_stage(game):
+        scan_name = scan_target(game)
+        scan_done = any(s.name == scan_name and s.done for s in states)
+        raw = [
+            (StepId.SETUP, "Setup", setup_done, ActionTarget.SETUP,
+             "Run setup to download the audio tools"),
+            (StepId.WORKSPACE, "Workspace", workspace_done, ActionTarget.WORKSPACE,
+             "Choose an output folder for your reels"),
+            (StepId.SCAN, "Scan", scan_done, ActionTarget.SCAN,
+             "Scan to build the line catalog"),
+            (StepId.BIND, "Bind", all_done, ActionTarget.BIND,
+             "Bind to attach audio to each line"),
+            (StepId.CURATE, "Curate", exported, ActionTarget.CURATE, _library_hint),
+            (StepId.EXPORT, "Export", exported, ActionTarget.CURATE, _library_hint),
+        ]
+    else:
+        raw = [
+            (StepId.SETUP, "Setup", setup_done, ActionTarget.SETUP,
+             "Run setup to download the audio tools"),
+            (StepId.WORKSPACE, "Workspace", workspace_done, ActionTarget.WORKSPACE,
+             "Choose an output folder for your reels"),
+            (StepId.BUILD, "Build", all_done, ActionTarget.BUILD, _BUILD_HINT),
+            (StepId.CURATE, "Curate", exported, ActionTarget.CURATE, _library_hint),
+            (StepId.EXPORT, "Export", exported, ActionTarget.CURATE, _library_hint),
+        ]
 
     current_idx = next((i for i, r in enumerate(raw) if not r[2]), None)
     steps = tuple(
-        Step(sid, label, done, i == current_idx)
+        Step(sid, label, done, i == current_idx, running=sid == running_step_id)
         for i, (sid, label, done, _a, _h) in enumerate(raw))
 
     if current_idx is None:
         return Journey(True, steps, None,
                        "All steps done — your reels are in the workspace.")
     action, hint = raw[current_idx][3], raw[current_idx][4]
-    return Journey(True, steps, action, f"Next: {hint}")
+    running = running_step_id is not None and running_step_id in {s.id for s in steps}
+    prefix = "In progress:" if running else "Next:"
+    return Journey(True, steps, action, f"{prefix} {hint}")

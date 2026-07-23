@@ -14,9 +14,10 @@ from PySide6.QtWidgets import QMainWindow, QStackedWidget, QTabBar, QVBoxLayout,
 
 from deciwaves.cli import config, doctor
 from deciwaves.gui.global_bar import GlobalBar
-from deciwaves.gui.guide_model import ActionTarget, build_journey
+from deciwaves.gui.guide_model import ActionTarget, StepId, build_journey
 from deciwaves.gui.job_controller import JobController
-from deciwaves.gui.pipeline_model import _marker_path, stage_states
+from deciwaves.gui.pipeline_model import _marker_path, has_gpu_stage, stage_states
+from deciwaves.cli.run import run_chain
 from deciwaves.gui.preview import PreviewPlayer
 from deciwaves.gui.progress_model import probe_progress
 from deciwaves.gui.preview_model import PreviewResolver
@@ -102,10 +103,11 @@ class MainWindow(QMainWindow):
         # missing decoder or unconfigured install is visible rather than swallowed.
         self.player.preview_failed.connect(lambda msg: self.pipeline.append_log(f"preview: {msg}\n"))
 
-        # poll markers/coverage while a job runs so the strip advances live (spec §5.3)
+        # poll markers/coverage while a job runs so the strip and guide rail advance live (spec §5.3)
         self._poll = QTimer(self)
         self._poll.setInterval(1500)
         self._poll.timeout.connect(self._refresh_panels)
+        self._poll.timeout.connect(self._refresh_guide)
 
         # pipeline controls -> jobs on the single runner
         self.pipeline.controls.scan_requested.connect(self._on_scan)
@@ -247,12 +249,30 @@ class MainWindow(QMainWindow):
         game = self.bar.current_game()
         cfg = config.load()
         status = _CHECKS[game](cfg).status
+
+        running_step_id = None
+        if self._controller.runner.is_running and self._controller._job_game == game:
+            active = self._active_stage(game)
+            if active is not None:
+                running_step_id = self._step_id_for_stage(game, active)
+
         self.guide.set_journey(build_journey(
             doctor_payload=self.pipeline.setup_doctor.doctor.last_payload(),
             game=game,
             game_label=self.bar.current_game_label(),
             game_status=status,
-            workspace=self.bar.workspace()))
+            workspace=self.bar.workspace(),
+            running_step_id=running_step_id))
+
+    @staticmethod
+    def _step_id_for_stage(game: str, stage: str) -> StepId:
+        if not has_gpu_stage(game):
+            return StepId.BUILD
+        chain = run_chain(game)
+        first_gpu_idx = next(i for i, s in enumerate(chain) if s.gpu)
+        stage_names = [s.name for s in chain]
+        running_idx = stage_names.index(stage)
+        return StepId.SCAN if running_idx < first_gpu_idx else StepId.BIND
 
     def _on_guide_action(self, target) -> None:
         """Navigate to the live step's control — tab-switch, expand collapsed sections,
@@ -272,7 +292,7 @@ class MainWindow(QMainWindow):
         elif target is ActionTarget.WORKSPACE:
             flash_highlight(self.bar._workspace)
             self.bar.focus_workspace()
-        elif target is ActionTarget.SCAN:
+        elif target in (ActionTarget.SCAN, ActionTarget.BUILD):
             self.pipeline.scroll_to_widget(self.pipeline.controls._scan_btn)
             flash_highlight(self.pipeline.controls._scan_btn)
             self.pipeline.controls.focus_scan()

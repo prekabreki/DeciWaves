@@ -455,3 +455,166 @@ def test_write_render_selection_with_tiers_non_fw_returns_empty_tiers(tmp_path):
     csv_path, fw_tiers = write_render_selection_with_tiers(ws, "ds", unchecked=set())
     assert fw_tiers == ""
     assert os.path.isfile(csv_path)
+
+
+# --- Task 1: imported-order override path helpers ---------------------------
+
+
+def test_imported_order_path_is_in_gui_namespace(tmp_path):
+    from deciwaves.gui import export_model as em
+
+    p = em.imported_order_path(str(tmp_path), "ds")
+    assert p == os.path.join(str(tmp_path), "out", "ds", "gui", "imported-order.csv")
+
+
+def test_has_and_revert_imported_order(tmp_path):
+    from deciwaves.gui import export_model as em
+
+    p = em.imported_order_path(str(tmp_path), "ds")
+    assert em.has_imported_order(str(tmp_path), "ds") is False
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    open(p, "w").close()
+    assert em.has_imported_order(str(tmp_path), "ds") is True
+    em.revert_imported_order(str(tmp_path), "ds")
+    assert em.has_imported_order(str(tmp_path), "ds") is False
+    em.revert_imported_order(str(tmp_path), "ds")  # tolerates absence
+
+
+# --- Task 2: render_input_source precedence ---------------------------------
+
+
+def _write_minimal_csv(path, header="line_id\n", body="a\n"):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        f.write(header + body)
+
+
+def test_render_input_source_prefers_override(tmp_path):
+    from deciwaves.gui import export_model as em
+
+    ws = str(tmp_path)
+    _write_minimal_csv(os.path.join(ws, "out", "playlist.csv"))
+    assert em.render_input_source(ws, "ds").endswith(os.path.join("out", "playlist.csv"))
+    _write_minimal_csv(em.imported_order_path(ws, "ds"))
+    assert em.render_input_source(ws, "ds") == em.imported_order_path(ws, "ds")
+    assert em._pipeline_input_source(ws, "ds").endswith(os.path.join("out", "playlist.csv"))
+
+
+# --- Task 3: import_order ---------------------------------------------------
+
+
+def _write_playlist(ws, ids):
+    p = os.path.join(ws, "out", "playlist.csv")
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=["line_id", "subtitle", "stream_path"])
+        w.writeheader()
+        for i in ids:
+            w.writerow({"line_id": i, "subtitle": f"sub {i}", "stream_path": f"{i}.stream"})
+
+
+def _write_user_csv(path, rows, header="line_id,note\n"):
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        f.write(header)
+        for r in rows:
+            f.write(r + "\n")
+
+
+def test_import_order_happy_reorders_and_subsets(tmp_path):
+    from deciwaves.gui import export_model as em
+
+    ws = str(tmp_path)
+    _write_playlist(ws, ["a", "b", "c", "d"])
+    src = os.path.join(ws, "edited.csv")
+    _write_user_csv(src, ["c,x", "a,y"])
+    res = em.import_order(ws, "ds", src)
+    assert res.ok and res.count == 2 and not res.errors
+    with open(em.imported_order_path(ws, "ds"), encoding="utf-8-sig") as f:
+        rows = list(csv.DictReader(f))
+    assert [r["line_id"] for r in rows] == ["c", "a"]
+    assert rows[0]["subtitle"] == "sub c"
+    assert list(rows[0].keys()) == ["line_id", "subtitle", "stream_path"]
+
+
+def test_import_order_missing_line_id_column(tmp_path):
+    from deciwaves.gui import export_model as em
+
+    ws = str(tmp_path); _write_playlist(ws, ["a"])
+    src = os.path.join(ws, "e.csv"); _write_user_csv(src, ["a"], header="id,note\n")
+    res = em.import_order(ws, "ds", src)
+    assert not res.ok and not em.has_imported_order(ws, "ds")
+    assert "line_id" in res.errors[0]
+
+
+def test_import_order_unknown_ids_all_unknown_hint(tmp_path):
+    from deciwaves.gui import export_model as em
+
+    ws = str(tmp_path); _write_playlist(ws, ["a", "b"])
+    src = os.path.join(ws, "e.csv"); _write_user_csv(src, ["x", "y"])
+    res = em.import_order(ws, "ds", src)
+    assert not res.ok and not em.has_imported_order(ws, "ds")
+    joined = " ".join(res.errors)
+    assert "not in" in joined and "right game" in joined
+
+
+def test_import_order_duplicate_ids(tmp_path):
+    from deciwaves.gui import export_model as em
+
+    ws = str(tmp_path); _write_playlist(ws, ["a", "b"])
+    src = os.path.join(ws, "e.csv"); _write_user_csv(src, ["a", "a"])
+    res = em.import_order(ws, "ds", src)
+    assert not res.ok and any("duplicate" in e for e in res.errors)
+
+
+def test_import_order_empty(tmp_path):
+    from deciwaves.gui import export_model as em
+
+    ws = str(tmp_path); _write_playlist(ws, ["a"])
+    src = os.path.join(ws, "e.csv"); _write_user_csv(src, [])
+    res = em.import_order(ws, "ds", src)
+    assert not res.ok and any("no lines" in e for e in res.errors)
+
+
+def test_import_order_no_pipeline_artifact(tmp_path):
+    from deciwaves.gui import export_model as em
+
+    res = em.import_order(str(tmp_path), "ds", os.path.join(str(tmp_path), "e.csv"))
+    assert not res.ok and res.errors
+
+
+def test_import_order_bom_and_accents(tmp_path):
+    from deciwaves.gui import export_model as em
+
+    ws = str(tmp_path); _write_playlist(ws, ["é1", "é2"])
+    src = os.path.join(ws, "e.csv")
+    with open(src, "w", newline="", encoding="utf-8-sig") as f:
+        f.write("line_id\né2\né1\n")
+    res = em.import_order(ws, "ds", src)
+    assert res.ok
+    with open(em.imported_order_path(ws, "ds"), "rb") as f:
+        head = f.read(3)
+    assert head != b"\xef\xbb\xbf"
+
+
+def test_import_order_malformed_encoding_rejected(tmp_path):
+    from deciwaves.gui import export_model as em
+
+    ws = str(tmp_path); _write_playlist(ws, ["a"])
+    src = os.path.join(ws, "e.csv")
+    with open(src, "wb") as f:
+        f.write("line_id\ncafé\n".encode("cp1252"))
+    res = em.import_order(ws, "ds", src)
+    assert not res.ok and not em.has_imported_order(ws, "ds")
+    assert res.errors and "UTF-8" in res.errors[0]
+
+
+def test_round_trip_export_reorder_import_render_selection(tmp_path):
+    from deciwaves.gui import export_model as em
+
+    ws = str(tmp_path); _write_playlist(ws, ["a", "b", "c"])
+    src = os.path.join(ws, "edited.csv"); _write_user_csv(src, ["c", "a"])
+    assert em.import_order(ws, "ds", src).ok
+    sel = em.write_render_selection(ws, "ds", unchecked=set())
+    with open(sel, encoding="utf-8-sig") as f:
+        rows = list(csv.DictReader(f))
+    assert [r["line_id"] for r in rows] == ["c", "a"]

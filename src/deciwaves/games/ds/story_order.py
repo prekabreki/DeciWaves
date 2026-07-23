@@ -19,6 +19,7 @@ from dataclasses import dataclass, asdict
 
 from deciwaves.games.ds import episode_map as em
 from deciwaves.engine import transcript_anchor as ta
+from deciwaves.engine.coverage import clear_stage_coverage, default_coverage_path
 from deciwaves.engine.selection import filter_and_dedup
 
 SECTION = {"cutscene": 0, "mission": 1, "terminal": 2, "npc": 3, "radio": 4}
@@ -263,6 +264,17 @@ def main(argv=None):
         # A stale dupes file from an earlier run (back when there WERE dupes)
         # must not linger and look current after a later, clean re-run.
         os.remove(args.dupes)
+
+    # The playlist was rewritten, so any previously rendered reels are stale
+    # (issue #277): invalidate the render stage's done-marker and its
+    # persisted coverage section so a later ds run / GUI export re-renders
+    # in the new order instead of skipping on the old marker.
+    _render_marker = os.path.join("out", "ds", ".done-render")
+    try:
+        os.remove(_render_marker)
+    except FileNotFoundError:
+        pass
+    clear_stage_coverage(default_coverage_path("ds"), "render")
 
     by_ep = Counter(s.episode for s in segs)
     print(f"{len(segs)} segments, {len(dropped)} dupes dropped, "
