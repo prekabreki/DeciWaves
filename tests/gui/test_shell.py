@@ -112,3 +112,23 @@ def test_minimum_width_fits_1366(qtbot):
     w = MainWindow()
     qtbot.addWidget(w)
     assert w.minimumSizeHint().width() <= 1366
+
+
+# --- busy propagation to bar + library (#278) --------------------------------
+
+
+def test_busy_changed_propagates_to_bar_and_library(qtbot):
+    w = MainWindow()
+    qtbot.addWidget(w)
+    assert w.bar._busy_bar.isHidden()
+    assert w.library._job_running_banner.isHidden()
+
+    w._controller.busy_changed.emit(True)
+    assert not w.bar._busy_bar.isHidden()
+    assert "color: #1b6ec2" in w.bar._chip.styleSheet()
+    assert not w.library._job_running_banner.isHidden()
+
+    w._controller.busy_changed.emit(False)
+    assert w.bar._busy_bar.isHidden()
+    assert "color: #666666" in w.bar._chip.styleSheet()
+    assert w.library._job_running_banner.isHidden()

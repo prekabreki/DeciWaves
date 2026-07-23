@@ -377,6 +377,8 @@ class MainWindow(QMainWindow):
         self.library.export.set_running(busy)
         self.library.export.set_dumping(self._controller.dump.is_running)
         self.pipeline.setup_doctor.setup.set_running(busy)
+        self.bar.set_busy(busy)
+        self.library.set_job_running(busy)
 
     def _on_poll_start(self) -> None:
         self._poll.start()
