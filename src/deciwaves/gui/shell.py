@@ -204,7 +204,7 @@ class MainWindow(QMainWindow):
     # --- status + panels ---------------------------------------------------
 
     def _workspace(self) -> str:
-        return self.bar.workspace() or "."
+        return self.bar.workspace()
 
     def _has_workspace(self) -> bool:
         return bool(self.bar.workspace().strip())
@@ -221,6 +221,8 @@ class MainWindow(QMainWindow):
         self.bar.set_install_status(check.detail, check.status)
 
     def _active_stage(self, game: str) -> str | None:
+        if not self._has_workspace():
+            return None
         for st in stage_states(game, self._workspace()):
             if not st.done:
                 return st.name   # first incomplete stage == the one currently running
@@ -228,6 +230,9 @@ class MainWindow(QMainWindow):
 
     def _refresh_panels(self) -> None:
         game = self.bar.current_game()
+        self.pipeline.controls.set_game_has_gpu(has_gpu_stage(game))
+        if not self._has_workspace():
+            return
         running = None
         if self._controller.runner.is_running and self._controller._job_game == game:
             running = self._active_stage(game)

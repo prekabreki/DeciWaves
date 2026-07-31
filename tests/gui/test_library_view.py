@@ -372,6 +372,7 @@ def test_empty_state_overlay(qtbot, tmp_path):
     """No catalog yet → overlay says 'No catalog yet'."""
     v = LibraryView()
     qtbot.addWidget(v)
+    v.refresh("ds", str(tmp_path))
     assert v._table.overlay_text == "No catalog yet — run Scan on the Pipeline tab"
 
 
@@ -485,3 +486,33 @@ def test_story_order_hint_shown_for_ds_only(qtbot, tmp_path):
 
     v.refresh("fw", ws)
     assert v._story_order_hint.isHidden()
+
+
+def test_unset_workspace_does_not_call_load_or_save_against_dot(qtbot, monkeypatch):
+    """With workspace unset, load_lines/selection-save are never called against '.' (#294)."""
+    import deciwaves.gui.library_model as lib_model
+
+    load_calls = []
+    save_calls = []
+    monkeypatch.setattr(lib_model, "load_lines",
+                        lambda ws, g: load_calls.append(ws) or [])
+    monkeypatch.setattr(lib_model, "load_selection",
+                        lambda ws, g: set())
+    monkeypatch.setattr(lib_model, "save_selection",
+                        lambda ws, g, u: save_calls.append(ws))
+
+    v = LibraryView()
+    qtbot.addWidget(v)
+
+    # refresh with empty workspace must not call load_lines at all
+    v.refresh("ds", "")
+    assert load_calls == []
+
+    # flush/apply selection with empty workspace must not call save_selection
+    v._flush_selection()
+    v._apply_selection({"a"})
+    assert save_calls == []
+
+    # debounced selection timer fires — still no save against empty workspace
+    v._selection_timer.timeout.emit()
+    assert save_calls == []
