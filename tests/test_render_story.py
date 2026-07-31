@@ -6,6 +6,7 @@ import pytest
 
 from deciwaves.engine import audio_clip as ac
 from deciwaves.engine import render as rs
+from deciwaves.games.ds import render as ds_render
 from deciwaves.games.ds.story_order import Segment, write_playlist
 from conftest import needs_ffmpeg  # noqa: F401
 
@@ -103,13 +104,13 @@ def test_format_ts():
 
 def test_main_story_only_keeps_spine_drops_side():
     segs = [_seg(0, "a"), _seg(1, "b"), _seg(0, "c"), _seg(1, "d")]
-    kept = rs.main_story_only(segs)
+    kept = ds_render.main_story_only(segs)
     assert [s.line_id for s in kept] == ["a", "c"]
 
 
 def test_main_story_only_preserves_order():
     segs = [_seg(0, "c"), _seg(0, "a"), _seg(0, "b")]
-    assert [s.line_id for s in rs.main_story_only(segs)] == ["c", "a", "b"]
+    assert [s.line_id for s in ds_render.main_story_only(segs)] == ["c", "a", "b"]
 
 
 def test_main_story_only_drops_non_story_cutscene_groups():
@@ -120,7 +121,7 @@ def test_main_story_only_drops_non_story_cutscene_groups():
         _seg(0, "battlefield", scene="sq_cs71_s00270_c101", category="cutscene"),
         _seg(0, "mission", scene="lines_m00030", category="mission"),
     ]
-    kept = rs.main_story_only(segs, non_story_cs_groups={"cs71"})
+    kept = ds_render.main_story_only(segs, non_story_cs_groups={"cs71"})
     assert [s.line_id for s in kept] == ["story_cut", "mission"]
 
 
@@ -128,20 +129,20 @@ def test_main_story_only_cs_cull_only_applies_to_cutscene_category():
     # A non-cutscene segment whose scene happens to contain a culled group id is kept:
     # the cull is scoped to cutscene tracks, not any scene string.
     segs = [_seg(0, "m", scene="sq_cs71_weird", category="mission")]
-    assert [s.line_id for s in rs.main_story_only(segs, non_story_cs_groups={"cs71"})] == ["m"]
+    assert [s.line_id for s in ds_render.main_story_only(segs, non_story_cs_groups={"cs71"})] == ["m"]
 
 
 def test_main_story_only_default_no_cs_cull():
     # Backward compatible: with no group set, cutscene groups are not culled.
     segs = [_seg(0, "battlefield", scene="sq_cs71_s00270_c101", category="cutscene")]
-    assert [s.line_id for s in rs.main_story_only(segs)] == ["battlefield"]
+    assert [s.line_id for s in ds_render.main_story_only(segs)] == ["battlefield"]
 
 
 def test_file_stem_distinguishes_main_story_reel():
     # Distinct base names so a main-story render never clobbers the full reel.
-    assert rs.file_stem(main_story=False) == "phase_d"
-    assert rs.file_stem(main_story=True) == "phase_d_main"
-    assert rs.file_stem(main_story=True) != rs.file_stem(main_story=False)
+    assert ds_render.file_stem(main_story=False) == "phase_d"
+    assert ds_render.file_stem(main_story=True) == "phase_d_main"
+    assert ds_render.file_stem(main_story=True) != ds_render.file_stem(main_story=False)
 
 
 def test_silence_wav_duration(tmp_path):
@@ -221,13 +222,13 @@ def test_load_keepspans_parses_map(tmp_path):
         "a.core.stream,sq_cs00#track0,0.5,0.65:2.35;3.0:4.0,0\n"
         "g.core.stream,sq_cs71#track0,0.01,,1\n",
         encoding="utf-8")
-    m = rs.load_keepspans(str(p))
+    m = ds_render.load_keepspans(str(p))
     assert m["a.core.stream"] == ([(0.65, 2.35), (3.0, 4.0)], False)
     assert m["g.core.stream"] == ([], True)
 
 
 def test_load_keepspans_missing_file_is_empty():
-    assert rs.load_keepspans("does/not/exist.csv") == {}
+    assert ds_render.load_keepspans("does/not/exist.csv") == {}
 
 
 # --- main(): zero-decode must be a loud failure, not a silent zero-clip "success" ---
@@ -273,7 +274,7 @@ def test_render_main_zero_decode_returns_1_and_prints_actionable_error(tmp_path,
     write_playlist(_playlist_segs(n_good=0, n_bad=2), str(playlist))
     errors = tmp_path / "render-errors.log"
 
-    rc = rs.main(_render_argv(tmp_path, playlist, errors))
+    rc = ds_render.main(_render_argv(tmp_path, playlist, errors))
 
     assert rc == 1
     out = capsys.readouterr().out
@@ -291,7 +292,7 @@ def test_render_main_all_decode_ok_but_no_segments_returns_0(tmp_path, monkeypat
     write_playlist([], str(playlist))
     errors = tmp_path / "render-errors.log"
 
-    rc = rs.main(_render_argv(tmp_path, playlist, errors))
+    rc = ds_render.main(_render_argv(tmp_path, playlist, errors))
 
     assert rc == 0
     out = capsys.readouterr().out
@@ -311,7 +312,7 @@ def test_render_main_explicit_missing_speech_trim_path_errors_loudly(tmp_path, m
     errors = tmp_path / "render-errors.log"
     missing = tmp_path / "does-not-exist-keepspans.csv"
 
-    rc = rs.main(_render_argv(tmp_path, playlist, errors,
+    rc = ds_render.main(_render_argv(tmp_path, playlist, errors,
                               extra=["--speech-trim", str(missing)]))
 
     assert rc != 0
@@ -338,7 +339,7 @@ def test_render_main_partial_success_returns_0_with_summary(tmp_path, monkeypatc
 
     monkeypatch.setattr(ac, "clip_wav", fake_clip_wav)
 
-    rc = rs.main(_render_argv(tmp_path, playlist, errors, extra=["--min-silence", "0"]))
+    rc = ds_render.main(_render_argv(tmp_path, playlist, errors, extra=["--min-silence", "0"]))
 
     assert rc == 0
     out = capsys.readouterr().out

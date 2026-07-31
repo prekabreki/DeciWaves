@@ -14,7 +14,7 @@ STAGES = {
         "trim":      ("deciwaves.games.ds.cutscene_trim",   "[GPU] Rebuild the speech-trim manifest"),
         "order":     ("deciwaves.games.ds.story_order",     "Build the story-ordered playlist"),
         "dump":      ("deciwaves.games.ds.dump",      "Decode selected lines to WAV files"),
-        "render":    ("deciwaves.engine.render",       "Render MP3 reels + tracklists"),
+        "render":    ("deciwaves.games.ds.render",       "Render MP3 reels + tracklists"),
     },
     "hzd": {
         "catalog":      ("deciwaves.games.hzd.catalog",      "Build the line catalog"),

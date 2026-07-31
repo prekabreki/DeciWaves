@@ -19,7 +19,7 @@ per-game configuration seam, and the tail of the pipeline (selection, ordering, 
 ```
 src/deciwaves/
   engine/          game-agnostic core: archive readers, the GameProfile seam,
-                   shared pipeline pieces (selection, render, catalog CSV-resume)
+                   shared render assembly kit (render.py)
     pack/          per-archive-format byte readers
   games/
     ds/            Death Stranding specifics
@@ -33,12 +33,14 @@ src/deciwaves/
 tests/             the test suite (mirrors the src/ layout)
 ```
 
-`deciwaves.engine` is "game-agnostic" in the sense that nothing under it hardcodes a single
-game's paths or vocabulary. The DS-shaped stages that used to live here — the `catalog`
-builder and `story_order` — now sit under `deciwaves.games.ds`; what remains in `engine/`
-is what more than one game genuinely uses: archive readers, the `GameProfile` seam,
-`selection`, `render`, and the game-free CSV-resume helpers in `catalog_io.py`. Treat
-`engine/` as "the code more than one game uses today," not as a strict abstraction boundary.
+`deciwaves.engine` is game-agnostic: nothing under it imports from `deciwaves.games` or
+hardcodes a single game's paths or vocabulary. What lives here is what more than one game
+genuinely uses: archive readers (including per-format byte readers under `pack/`), the
+`GameProfile` seam, the shared render assembly kit (`engine/render.py` — `accumulate_episode_seconds`,
+`assemble_reels`, `finish_render`, and their constants/helpers), and the game-free CSV-resume
+helpers in `catalog_io.py`. Every DS-specific module that used to live under `engine/` —
+`selection`, `transcript_anchor`, `speech_trim`, and the DS `main()` part of `render` —
+now lives under `games/ds/` alongside DS's other game-specific modules.
 
 ## The `GameProfile` seam
 
@@ -82,21 +84,23 @@ The DS and HZD pipelines share this shape (FW's is described in its own section 
    authority; on startup it drops any CSV rows for cores the sidecar doesn't confirm,
    which repairs partial rows a mid-core crash may have left behind — see issue #21)
    and fail-soft (a parse error on one file is logged and skipped, never aborts the run).
-2. **Selection** (`engine/selection.py`) — a small, portable set of creative rules applied
-   to catalog rows before ordering: drop rows with no subtitle or no audio stream, and
-   drop within-scene duplicate `(scene, speaker, subtitle)` triples while keeping the same
-   line if it recurs in a different scene. This is deliberately factored out of
-   `story_order` so a future profile can reuse it without copying the logic.
+2. **Selection** (`games/ds/selection.py`) — a small set of DS-specific creative rules
+   applied to catalog rows before ordering: drop rows with no subtitle or no audio stream,
+   and drop within-scene duplicate `(scene, speaker, subtitle)` triples while keeping the
+   same line if it recurs in a different scene. This is factored out of `story_order` for
+   separate testability.
 3. **Story order** (`games/ds/story_order.py`) — turns the filtered catalog plus (for DS)
    cutscene track rows into an ordered playlist. Where a user-supplied narrative
    transcript is available it anchors scenes to their real chronological position;
    everywhere else, episode/scene heuristics place the line. The stage's `--transcript`
    argument defaults to empty (DeciWaves does not bundle any game's script text), so it
    falls back cleanly to the heuristic order.
-4. **Render** (`engine/render.py`) — packs the ordered playlist into MP3 files sized to
-   stay under a fixed per-file budget (comfortably under 290 MB per file at a given
-   bitrate), inserting small silence gaps between lines and a longer one between scenes,
-   and writes a tracklist CSV alongside each MP3 so the reel is navigable. The
+4. **Render** — the shared assembly kit in `engine/render.py` and each game's own
+   `main()` (DS: `games/ds/render.py`, HZD: `games/hzd/render.py`, FW:
+   `games/fw/render.py`) packs the ordered playlist into MP3 files sized to stay under
+   a fixed per-file budget (comfortably under 290 MB per file at a given bitrate),
+   inserting small silence gaps between lines and a longer one between scenes, and
+   writes a tracklist CSV alongside each MP3 so the reel is navigable. The
    measure-durations → per-episode gap accounting → pack → concat → tracklist shape used
    to be copy-pasted once per game; it's now two public helpers every game's `main()`
    calls instead: `accumulate_episode_seconds(segs, dur_of, ...)` does the
@@ -123,10 +127,10 @@ The DS and HZD pipelines share this shape (FW's is described in its own section 
 
 HZD reuses the general shape of catalog/render — `games/hzd/render.py`'s own docstring
 notes it reuses `engine.render`'s game-agnostic assembly kit
-(`accumulate_episode_seconds`, `assemble_reels`) — but it does **not** reuse
-`engine.selection`: nothing under `games/hzd/` imports `filter_and_dedup` or anything else
-from that module. Instead HZD has its own binding stage in place of both DS's transcript
-anchoring and DS's `engine.selection` dedup — its structural (A, B)-bucket join (see below)
+(`accumulate_episode_seconds`, `assemble_reels`) — but it does **not** reuse DS's
+selection rules: nothing under `games/hzd/` imports `filter_and_dedup` or anything else
+from `games/ds/selection.py`. Instead HZD has its own binding stage in place of both DS's
+transcript anchoring and DS's selection dedup — its structural (A, B)-bucket join (see below)
 binds at most one line to one clip per bucket by construction, which is a different
 mechanism from, not a reuse of, `filter_and_dedup`. The two games don't share
 `story_order.py` itself.
@@ -306,7 +310,7 @@ prefixes like `ds_lines_cutscene` / `ds_lines_mission` / `ds_lines_npc` to a cat
 Because a cutscene's line-level sound refs are null, its audio is resolved per *scene*
 instead of per *line* — `games/ds/cutscene_audio.py` locates the scene's whole-track Wwise
 voice file(s) under a separate Wwise cinematics path and hands them to
-`engine/speech_trim.py`, which computes speech-region keep-spans (from an externally
+`games/ds/speech_trim.py`, which computes speech-region keep-spans (from an externally
 supplied speech-segment list) so dead air and back-to-back grunts between cues get
 trimmed out of the rendered track. Pre-rendered video (studio logos, recaps, credits) is a
 small, separate, optional pass outside this workflow.

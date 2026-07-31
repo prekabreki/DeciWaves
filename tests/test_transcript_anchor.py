@@ -3,7 +3,7 @@ import os
 
 import pytest
 
-from deciwaves.engine import transcript_anchor as ta
+from deciwaves.games.ds import transcript_anchor as ta
 
 # Opt-in real-transcript smoke test: the DS narrative gamescript is copyrighted game
 # prose (BYO — see docs/BYO.md), deliberately not shipped in this repo. Set this env

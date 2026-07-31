@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 
 from deciwaves.engine.profile import GameProfile
+from deciwaves.engine.pack.hzd_package import HZD_LOCATORS_NAME
 
 # HZD quest-prefix -> category family (heuristic; see games.hzd.catalog.classify_hzd).
 # Matched by longest-prefix on the first scene segment, so "collectab"/"aigenerated"
@@ -39,9 +40,6 @@ HZD_ANCHORED_PREFIXES: frozenset[str] = frozenset({"mq", "sq", "ec", "dlc"})
 # The DSAR archive holding every dialogue clip's encoded ATRAC9 payload -- shared by
 # every stage that decodes or fingerprints clips (clip_index, asr_bind, render).
 VOICE_ARCHIVE = "package.01.00.core.stream"
-
-
-HZD_LOCATORS_NAME = "PackFileLocators.bin"
 
 
 def is_valid_hzd_package_dir(package_dir: str) -> bool:
