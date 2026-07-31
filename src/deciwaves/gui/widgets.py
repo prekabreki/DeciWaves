@@ -12,7 +12,7 @@ issues/game-panel so the look and behaviour are defined and tested once.
   "optional" note (#265)."""
 from __future__ import annotations
 
-from PySide6.QtCore import QTimer, Qt, Signal
+from PySide6.QtCore import QThread, QTimer, Qt, Signal, Slot
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QToolButton, QVBoxLayout, QWidget
 
 from deciwaves.gui.theme import NEUTRAL, WARN
@@ -110,6 +110,23 @@ def flash_highlight(widget: QWidget) -> None:
     QTimer.singleShot(_HIGHLIGHT_DURATION_MS, lambda: widget.setStyleSheet(""))
 
 
+class _ProbeThread(QThread):
+    """Runs :func:`~deciwaves.gui.gpu_probe.probe_gpu` off the UI thread
+    and stores the result directly on the widget so :meth:`AsrInstallHint.commands`
+    can block without depending on the event loop. Qt-free by design — the
+    import of ``gpu_probe`` is deferred to ``run()``."""
+
+    def __init__(self, widget: "AsrInstallHint", parent=None):
+        super().__init__(parent)
+        self._widget = widget
+
+    def run(self) -> None:
+        from deciwaves.gui.gpu_probe import build_asr_install_steps, probe_gpu
+        result = probe_gpu()
+        steps = build_asr_install_steps(result)
+        self._widget._steps = steps
+
+
 class AsrInstallHint(QWidget):
     """GPU-aware ASR install instruction widget (#265).
 
@@ -131,9 +148,11 @@ class AsrInstallHint(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._probed = False
+        self._rendered = False
         self._steps: list[tuple[str, str]] = []
         self._cmd_labels: list[QLabel] = []
         self._copy_btns: list[QPushButton] = []
+        self._thread: QThread | None = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -187,8 +206,25 @@ class AsrInstallHint(QWidget):
         if self._probed:
             return
         self._probed = True
-        from deciwaves.gui.gpu_probe import build_asr_install_steps, probe_gpu
-        self._steps = build_asr_install_steps(probe_gpu())
+        self._thread = _ProbeThread(self, self)
+        self._thread.finished.connect(self._on_probe_thread_finished)
+        self._thread.start()
+
+    @Slot()
+    def _on_probe_thread_finished(self) -> None:
+        try:
+            self.isVisible()
+        except RuntimeError:
+            return
+        if self._thread:
+            self._thread.deleteLater()
+            self._thread = None
+        self._render_steps()
+
+    def _render_steps(self) -> None:
+        if self._rendered:
+            return
+        self._rendered = True
         for label, command in self._steps:
             step_label = QLabel(label)
             step_label.setWordWrap(True)
@@ -224,4 +260,7 @@ class AsrInstallHint(QWidget):
     def commands(self) -> list[str]:
         """The ordered install command(s); probes on first access."""
         self._probe()
+        if self._thread is not None:
+            self._thread.wait()
+            self._render_steps()
         return [cmd for _label, cmd in self._steps]

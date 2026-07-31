@@ -136,5 +136,31 @@ def test_asr_install_hint_probes_only_once_on_show(qtbot, monkeypatch):
     assert hint._probed
     hint.hide()
     hint.show()
+    hint.commands()  # wait for the async probe thread
     assert len(calls) == 1
     assert hint.commands()
+
+# --- AsrInstallHint pending/populated state (#299) --------------------------
+
+
+def test_asr_install_hint_pending_state_shows_no_steps(qtbot, monkeypatch):
+    """After show the widget appears immediately; steps are not yet rendered."""
+    from deciwaves.gui.gpu_probe import CPU_RESULT
+    monkeypatch.setattr("deciwaves.gui.gpu_probe.probe_gpu", lambda: CPU_RESULT)
+    hint = AsrInstallHint()
+    qtbot.addWidget(hint)
+    hint.show()
+    assert hint._probed
+    assert not hint._rendered
+
+
+def test_asr_install_hint_populated_state_has_steps(qtbot, monkeypatch):
+    """After the async probe finishes, steps are rendered and commands available."""
+    from deciwaves.gui.gpu_probe import CPU_RESULT
+    monkeypatch.setattr("deciwaves.gui.gpu_probe.probe_gpu", lambda: CPU_RESULT)
+    hint = AsrInstallHint()
+    qtbot.addWidget(hint)
+    cmds = hint.commands()
+    assert hint._rendered
+    assert len(cmds) == 1
+    assert "[asr]" in cmds[0]
