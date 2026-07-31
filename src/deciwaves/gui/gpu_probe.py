@@ -16,7 +16,7 @@ from pathlib import Path
 
 from deciwaves.gui import ASR_INSTALL_HINT
 
-_NVIDIA_SMI_TIMEOUT = 10
+_NVIDIA_SMI_TIMEOUT = 3
 
 _CUDA_INDEX_URLS: dict[str, str] = {
     "cu128": "https://download.pytorch.org/whl/cu128",
