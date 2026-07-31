@@ -29,8 +29,11 @@ def assign_bucket(lines, clip_rows, transcripts, strong=90.0, margin=8.0):
     ``lines``: candidate line dicts (line_id, subtitle_en). ``clip_rows``: the bucket's clip
     ids. ``transcripts``: {clip_row: text}. Returns {clip_row: (line_id|None, tier, score)}:
       * confident unique matches (score >= strong), greedily by score -> tier "1"/"2";
-      * if exactly ONE line and ONE clip remain after that, pair them -> tier "E" (inferred
-        by exclusion -- recovers clips whose shouted/one-word audio ASR mangled);
+      * otherwise, pair EVERY leftover clip with the leftover line it scores best against,
+        greedily by score -> tier "E" (inferred by exclusion -- recovers clips whose
+        shouted/one-word audio ASR mangled); skipped when the bucket is partial (fewer clips
+        than lines), where a surviving mangled clip would otherwise be force-bound to a line
+        whose real clip is simply absent;
       * everything else -> tier "3" (unbound). Each line and each clip is used at most once.
     """
     norm = [(l["line_id"], normalize(l["subtitle_en"])) for l in lines]
