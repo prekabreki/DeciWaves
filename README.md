@@ -36,8 +36,10 @@ DeciWaves has a desktop GUI, and it's the recommended way to run everything:
 
     pip install "deciwaves[gui]"
 
-Then run `deciwaves` to open it. Prefer the terminal? `pip install deciwaves` gives you the
-CLI, and bare `deciwaves` falls back to a guided prompt when the GUI extra isn't installed.
+Then run `deciwaves` to open it, or `deciwaves gui` to ask for the desktop app explicitly
+(it prints the install hint instead of falling back to the guided prompt when the GUI extra
+is missing). Prefer the terminal? `pip install deciwaves` gives you the CLI, and bare
+`deciwaves` falls back to a guided prompt when the GUI extra isn't installed.
 
 HZD and FW also need the GPU transcription extra (WhisperX). Install it together with a
 PyTorch build that matches your CUDA version (see https://pytorch.org/get-started/locally/):
