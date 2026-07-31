@@ -42,6 +42,7 @@ class PipelineView(QWidget):
         self._toggle.setText("▾ Log console")
         self._log = QPlainTextEdit()
         self._log.setReadOnly(True)
+        self._log.setStyleSheet("QPlainTextEdit { background-color: palette(base); color: palette(text); }")
 
         content = QWidget()
         layout = QVBoxLayout(content)
