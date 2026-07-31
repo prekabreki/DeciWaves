@@ -63,6 +63,7 @@ def test_refresh_populates_rows_and_status(qtbot, tmp_path):
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("ds", ws)
+    v._wait_for_parse()
     assert v.total_count() == 3
     assert v.visible_count() == 3
     assert v.checked_count() == 3
@@ -76,6 +77,7 @@ def test_toggle_checkbox_changes_count_and_persists(qtbot, tmp_path):
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("ds", ws)
+    v._wait_for_parse()
     idx = v._model.index(0, v._model.COL_CHECK)
     assert v._model.setData(idx, Qt.Unchecked, Qt.CheckStateRole) is True
     assert v.checked_count() == 1
@@ -86,6 +88,7 @@ def test_toggle_checkbox_changes_count_and_persists(qtbot, tmp_path):
     v2 = LibraryView()
     qtbot.addWidget(v2)
     v2.refresh("ds", ws)
+    v2._wait_for_parse()
     assert v2.checked_count() == 1
     assert "a" in v2._unchecked
 
@@ -97,6 +100,7 @@ def test_filter_changes_visible_not_checked_count(qtbot, tmp_path):
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("ds", ws)
+    v._wait_for_parse()
     v._search.setText("hello")
     assert v.visible_count() == 1
     assert v.checked_count() == 2  # a filter never touches the selection
@@ -109,6 +113,7 @@ def test_selection_command_and_undo(qtbot, tmp_path):
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("ds", ws)
+    v._wait_for_parse()
     assert v.checked_count() == 2
     v._uncheck_barks_btn.click()
     assert v.checked_count() == 1
@@ -125,6 +130,7 @@ def test_speaker_dropdown_populated(qtbot, tmp_path):
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("ds", ws)
+    v._wait_for_parse()
     items = [v._speaker.itemText(i) for i in range(v._speaker.count())]
     assert items == ["all", "Amelie", "Sam"]
 
@@ -135,6 +141,7 @@ def test_short_controls_disabled_without_lengths(qtbot, tmp_path):
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("ds", ws)
+    v._wait_for_parse()
     assert v._uncheck_short_btn.isEnabled() is False
 
 
@@ -148,6 +155,7 @@ def test_short_controls_enabled_with_fw_wav_lengths(qtbot, tmp_path):
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("fw", ws)
+    v._wait_for_parse()
     # Lengths start None (lazy) — short controls disabled until the background probe finishes.
     assert v._uncheck_short_btn.isEnabled() is False
 
@@ -163,6 +171,7 @@ def test_header_click_sorts(qtbot, tmp_path):
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("ds", ws)
+    v._wait_for_parse()
     v._on_header_clicked(v._model.COL_SPEAKER)  # sort by speaker asc
     assert v._model.row_at(0).speaker == "Al"
 
@@ -173,6 +182,7 @@ def test_preview_requested_emitted(qtbot, tmp_path):
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("ds", ws)
+    v._wait_for_parse()
     idx = v._model.index(0, v._model.COL_PREVIEW)
     with qtbot.waitSignal(v.preview_requested) as blocker:
         v._on_cell_clicked(idx)
@@ -186,6 +196,7 @@ def test_enter_key_previews_current_row(qtbot, tmp_path):
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("ds", ws)
+    v._wait_for_parse()
     v._table.setCurrentIndex(v._model.index(1, v._model.COL_ID))  # row "b"
     got = []
     v.preview_requested.connect(got.append)
@@ -201,6 +212,7 @@ def test_enter_key_on_unavailable_row_is_noop(qtbot, tmp_path):
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("hzd", ws)
+    v._wait_for_parse()
     v._table.setCurrentIndex(v._model.index(0, v._model.COL_ID))
     v.preview_requested.connect(lambda _lid: pytest.fail("unavailable row must not preview"))
     _send_key(v._table, Qt.Key_Return)
@@ -213,6 +225,7 @@ def test_space_key_toggles_current_row_checkbox(qtbot, tmp_path):
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("ds", ws)
+    v._wait_for_parse()
     v._table.setCurrentIndex(v._model.index(0, v._model.COL_ID))  # row "a", not the check col
     assert v.checked_count() == 2
     _send_key(v._table, Qt.Key_Space)
@@ -232,6 +245,7 @@ def test_rapid_space_toggles_produce_one_disk_write(qtbot, tmp_path, monkeypatch
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("ds", ws)
+    v._wait_for_parse()
     v._table.setCurrentIndex(v._model.index(0, v._model.COL_ID))
 
     calls = []
@@ -257,6 +271,7 @@ def test_preview_column_availability_hzd_prebind_dimmed(qtbot, tmp_path):
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("hzd", ws)
+    v._wait_for_parse()
     idx = v._model.index(0, v._model.COL_PREVIEW)
     assert v._model.data(idx, Qt.DisplayRole) == "▶"
     assert v._model.data(idx, Qt.ForegroundRole) is not None  # dimmed = unavailable
@@ -274,6 +289,7 @@ def test_preview_column_availability_ds_and_fw_available(qtbot, tmp_path):
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("ds", ws)
+    v._wait_for_parse()
     idx = v._model.index(0, v._model.COL_PREVIEW)
     assert v._model.data(idx, Qt.ForegroundRole) is None
     assert v._model.data(idx, Qt.ToolTipRole) == "Play preview"
@@ -284,6 +300,7 @@ def test_preview_column_availability_ds_and_fw_available(qtbot, tmp_path):
                  "gamescript_index": "1", "quest": "MQ", "tier": "S", "score": "9",
                  "transcript": "x"}])
     v.refresh("fw", ws)
+    v._wait_for_parse()
     idx = v._model.index(0, v._model.COL_PREVIEW)
     assert v._model.data(idx, Qt.ForegroundRole) is None
     assert v._model.data(idx, Qt.ToolTipRole) == "Play preview"
@@ -302,6 +319,7 @@ def test_fw_refresh_does_not_block_on_wav_probe(qtbot, tmp_path):
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("fw", ws)
+    v._wait_for_parse()
     # Rows appear immediately, lengths are None — no blocking WAV probe.
     assert v.total_count() == 1
     assert v.rows()[0].length_s is None
@@ -323,6 +341,7 @@ def test_fw_lengths_fill_via_background_pass(qtbot, tmp_path):
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("fw", ws)
+    v._wait_for_parse()
     assert v.rows()[0].length_s is None
 
     # Wait for the background probe and flush queued signals.
@@ -349,12 +368,14 @@ def test_stale_duration_task_results_are_dropped(qtbot, tmp_path, monkeypatch):
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("fw", ws)
+    v._wait_for_parse()
 
     # Capture the generation that the first task sees.
     gen_before = v._duration_generation
 
     # Second refresh bumps generation again (simulates rapid refresh before probe finishes).
     v.refresh("fw", ws)
+    v._wait_for_parse()
     assert v._duration_generation == gen_before + 1
 
     # Simulate a stale result arriving for the old generation — it must be discarded.
@@ -374,6 +395,7 @@ def test_empty_state_overlay(qtbot, tmp_path):
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("ds", str(tmp_path))
+    v._wait_for_parse()
     overlay = v._table._overlay
     assert v._table.overlay_text == "No catalog yet — run Scan on the Pipeline tab"
     assert not overlay.isHidden()
@@ -394,6 +416,7 @@ def test_no_results_overlay_disappears_with_rows(qtbot, tmp_path):
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("ds", ws)
+    v._wait_for_parse()
     assert v._table.overlay_text is None
     assert v._table._overlay.isHidden()
 
@@ -429,6 +452,7 @@ def test_empty_state_overlay_geometries_follow_viewport(qtbot, tmp_path):
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("ds", str(tmp_path))
+    v._wait_for_parse()
     overlay = v._table._overlay
     assert overlay.geometry() == v._table.viewport().rect()
     # once shown (real usage), the overlay stays pinned and follows live viewport resizes
@@ -451,6 +475,7 @@ def test_filter_state_resets_on_game_change_but_persists_same_game(qtbot, tmp_pa
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("ds", ws)
+    v._wait_for_parse()
     v._search.setText("hello")
     v._hide_dupes.setChecked(True)
     v._hide_nosub.setChecked(True)
@@ -459,6 +484,7 @@ def test_filter_state_resets_on_game_change_but_persists_same_game(qtbot, tmp_pa
 
     # DS -> HZD: filters/sort reset to defaults
     v.refresh("hzd", ws)
+    v._wait_for_parse()
     assert v._search.text() == ""
     assert v._hide_dupes.isChecked() is False
     assert v._hide_nosub.isChecked() is False
@@ -468,6 +494,7 @@ def test_filter_state_resets_on_game_change_but_persists_same_game(qtbot, tmp_pa
     v._search.setText("world")
     v._hide_dupes.setChecked(True)
     v.refresh("hzd", ws)
+    v._wait_for_parse()
     assert v._search.text() == "world"
     assert v._hide_dupes.isChecked() is True
 
@@ -478,6 +505,7 @@ def test_flush_pending_selection_saves_inside_debounce_window(qtbot, tmp_path):
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("ds", ws)
+    v._wait_for_parse()
     assert v.checked_count() == 2
 
     # Toggle a row — debounce timer starts, no disk write yet
@@ -529,13 +557,16 @@ def test_story_order_hint_shown_for_ds_only(qtbot, tmp_path):
     qtbot.addWidget(v)
 
     v.refresh("ds", ws)
+    v._wait_for_parse()
     assert not v._story_order_hint.isHidden()
     assert v._story_order_hint.text() == STORY_ORDER_HINT
 
     v.refresh("hzd", ws)
+    v._wait_for_parse()
     assert v._story_order_hint.isHidden()
 
     v.refresh("fw", ws)
+    v._wait_for_parse()
     assert v._story_order_hint.isHidden()
 
 
@@ -557,6 +588,7 @@ def test_unset_workspace_does_not_call_load_or_save_against_dot(qtbot, monkeypat
 
     # refresh with empty workspace must not call load_lines at all
     v.refresh("ds", "")
+    v._wait_for_parse()
     assert load_calls == []
 
     # flush/apply selection with empty workspace must not call save_selection
@@ -567,3 +599,77 @@ def test_unset_workspace_does_not_call_load_or_save_against_dot(qtbot, monkeypat
     # debounced selection timer fires — still no save against empty workspace
     v._selection_timer.timeout.emit()
     assert save_calls == []
+
+
+def test_superseded_parse_does_not_overwrite_rows(qtbot, tmp_path, monkeypatch):
+    """When two refreshes fire in rapid succession, the stale first parse must not
+    overwrite the rows set by the second (newer) parse. The stub blocks the first
+    call so it consistently finishes *after* the second, exercising the generation
+    guard in ``_on_lines_loaded``.
+
+    This test patches ``load_lines`` where it is *used* in ``views.library``
+    (``_ParseTask.run`` calls the module-local import, not the original name in
+    ``library_model``). It also asserts ``call_count == 2`` so the test can never
+    silently degrade to a no-op.  The non-blocking path is verified first so a
+    basic refresh still works end-to-end."""
+    import threading
+    import time
+
+    from deciwaves.gui.library_model import LineRow, load_lines as real_load_lines
+
+    ws = str(tmp_path)
+    _write_ds_catalog(ws, [_cat_row(line_id="a"), _cat_row(line_id="b")])
+
+    call_count = [0]
+    first_block = threading.Event()
+    second_done = threading.Event()
+
+    def blocking_load(workspace, game):
+        call_count[0] += 1
+        if call_count[0] == 1:
+            first_block.wait()
+            return [LineRow(line_id="STALE")]
+        else:
+            result = real_load_lines(workspace, game)
+            second_done.set()
+            return result
+
+    monkeypatch.setattr("deciwaves.gui.views.library.load_lines", blocking_load)
+
+    v = LibraryView()
+    qtbot.addWidget(v)
+
+    # First refresh: parse is dispatched, blocks inside blocking_load
+    v.refresh("ds", ws)
+
+    # Wait until the first call is inside the stub (call_count bumped to 1).
+    while call_count[0] == 0:
+        QApplication.processEvents()
+        time.sleep(0.001)
+    assert call_count[0] == 1
+
+    # Second refresh: supersedes the first.
+    v.refresh("ds", ws)
+
+    # Wait for the second parse to finish and be processed on the main thread.
+    second_done.wait()
+    QApplication.processEvents()
+
+    assert call_count[0] == 2  # the stub actually ran twice
+
+    # Verify the second (non-stale) parse populated the view correctly.
+    assert v.total_count() == 2
+    assert v.rows()[0].line_id == "a"
+
+    # Now unblock the stale first parse. Its result carries line_id="STALE"
+    # and a stale generation — _on_lines_loaded must discard it.
+    first_block.set()
+    QApplication.processEvents()
+    time.sleep(0.1)
+    QApplication.processEvents()
+
+    # The view must still reflect the second (non-stale) parse.
+    assert v.total_count() == 2
+    assert v.rows()[0].line_id == "a"
+    assert v.rows()[0].line_id != "STALE"
+    assert call_count[0] == 2

@@ -283,6 +283,7 @@ def _mainwindow(qtbot, tmp_path, game):
     qtbot.addWidget(w)
     w.bar.set_workspace(str(tmp_path))
     w.bar.select_game(game)
+    w.library._wait_for_parse()
     return w
 
 

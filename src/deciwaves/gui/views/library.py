@@ -15,6 +15,7 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
@@ -284,6 +285,30 @@ class _DurationTask(QRunnable):
         self._signaller.finished.emit(self._generation, durations)
 
 
+class _ParseSignaller(QObject):
+    """QObject whose ``finished`` signal is emitted from the thread pool to the main thread
+    with the generation tag and parsed lines. Mirrors ``_DurationSignaller``."""
+    finished = Signal(int, object)  # generation, list[LineRow]
+
+
+class _ParseTask(QRunnable):
+    """Runs ``load_lines`` on a background thread and emits the result via the *signaller*
+    when done. Carries a *generation* tag so the view can discard stale results when
+    ``refresh()`` fires again before the parse finishes."""
+
+    def __init__(self, signaller: _ParseSignaller, generation: int,
+                 workspace: str, game: str):
+        super().__init__()
+        self._signaller = signaller
+        self._generation = generation
+        self._workspace = workspace
+        self._game = game
+
+    def run(self) -> None:
+        rows = load_lines(self._workspace, self._game)
+        self._signaller.finished.emit(self._generation, rows)
+
+
 class LibraryView(QWidget):
     """The line list with search/speaker/dupe/no-subtitle filters, undoable selection
     commands, a persisted checkbox column, and an availability-aware ▶ preview column."""
@@ -321,6 +346,11 @@ class LibraryView(QWidget):
         self._duration_signaller = _DurationSignaller()
         self._duration_signaller.finished.connect(self._on_durations_ready)
         self._duration_pool = QThreadPool()
+        self._parse_generation = 0
+        self._parse_signaller = _ParseSignaller()
+        self._parse_signaller.finished.connect(self._on_lines_loaded)
+        self._parse_pool = QThreadPool()
+        self._parse_game_changed = False
 
         # Selection debounce (issue #133 L3): a real member QTimer so rapid Space-toggling
         # produces exactly one disk write.
@@ -460,12 +490,13 @@ class LibraryView(QWidget):
         (e.g. a job finished for the current game) preserves all filter/sort state so an
         in-progress curation survives a background reload.
 
-        WAV durations are NOT probed synchronously here -- they start ``None`` and fill in
-        via a background ``QThreadPool`` worker, so the table appears immediately without
-        blocking the UI thread."""
+        CSV parsing runs on a background ``QThreadPool`` worker so the UI thread is never
+        blocked by the parse (~200 ms at 26 k rows). WAV durations are also probed
+        asynchronously and fill in progressively."""
         game_changed = game != self._game
         self._game = game
         self._workspace = workspace
+        self._parse_game_changed = game_changed
         if not workspace:
             self._rows = []
             self._visible = []
@@ -479,54 +510,34 @@ class LibraryView(QWidget):
             self._order_active = False
             self._order_count = 0
             self._duration_generation += 1
+            self._parse_generation += 1
             if game_changed:
                 self._reset_filter_state()
             self._apply_filters()
             return
-        self._rows = load_lines(workspace, game)
-        self._unchecked = load_selection(workspace, game)
-        self._checked_count = sum(
-            1 for r in self._rows if r.line_id not in self._unchecked)
+
+        # Row-independent state computed immediately on the UI thread.
         self._bind_done = is_bind_done(workspace, game)
-        self._available = availability_by_id(self._rows, game, bind_done=self._bind_done)
         self._unavailable_tooltip = preview_unavailable_tooltip(game, bind_done=self._bind_done)
         self._can_export_mp3 = can_export_mp3(workspace, game)
         self._has_catalog = catalog_source_path(workspace, game) is not None
-        from deciwaves.gui.export_model import has_imported_order
-        self._order_active = has_imported_order(workspace, game) if game else False
-        self._order_count = len(self._rows) if self._order_active else 0
         self._undo.clear()
 
-        # Bump the generation so any still-in-flight duration task discards itself on finish.
+        # Bump both generations so any still-in-flight tasks discard themselves on finish.
         self._duration_generation += 1
+        self._parse_generation += 1
 
         if game_changed:
             self._reset_filter_state()
 
-        # Speaker list is game-specific, so it is always rebuilt; a same-game refresh restores
-        # the prior selection if it still exists, a game change resets to "all".
-        prev_speaker = self._speaker.currentText()
-        self._speaker.blockSignals(True)
-        self._speaker.clear()
-        self._speaker.addItem("all")
-        for sp in distinct_speakers(self._rows):
-            self._speaker.addItem(sp)
-        restore = self._speaker.findText(prev_speaker) if not game_changed else -1
-        self._speaker.setCurrentIndex(restore if restore >= 0 else 0)
-        self._speaker.blockSignals(False)
-
-        self._set_shortlen_enabled(has_known_lengths(self._rows))
         self._story_order_hint.setVisible(game == "ds")
 
-        self._apply_filters()
+        # Brief loading state while the parse runs on a background thread.
+        self._status.setText("Loading...")
 
-        # Launch a background probe for WAV durations (no-op for DS/HZD which have no
-        # per-row WAV to probe). The task carries the current generation; stale results
-        # from a prior refresh are silently dropped.
-        if game == "fw" and self._rows:
-            task = _DurationTask(
-                self._duration_signaller, self._duration_generation, list(self._rows))
-            self._duration_pool.start(task)
+        task = _ParseTask(
+            self._parse_signaller, self._parse_generation, workspace, game)
+        self._parse_pool.start(task)
 
     def _reset_filter_state(self) -> None:
         """Clear search text, sort key/dir, and both hide toggles to defaults (called on a
@@ -540,6 +551,47 @@ class LibraryView(QWidget):
         self._hide_nosub.setChecked(False)
         for w in (self._search, self._hide_dupes, self._hide_nosub):
             w.blockSignals(False)
+
+    def _on_lines_loaded(self, generation: int, rows: list[LineRow]) -> None:
+        """Handle the result of a background CSV parse. Discards stale results
+        from a prior ``refresh`` (whose generation was already bumped).
+
+        Sets ``_rows`` and all derived per-refresh state, rebuilds the speaker
+        dropdown, and applies filters so the table populates with the fresh data.
+        Also launches the WAV-duration probe for FW (the duration generation was
+        already bumped in ``refresh`` so any in-flight probe will discard itself
+        naturally)."""
+        if generation != self._parse_generation:
+            return
+
+        self._rows = rows
+        self._unchecked = load_selection(self._workspace, self._game)
+        self._checked_count = sum(
+            1 for r in self._rows if r.line_id not in self._unchecked)
+        self._available = availability_by_id(self._rows, self._game, bind_done=self._bind_done)
+
+        from deciwaves.gui.export_model import has_imported_order
+        self._order_active = has_imported_order(self._workspace, self._game) if self._game else False
+        self._order_count = len(self._rows) if self._order_active else 0
+
+        prev_speaker = self._speaker.currentText()
+        self._speaker.blockSignals(True)
+        self._speaker.clear()
+        self._speaker.addItem("all")
+        for sp in distinct_speakers(self._rows):
+            self._speaker.addItem(sp)
+        restore = self._speaker.findText(prev_speaker) if not self._parse_game_changed else -1
+        self._speaker.setCurrentIndex(restore if restore >= 0 else 0)
+        self._speaker.blockSignals(False)
+
+        self._set_shortlen_enabled(has_known_lengths(self._rows))
+
+        self._apply_filters()
+
+        if self._game == "fw" and self._rows:
+            task = _DurationTask(
+                self._duration_signaller, self._duration_generation, list(self._rows))
+            self._duration_pool.start(task)
 
     def _on_search_changed(self) -> None:
         if not self._debounce_timer.isActive():
@@ -791,6 +843,12 @@ class LibraryView(QWidget):
         if self._sort_key is None:
             base += " · story order"
         return base
+
+    def _wait_for_parse(self) -> None:
+        """Wait for any in-flight parse task to finish and deliver its result to the
+        main thread. Test-only helper -- never called in production code paths."""
+        self._parse_pool.waitForDone()
+        QApplication.processEvents()
 
     def set_job_running(self, running: bool) -> None:
         if running:
