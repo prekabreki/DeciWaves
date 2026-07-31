@@ -151,7 +151,7 @@ def packindex_accessors(idx):
 
     path_exists is a cheap hash-membership test (no extraction) backed by the
     PackReader.has() primitive -- an arbitrary path-with-extension existence
-    check (unlike `has_core`, which only appends `.core`).
+    check (unlike read_core, which appends `.core`).
     """
     return idx.read_core, idx.has
 

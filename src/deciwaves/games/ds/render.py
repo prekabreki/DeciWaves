@@ -122,7 +122,14 @@ def main(argv=None):
 
     idx = PackIndex(args.data_dir, args.oodle)
     os.makedirs(args.out_dir, exist_ok=True)
-    segs = story_order.read_playlist(args.playlist)
+    try:
+        segs = story_order.read_playlist(args.playlist)
+    except FileNotFoundError:
+        # Running render before order (issue #311): a missing playlist is an
+        # "upstream produced nothing" failure, not a traceback.
+        print(f"render: ERROR - {args.playlist} does not exist -- run "
+              f"`deciwaves ds order` to create it first.")
+        return 1
     if args.main_story:
         kept = main_story_only(segs, non_story_cs_groups=em.NON_STORY_CS_GROUPS,
                                group_of=em.cs_group)

@@ -227,7 +227,16 @@ def main(argv=None):
     else:
         from deciwaves.games.hzd.episode_map import HZD_EPISODE_MAP
         episode_map = HZD_EPISODE_MAP
-    manifest_rows = read_csv_rows(a.manifest)
+    try:
+        manifest_rows = read_csv_rows(a.manifest)
+    except FileNotFoundError:
+        # Running render before bind (issue #311): a missing asr-manifest is an
+        # "upstream produced nothing" failure, not a traceback. This is the
+        # intolerant read agreeing with load_hzd_manifest_join's tolerant one:
+        # absence is an error here, surfaced loudly with rc 1.
+        print(f"render: ERROR - {a.manifest} does not exist -- run "
+              f"`deciwaves hzd bind` to create it first.")
+        return 1
     spine = build_spine(manifest_rows, catalog, clip_index, episode_map=episode_map)
     kind = "main-quest spine" if a.spine_only else "full story reel"
     print(f"{kind}: {len(spine)} lines across {len({s.episode for s in spine})} scenes")
