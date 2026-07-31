@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import os
 import sys
 from dataclasses import dataclass
@@ -84,6 +85,32 @@ def _done_marker(game: str, stage_name: str) -> str:
     from an old build, or (for fw) another stage entirely.
     """
     return os.path.join("out", game, f".done-{stage_name}")
+
+
+def _argv_fingerprint(argv: list) -> str:
+    """Stable fingerprint of a stage's resolved argv, stored in the done-marker
+    so a changed argv is detected and re-runs the stage (issue #306)."""
+    return json.dumps(argv, sort_keys=True)
+
+
+def _read_marker_fingerprint(marker_path: str) -> str | None:
+    """Read the fingerprint from a done-marker file.
+
+    Returns None for missing markers, empty markers (legacy ``touch()``), or
+    markers whose content isn't valid JSON -- all three are grandfathered as
+    "matches anything" so existing workspaces are not force-re-run (issue #306).
+    """
+    try:
+        content = Path(marker_path).read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return None
+    if not content:
+        return None
+    try:
+        json.loads(content)
+        return content
+    except json.JSONDecodeError:
+        return None
 
 
 def _remove_marker(game: str, stage_name: str) -> None:
@@ -217,14 +244,19 @@ def _run_chain(game: str, chain: list[Stage], ctx: dict,
         return 1
     for st in chain:
         marker = _done_marker(game, st.name)
-        if os.path.isfile(marker):
-            print(f"skip {st.name} ({marker} exists -- delete it to force a re-run)")
-            continue
         try:
             argv = st.build_argv(ctx)
         except StageConfigError as exc:
             print(f"{st.name}: {exc}")
             return 1
+        current_fp = _argv_fingerprint(argv)
+        stored_fp = _read_marker_fingerprint(marker)
+        if stored_fp is not None and stored_fp == current_fp:
+            print(f"skip {st.name} ({marker} exists -- delete it to force a re-run)")
+            continue
+        if stored_fp is None and os.path.isfile(marker):
+            print(f"skip {st.name} ({marker} exists -- delete it to force a re-run)")
+            continue
         # The stage is genuinely about to (re-)execute -- its data may already
         # differ from what any later stage previously consumed, so invalidate
         # downstream markers now, before dispatch, so a failed run still
@@ -234,7 +266,7 @@ def _run_chain(game: str, chain: list[Stage], ctx: dict,
         if rc:
             return rc
         os.makedirs(os.path.dirname(marker), exist_ok=True)
-        Path(marker).touch()
+        Path(marker).write_text(current_fp, encoding="utf-8")
     return 0
 
 
@@ -450,10 +482,7 @@ def _run_hzd(cfg: dict, extra_argv: list) -> int:
                           "bind's own bounded default, 300 -- structural binding already "
                           "resolves most rows without any ASR). 0 = unlimited (an "
                           "uncapped full pass over every ambiguous bucket, hours on a full "
-                          "library). NOTE: if `bind` already completed in this workspace, "
-                          "passing a different --sample-cap here has no effect until you "
-                          "delete out/hzd/.done-bind and re-run -- the done-marker doesn't "
-                          "know its own flags changed.")
+                          "library).")
     _add_slice_flags(ap, chain)
     ns = _parse_or_exit(ap, extra_argv)
     if isinstance(ns, int):
