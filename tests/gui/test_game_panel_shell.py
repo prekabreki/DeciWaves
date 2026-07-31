@@ -51,6 +51,9 @@ def test_export_threads_ds_main_story_scope(qtbot, tmp_path, monkeypatch):
     qtbot.addWidget(w)
     w.bar.set_workspace(ws)
     w.bar.select_game("ds")
+    w.library._parse_pool.waitForDone()
+    from PySide6.QtWidgets import QApplication
+    QApplication.processEvents()
     w.game_panel._main_story.setChecked(True)
     calls = _capture_jobs(w)
     w.library.export.export_mp3_requested.emit(96)

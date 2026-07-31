@@ -277,12 +277,19 @@ def test_dump_runner_start_is_single_flight(qtbot, tmp_path):
 
 # --- shell wiring ----------------------------------------------------------
 
+def _wait_for_parse(view):
+    from PySide6.QtWidgets import QApplication
+    view._parse_pool.waitForDone()
+    QApplication.processEvents()
+
+
 def _mainwindow(qtbot, tmp_path, game):
     from deciwaves.gui.shell import MainWindow
     w = MainWindow()
     qtbot.addWidget(w)
     w.bar.set_workspace(str(tmp_path))
     w.bar.select_game(game)
+    _wait_for_parse(w.library)
     return w
 
 

@@ -20,6 +20,11 @@ from deciwaves.gui.views.library import LibraryView  # noqa: E402
 def _send_key(widget, key):
     QApplication.sendEvent(widget, QKeyEvent(QEvent.KeyPress, key, Qt.NoModifier))
 
+
+def _wait_for_parse(view):
+    view._parse_pool.waitForDone()
+    QApplication.processEvents()
+
 DS_CAT = ["line_id", "core_path", "line_index", "category", "scene", "speaker_code",
           "speaker_name", "subtitle_en", "wem_path_en", "language"]
 FW_FULL = ["line_id", "wav", "speaker", "subtitle", "gamescript_index", "quest", "tier",
@@ -63,6 +68,7 @@ def test_refresh_populates_rows_and_status(qtbot, tmp_path):
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("ds", ws)
+    _wait_for_parse(v)
     assert v.total_count() == 3
     assert v.visible_count() == 3
     assert v.checked_count() == 3
@@ -76,6 +82,7 @@ def test_toggle_checkbox_changes_count_and_persists(qtbot, tmp_path):
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("ds", ws)
+    _wait_for_parse(v)
     idx = v._model.index(0, v._model.COL_CHECK)
     assert v._model.setData(idx, Qt.Unchecked, Qt.CheckStateRole) is True
     assert v.checked_count() == 1
@@ -86,6 +93,7 @@ def test_toggle_checkbox_changes_count_and_persists(qtbot, tmp_path):
     v2 = LibraryView()
     qtbot.addWidget(v2)
     v2.refresh("ds", ws)
+    _wait_for_parse(v2)
     assert v2.checked_count() == 1
     assert "a" in v2._unchecked
 
@@ -97,6 +105,7 @@ def test_filter_changes_visible_not_checked_count(qtbot, tmp_path):
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("ds", ws)
+    _wait_for_parse(v)
     v._search.setText("hello")
     assert v.visible_count() == 1
     assert v.checked_count() == 2  # a filter never touches the selection
@@ -109,6 +118,7 @@ def test_selection_command_and_undo(qtbot, tmp_path):
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("ds", ws)
+    _wait_for_parse(v)
     assert v.checked_count() == 2
     v._uncheck_barks_btn.click()
     assert v.checked_count() == 1
@@ -125,6 +135,7 @@ def test_speaker_dropdown_populated(qtbot, tmp_path):
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("ds", ws)
+    _wait_for_parse(v)
     items = [v._speaker.itemText(i) for i in range(v._speaker.count())]
     assert items == ["all", "Amelie", "Sam"]
 
@@ -135,6 +146,7 @@ def test_short_controls_disabled_without_lengths(qtbot, tmp_path):
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("ds", ws)
+    _wait_for_parse(v)
     assert v._uncheck_short_btn.isEnabled() is False
 
 
@@ -148,6 +160,7 @@ def test_short_controls_enabled_with_fw_wav_lengths(qtbot, tmp_path):
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("fw", ws)
+    _wait_for_parse(v)
     # Lengths start None (lazy) — short controls disabled until the background probe finishes.
     assert v._uncheck_short_btn.isEnabled() is False
 
@@ -163,6 +176,7 @@ def test_header_click_sorts(qtbot, tmp_path):
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("ds", ws)
+    _wait_for_parse(v)
     v._on_header_clicked(v._model.COL_SPEAKER)  # sort by speaker asc
     assert v._model.row_at(0).speaker == "Al"
 
@@ -173,6 +187,7 @@ def test_preview_requested_emitted(qtbot, tmp_path):
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("ds", ws)
+    _wait_for_parse(v)
     idx = v._model.index(0, v._model.COL_PREVIEW)
     with qtbot.waitSignal(v.preview_requested) as blocker:
         v._on_cell_clicked(idx)
@@ -186,6 +201,7 @@ def test_enter_key_previews_current_row(qtbot, tmp_path):
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("ds", ws)
+    _wait_for_parse(v)
     v._table.setCurrentIndex(v._model.index(1, v._model.COL_ID))  # row "b"
     got = []
     v.preview_requested.connect(got.append)
@@ -201,6 +217,7 @@ def test_enter_key_on_unavailable_row_is_noop(qtbot, tmp_path):
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("hzd", ws)
+    _wait_for_parse(v)
     v._table.setCurrentIndex(v._model.index(0, v._model.COL_ID))
     v.preview_requested.connect(lambda _lid: pytest.fail("unavailable row must not preview"))
     _send_key(v._table, Qt.Key_Return)
@@ -213,6 +230,7 @@ def test_space_key_toggles_current_row_checkbox(qtbot, tmp_path):
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("ds", ws)
+    _wait_for_parse(v)
     v._table.setCurrentIndex(v._model.index(0, v._model.COL_ID))  # row "a", not the check col
     assert v.checked_count() == 2
     _send_key(v._table, Qt.Key_Space)
@@ -232,6 +250,7 @@ def test_rapid_space_toggles_produce_one_disk_write(qtbot, tmp_path, monkeypatch
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("ds", ws)
+    _wait_for_parse(v)
     v._table.setCurrentIndex(v._model.index(0, v._model.COL_ID))
 
     calls = []
@@ -257,6 +276,7 @@ def test_preview_column_availability_hzd_prebind_dimmed(qtbot, tmp_path):
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("hzd", ws)
+    _wait_for_parse(v)
     idx = v._model.index(0, v._model.COL_PREVIEW)
     assert v._model.data(idx, Qt.DisplayRole) == "▶"
     assert v._model.data(idx, Qt.ForegroundRole) is not None  # dimmed = unavailable
@@ -274,6 +294,7 @@ def test_preview_column_availability_ds_and_fw_available(qtbot, tmp_path):
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("ds", ws)
+    _wait_for_parse(v)
     idx = v._model.index(0, v._model.COL_PREVIEW)
     assert v._model.data(idx, Qt.ForegroundRole) is None
     assert v._model.data(idx, Qt.ToolTipRole) == "Play preview"
@@ -284,15 +305,16 @@ def test_preview_column_availability_ds_and_fw_available(qtbot, tmp_path):
                  "gamescript_index": "1", "quest": "MQ", "tier": "S", "score": "9",
                  "transcript": "x"}])
     v.refresh("fw", ws)
+    _wait_for_parse(v)
     idx = v._model.index(0, v._model.COL_PREVIEW)
     assert v._model.data(idx, Qt.ForegroundRole) is None
     assert v._model.data(idx, Qt.ToolTipRole) == "Play preview"
 
 
 def test_fw_refresh_does_not_block_on_wav_probe(qtbot, tmp_path):
-    """FW refresh must display rows immediately with length_s=None; the WAV probe runs
-    on a background thread. This is the core H4 fix — the UI thread must never open
-    tens of thousands of WAV headers synchronously."""
+    """FW refresh must display rows with length_s=None once the background parse completes;
+    the WAV probe runs on a separate background thread. Neither the parse nor the WAV probe
+    blocks the UI thread."""
     ws = str(tmp_path)
     _write_wav(os.path.join(ws, "out", "fw", "audio", "f1.wav"), seconds=1.5)
     _write_csv(os.path.join(ws, "out", "fw", "full-reel-manifest.csv"), FW_FULL,
@@ -302,7 +324,8 @@ def test_fw_refresh_does_not_block_on_wav_probe(qtbot, tmp_path):
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("fw", ws)
-    # Rows appear immediately, lengths are None — no blocking WAV probe.
+    _wait_for_parse(v)
+    # Parse is complete — rows are populated, lengths are None — no blocking WAV probe.
     assert v.total_count() == 1
     assert v.rows()[0].length_s is None
     assert v.visible_count() == 1
@@ -323,6 +346,7 @@ def test_fw_lengths_fill_via_background_pass(qtbot, tmp_path):
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("fw", ws)
+    _wait_for_parse(v)
     assert v.rows()[0].length_s is None
 
     # Wait for the background probe and flush queued signals.
@@ -349,20 +373,22 @@ def test_stale_duration_task_results_are_dropped(qtbot, tmp_path, monkeypatch):
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("fw", ws)
+    _wait_for_parse(v)
 
-    # Capture the generation that the first task sees.
+    # Capture the generation that the first duration task was dispatched with.
     gen_before = v._duration_generation
 
-    # Second refresh bumps generation again (simulates rapid refresh before probe finishes).
+    # Second refresh bumps parse + duration generations again (simulates rapid refresh
+    # before the duration probe finishes).
     v.refresh("fw", ws)
     assert v._duration_generation == gen_before + 1
 
     # Simulate a stale result arriving for the old generation — it must be discarded.
     v._on_durations_ready(gen_before, {"f1": 5.0})
-    # The rows should NOT have length 5.0 — the stale result was dropped.
-    assert v.rows()[0].length_s is None  # fresh refresh also started with None
 
-    # After the current generation's probe finishes, lengths are correct.
+    # After the current generation's parse + probe finish, lengths are correct
+    # (1.0, not 5.0 from the stale discarded result).
+    _wait_for_parse(v)
     v._duration_pool.waitForDone()
     QApplication.processEvents()
     assert v.rows()[0].length_s == 1.0
@@ -373,6 +399,7 @@ def test_empty_state_overlay(qtbot, tmp_path):
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("ds", str(tmp_path))
+    _wait_for_parse(v)
     assert v._table.overlay_text == "No catalog yet — run Scan on the Pipeline tab"
 
 
@@ -383,6 +410,7 @@ def test_no_results_overlay_disappears_with_rows(qtbot, tmp_path):
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("ds", ws)
+    _wait_for_parse(v)
     assert v._table.overlay_text is None
 
     v._search.setText("zzz_nonexistent")
@@ -427,6 +455,7 @@ def test_flush_pending_selection_saves_inside_debounce_window(qtbot, tmp_path):
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("ds", ws)
+    _wait_for_parse(v)
     assert v.checked_count() == 2
 
     # Toggle a row — debounce timer starts, no disk write yet
@@ -478,13 +507,16 @@ def test_story_order_hint_shown_for_ds_only(qtbot, tmp_path):
     qtbot.addWidget(v)
 
     v.refresh("ds", ws)
+    _wait_for_parse(v)
     assert not v._story_order_hint.isHidden()
     assert v._story_order_hint.text() == STORY_ORDER_HINT
 
     v.refresh("hzd", ws)
+    _wait_for_parse(v)
     assert v._story_order_hint.isHidden()
 
     v.refresh("fw", ws)
+    _wait_for_parse(v)
     assert v._story_order_hint.isHidden()
 
 
@@ -516,3 +548,49 @@ def test_unset_workspace_does_not_call_load_or_save_against_dot(qtbot, monkeypat
     # debounced selection timer fires — still no save against empty workspace
     v._selection_timer.timeout.emit()
     assert save_calls == []
+
+
+# --- superseded parse (#298) -----------------------------------------------
+
+
+def test_superseded_parse_does_not_overwrite_rows(qtbot, tmp_path, monkeypatch):
+    """A second refresh before the first parse completes discards the stale result:
+    the table shows rows from the latest refresh, not an interleaved mix."""
+    import threading
+
+    import deciwaves.gui.library_model as lib_model
+
+    ws = str(tmp_path)
+    _write_ds_catalog(ws, [_cat_row(line_id="a"), _cat_row(line_id="b")])
+    _write_csv(os.path.join(ws, "out", "hzd", "catalog.csv"), DS_CAT,
+               [_cat_row(line_id="h1"), _cat_row(line_id="h2")])
+
+    v = LibraryView()
+    qtbot.addWidget(v)
+
+    first_block = threading.Event()
+    call_count = [0]
+    original_load = lib_model.load_lines
+
+    def blocking_load(workspace, game):
+        call_count[0] += 1
+        if call_count[0] == 1:
+            first_block.wait()
+        return original_load(workspace, game)
+
+    monkeypatch.setattr(lib_model, "load_lines", blocking_load)
+
+    v.refresh("ds", ws)
+    assert v._parse_pending is True
+
+    v.refresh("hzd", ws)
+    assert v._parse_pending is True
+
+    first_block.set()
+    v._parse_pool.waitForDone()
+    QApplication.processEvents()
+
+    assert v._parse_pending is False
+    assert v._game == "hzd"
+    line_ids = [r.line_id for r in v.rows()]
+    assert line_ids == ["h1", "h2"]
