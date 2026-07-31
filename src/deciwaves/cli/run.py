@@ -49,11 +49,18 @@ class StageConfigError(Exception):
     stage failure by the run loop instead of an uncaught traceback."""
 
 
+def _no_argv(_ctx: dict) -> list:
+    """The default ``build_argv``: this stage's own defaults already match what the chain
+    needs, so ``run`` passes it nothing. Two FW stages (asr, full-reel) used to each carry
+    an identical two-line ``return []`` function purely to fill the field."""
+    return []
+
+
 @dataclass(frozen=True)
 class Stage:
     name: str
     module: str
-    build_argv: Callable[[dict], list]
+    build_argv: Callable[[dict], list] = _no_argv
     gpu: bool = False  # gate on importlib.util.find_spec("whisperx") before running
 
 
@@ -525,10 +532,6 @@ def _fw_extract_argv(ctx: dict) -> list:
     return ["--package", ctx["package"]]
 
 
-def _fw_asr_argv(ctx: dict) -> list:
-    return []
-
-
 def _fw_subtitle_bind_argv(ctx: dict) -> list:
     # subtitle-bind's own --out default (`subtitle_bind.DEFAULT_OUT`) already
     # matches what match/full-reel/weave read by default, so this stage needs
@@ -549,10 +552,6 @@ def _fw_subtitle_bind_argv(ctx: dict) -> list:
 
 def _fw_match_argv(ctx: dict) -> list:
     return ["--gamescript", ctx["gamescript"]]
-
-
-def _fw_full_reel_argv(ctx: dict) -> list:
-    return []
 
 
 def _fw_render_argv(ctx: dict) -> list:
@@ -681,10 +680,10 @@ def run_chain(game: str) -> list[Stage]:
         ],
         "fw": [
             Stage("extract", STAGES["fw"]["extract"][0], _fw_extract_argv),
-            Stage("asr", STAGES["fw"]["asr"][0], _fw_asr_argv, gpu=True),
+            Stage("asr", STAGES["fw"]["asr"][0], gpu=True),
             Stage("subtitle-bind", STAGES["fw"]["subtitle-bind"][0], _fw_subtitle_bind_argv),
             Stage("match", STAGES["fw"]["match"][0], _fw_match_argv),
-            Stage("full-reel", STAGES["fw"]["full-reel"][0], _fw_full_reel_argv),
+            Stage("full-reel", STAGES["fw"]["full-reel"][0]),
             Stage("render", STAGES["fw"]["render"][0], _fw_render_argv),
         ],
     }[game]

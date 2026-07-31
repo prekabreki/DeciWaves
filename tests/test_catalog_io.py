@@ -5,7 +5,7 @@ import csv
 import pytest
 
 from deciwaves.engine.catalog_io import (
-    CsvFormatError, read_csv_rows,
+    CsvFormatError, read_csv_rows, read_line_ids,
 )
 
 
@@ -72,3 +72,49 @@ def test_read_csv_rows_required_no_missing_column_passes(tmp_path):
     rows = read_csv_rows(str(p), required=["a", "c"])
     assert rows[0]["a"] == "1"
     assert rows[0]["c"] == "3"
+
+
+# --- tolerant reads (the GUI's contract) ------------------------------------
+
+
+def test_read_csv_rows_missing_file_raises_by_default(tmp_path):
+    """A CLI stage wants a missing manifest to be a real, diagnosable failure."""
+    with pytest.raises(OSError):
+        read_csv_rows(str(tmp_path / "nope.csv"))
+
+
+def test_read_csv_rows_tolerant_returns_empty_for_missing_file(tmp_path):
+    """The GUI reads artifacts that legitimately do not exist yet; [] not a crashed panel."""
+    assert read_csv_rows(str(tmp_path / "nope.csv"), tolerant=True) == []
+
+
+def test_read_csv_rows_tolerant_still_raises_on_bad_header(tmp_path):
+    """`tolerant` forgives ABSENT, never MALFORMED.
+
+    Regression guard: CsvFormatError subclasses ValueError, so a naive
+    `except (OSError, ValueError)` swallows a missing-column error into [] and the
+    caller silently renders nothing instead of being told its manifest is wrong.
+    """
+    p = tmp_path / "bad.csv"
+    with open(p, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=["a", "b"])
+        w.writeheader()
+        w.writerow({"a": "1", "b": "2"})
+    with pytest.raises(CsvFormatError):
+        read_csv_rows(str(p), required=["a", "missing_col"], tolerant=True)
+
+
+# --- read_line_ids ----------------------------------------------------------
+
+
+def test_read_line_ids_skips_blanks_and_strips(tmp_path):
+    p = tmp_path / "ids.txt"
+    p.write_text("id_one\n\n  id_two  \n\n", encoding="utf-8")
+    assert read_line_ids(str(p)) == ["id_one", "id_two"]
+
+
+def test_read_line_ids_strips_bom_from_first_id(tmp_path):
+    """A BOM must not fuse into the FIRST id, or exactly one row of a dump goes missing."""
+    p = tmp_path / "ids.txt"
+    p.write_bytes(b"\xef\xbb\xbfid_one\nid_two\n")
+    assert read_line_ids(str(p)) == ["id_one", "id_two"]

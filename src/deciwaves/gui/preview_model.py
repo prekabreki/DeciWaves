@@ -22,12 +22,12 @@ Per game (mirrors each render stage's call site):
 """
 from __future__ import annotations
 
-import csv
 import os
 import threading
 
 from deciwaves.cli import config
 from deciwaves.engine.audio_clip import clip_wav
+from deciwaves.engine.catalog_io import read_csv_rows
 from deciwaves.engine.pack.bin_index import PackIndex
 from deciwaves.engine.pack.hzd_package import HzdPackage
 from deciwaves.games.hzd.atrac9 import decode_wem_to_wav
@@ -53,13 +53,10 @@ def _cache_hit(wav_path: str) -> bool:
 
 
 def _read_csv(path: str) -> list[dict]:
-    """``csv.DictReader`` rows for *path*, or ``[]`` if absent/unreadable. ``utf-8-sig`` so a
-    BOM is consumed rather than fused onto the first header (the repo's recurring BOM theme)."""
-    try:
-        with open(path, "r", newline="", encoding="utf-8-sig") as f:
-            return list(csv.DictReader(f))
-    except (OSError, ValueError):
-        return []
+    """``csv.DictReader`` rows for *path*, or ``[]`` if absent/unreadable. Thin alias over
+    ``engine.catalog_io.read_csv_rows(..., tolerant=True)``, which owns the ``utf-8-sig`` BOM
+    contract (the repo's recurring BOM theme -- issues #59/#84/#229)."""
+    return read_csv_rows(path, tolerant=True)
 
 
 class PreviewResolver:

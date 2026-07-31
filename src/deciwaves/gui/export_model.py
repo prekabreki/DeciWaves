@@ -26,6 +26,7 @@ from dataclasses import dataclass
 
 from deciwaves.cli.config import resolve_ds_install
 from deciwaves.engine.atomic_io import atomic_write
+from deciwaves.gui.artifact_paths import out_dir, pipeline_render_input
 from deciwaves.gui.cli_command import build_cli_command
 
 # FW render's ``--tiers`` fallback when the filtered manifest carries no tier values at all
@@ -41,41 +42,15 @@ class ExportError(Exception):
     in the log console rather than crashing."""
 
 
-def _out_dir(workspace: str, game: str) -> str:
-    """Artifact root for *game*: ``out/`` for DS, ``out/<game>/`` for HZD/FW (spec §9 #6)."""
-    return os.path.join(workspace, "out") if game == "ds" else os.path.join(workspace, "out", game)
-
-
-def _pipeline_input_source(workspace: str, game: str) -> str | None:
-    """The pipeline's own render-input CSV (ignoring any manual-order override): DS
-    ``out/playlist.csv`` (pre-``order`` -> None), HZD ``out/hzd/asr-manifest.csv`` (pre-``bind``
-    -> None), FW ``out/fw/full-reel-manifest.csv`` else ``out/fw/subtitle-manifest-full.csv``
-    (pre-``subtitle-bind`` -> None). This is what :func:`import_order` joins against."""
-    root = _out_dir(workspace, game)
-    if game == "ds":
-        candidates = ["playlist.csv"]
-    elif game == "hzd":
-        candidates = ["asr-manifest.csv"]
-    elif game == "fw":
-        candidates = ["full-reel-manifest.csv", "subtitle-manifest-full.csv"]
-    else:
-        return None
-    for name in candidates:
-        path = os.path.join(root, name)
-        if os.path.isfile(path):
-            return path
-    return None
-
-
 def render_input_source(workspace: str, game: str) -> str | None:
     """The render-input CSV the render stage reads, override-aware: a manual-order override
     (:func:`imported_order_path`) wins when present, else the pipeline artifact
-    (:func:`_pipeline_input_source`). All consumers (Export MP3, the Library) go through this,
-    so an active override drives both display and render."""
+    (``artifact_paths.pipeline_render_input``). All consumers (Export MP3, the Library) go
+    through this, so an active override drives both display and render."""
     override = imported_order_path(workspace, game)
     if os.path.isfile(override):
         return override
-    return _pipeline_input_source(workspace, game)
+    return pipeline_render_input(workspace, game)
 
 
 def can_export_mp3(workspace: str, game: str) -> bool:
@@ -314,7 +289,7 @@ def import_order(workspace: str, game: str, src_csv: str) -> ImportResult:
     atomically -- unknown ids, duplicate ids, a missing ``line_id`` column, an empty file, or a
     missing pipeline artifact all abort with nothing written. On success writes
     :func:`imported_order_path` (base schema, base row data, the user's order)."""
-    base_src = _pipeline_input_source(workspace, game)
+    base_src = pipeline_render_input(workspace, game)
     if base_src is None:
         return ImportResult(False, None, 0, [_missing_source_message(game)])
 
@@ -386,7 +361,7 @@ def catalog_source_path(workspace: str, game: str) -> str | None:
     """The on-disk catalog CSV Export-catalog copies: DS ``out/catalog.csv``, HZD
     ``out/hzd/catalog.csv``; FW has no catalog, so its ``out/fw/clip-index.csv`` (ids + wav
     paths) stands in. ``None`` when the file doesn't exist yet."""
-    root = _out_dir(workspace, game)
+    root = out_dir(workspace, game)
     name = "clip-index.csv" if game == "fw" else "catalog.csv"
     path = os.path.join(root, name)
     return path if os.path.isfile(path) else None

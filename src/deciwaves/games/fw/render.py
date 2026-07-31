@@ -122,10 +122,6 @@ REQUIRED_COLS = ("line_id", "gamescript_index", "quest", "tier",
                  "speaker", "subtitle", "wav")
 
 
-class ManifestError(Exception):
-    """A manifest that can't be rendered (missing/garbled required columns)."""
-
-
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Render FW story reel to MP3")
     ap.add_argument("--manifest", default=DEFAULT_MANIFEST)

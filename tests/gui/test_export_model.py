@@ -490,14 +490,17 @@ def _write_minimal_csv(path, header="line_id\n", body="a\n"):
 
 
 def test_render_input_source_prefers_override(tmp_path):
-    from deciwaves.gui import export_model as em
+    from deciwaves.gui import artifact_paths, export_model as em
 
     ws = str(tmp_path)
     _write_minimal_csv(os.path.join(ws, "out", "playlist.csv"))
     assert em.render_input_source(ws, "ds").endswith(os.path.join("out", "playlist.csv"))
     _write_minimal_csv(em.imported_order_path(ws, "ds"))
     assert em.render_input_source(ws, "ds") == em.imported_order_path(ws, "ds")
-    assert em._pipeline_input_source(ws, "ds").endswith(os.path.join("out", "playlist.csv"))
+    # The override winning must not mean the pipeline artifact stopped resolving: revert
+    # deletes the override and render_input_source has to fall straight back to it.
+    assert artifact_paths.pipeline_render_input(ws, "ds").endswith(
+        os.path.join("out", "playlist.csv"))
 
 
 # --- Task 3: import_order ---------------------------------------------------

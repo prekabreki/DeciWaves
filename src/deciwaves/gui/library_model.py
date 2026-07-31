@@ -2,9 +2,9 @@
 normalized ``LineRow`` list, and provide the pure filter/sort/selection logic the thin
 widget renders. Imports without PySide6 and unit-tests on the base ``.[test]`` install.
 
-Deliberately import-light: reads artifacts with ``csv.DictReader`` and never imports
-``deciwaves.games.*`` (those pull pydecima / heavy parsers). The columns each game writes
-are verified against the stage code:
+Deliberately import-light: reads artifacts through ``engine.catalog_io.read_csv_rows`` (itself
+dependency-free by contract) and never imports ``deciwaves.games.*`` (those pull pydecima /
+heavy parsers). The columns each game writes are verified against the stage code:
 
 - **DS** artifacts live in ``out/`` ROOT (spec §9 gotcha #6): story ``out/playlist.csv``
   (``games/ds/story_order.py`` ``PLAYLIST_COLUMNS``) else ``out/catalog.csv``
@@ -25,7 +25,6 @@ are verified against the stage code:
 """
 from __future__ import annotations
 
-import csv
 import json
 import os
 import struct
@@ -34,6 +33,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from deciwaves.engine.atomic_io import atomic_write
+from deciwaves.engine.catalog_io import read_csv_rows
+from deciwaves.gui.artifact_paths import out_dir
 from deciwaves.gui.export_model import imported_order_path
 
 # HZD story voice is 48 kHz mono ATRAC9 (games/hzd/sentence_fw.py comment); b_samples is the
@@ -72,15 +73,12 @@ class LineRow:
 def _read_csv(path: str) -> list[dict]:
     """``csv.DictReader`` rows for *path*, or ``[]`` if the file is absent/unreadable.
 
-    Opened as ``utf-8-sig`` so a UTF-8 BOM is consumed rather than fused onto the first
-    header (``\\ufeffline_id``), which would silently parse every ``line_id`` as ``""``
-    and key the whole selection under one blank id (the repo's recurring BOM-mojibake
-    theme -- issues #59/#84). ``utf-8-sig`` reads both BOM and no-BOM files."""
-    try:
-        with open(path, "r", newline="", encoding="utf-8-sig") as f:
-            return list(csv.DictReader(f))
-    except (OSError, ValueError):
-        return []
+    Thin alias over ``engine.catalog_io.read_csv_rows(..., tolerant=True)``, which owns the
+    BOM contract: ``utf-8-sig`` so a UTF-8 BOM is consumed rather than fused onto the first
+    header (``\\ufeffline_id``), which would silently parse every ``line_id`` as ``""`` and
+    key the whole selection under one blank id (the repo's recurring BOM-mojibake theme --
+    issues #59/#84). Kept as a local name because this module calls it in several places."""
+    return read_csv_rows(path, tolerant=True)
 
 
 def _has_subtitle(subtitle: str | None) -> bool:
@@ -91,10 +89,6 @@ def _has_subtitle(subtitle: str | None) -> bool:
     s = subtitle.strip()
     return bool(s) and s.lower() != _NONE_SUBTITLE
 
-
-def _out_dir(workspace: str, game: str) -> str:
-    """Artifact root for *game*: ``out/`` for DS, ``out/<game>/`` for HZD/FW (spec §9 #6)."""
-    return os.path.join(workspace, "out") if game == "ds" else os.path.join(workspace, "out", game)
 
 
 def _precompute_haystack(r: LineRow) -> LineRow:
@@ -118,7 +112,7 @@ def load_lines(workspace: str, game: str) -> list[LineRow]:
 
 
 def _load_ds(workspace: str) -> list[LineRow]:
-    root = _out_dir(workspace, "ds")
+    root = out_dir(workspace, "ds")
     override = imported_order_path(workspace, "ds")
     src = override if os.path.isfile(override) else os.path.join(root, "playlist.csv")
     if os.path.isfile(src):
@@ -148,7 +142,7 @@ def _load_ds_catalog_shape(path: str) -> list[LineRow]:
 
 
 def _load_hzd(workspace: str) -> list[LineRow]:
-    root = _out_dir(workspace, "hzd")
+    root = out_dir(workspace, "hzd")
     override = imported_order_path(workspace, "hzd")
     src = override if os.path.isfile(override) else os.path.join(root, "asr-manifest.csv")
     if os.path.isfile(src):
@@ -181,7 +175,7 @@ def _hzd_b_samples_by_clip_row(clip_index_path: str) -> dict[str, int]:
 
 
 def _load_fw(workspace: str) -> list[LineRow]:
-    root = _out_dir(workspace, "fw")
+    root = out_dir(workspace, "fw")
     # A manual-order override (out/fw/gui/imported-order.csv) is full-reel-shaped, so it reads
     # through the same mapping and simply substitutes for the story-order choice.
     override = imported_order_path(workspace, "fw")

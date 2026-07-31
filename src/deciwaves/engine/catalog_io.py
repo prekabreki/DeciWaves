@@ -20,7 +20,7 @@ class CsvFormatError(ValueError):
     """A CSV file is missing required columns or has a format issue."""
 
 
-def read_csv_rows(path, *, required=None):
+def read_csv_rows(path, *, required=None, tolerant=False):
     """Open a CSV with BOM-safe encoding (``utf-8-sig``) and return ``list[dict]``
     via ``csv.DictReader``.
 
@@ -28,22 +28,56 @@ def read_csv_rows(path, *, required=None):
     all required columns and raises ``CsvFormatError`` listing the missing
     column(s) and the actual header. Pass ``None`` (default) for no validation.
 
+    ``tolerant``: return ``[]`` instead of raising when the file is absent or
+    unreadable (``OSError``/``ValueError``). The GUI needs this -- it reads pipeline
+    artifacts that legitimately do not exist yet, on a path where an exception is a
+    crashed panel rather than a diagnosable error. CLI stages want the default
+    (raise), because a missing manifest there is a real failure with an exit code
+    attached. Note ``required`` still raises under ``tolerant`` if the file parses
+    but its header is wrong: absent is expected, malformed is not.
+
     BOM-safety (issue #84, #229): ``utf-8-sig`` transparently strips a UTF-8 BOM
     that PowerShell 5.1's ``Set-Content -Encoding utf8`` writes, which would
     otherwise fuse ``\\ufeff`` into the first header key and cause a ``KeyError``.
-    BOM-less (plain-utf8) manifests are a subset and are unaffected.
+    BOM-less (plain-utf8) manifests are a subset and are unaffected. The
+    ``tolerant`` variant of this function used to be copy-pasted as a private
+    ``_read_csv`` in three modules (``gui.library_model``, ``gui.preview_model``,
+    ``games.hzd.catalog``); it lives here so the BOM contract has exactly one home,
+    which is the whole point of issue #229's consolidation.
     """
-    with open(path, newline="", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
-        fields = reader.fieldnames or []
-        if required is not None:
-            missing = [c for c in required if c not in fields]
-            if missing:
-                raise CsvFormatError(
-                    f"manifest {path} is missing required column(s) "
-                    f"{', '.join(missing)} (header has: "
-                    f"{', '.join(fields) or 'nothing'}).")
-        return list(reader)
+    try:
+        with open(path, newline="", encoding="utf-8-sig") as f:
+            reader = csv.DictReader(f)
+            fields = reader.fieldnames or []
+            if required is not None:
+                missing = [c for c in required if c not in fields]
+                if missing:
+                    raise CsvFormatError(
+                        f"manifest {path} is missing required column(s) "
+                        f"{', '.join(missing)} (header has: "
+                        f"{', '.join(fields) or 'nothing'}).")
+            return list(reader)
+    except CsvFormatError:
+        # Listed before the ValueError arm on purpose: CsvFormatError IS a ValueError,
+        # so without this a tolerant read would swallow a malformed header into [] and
+        # silently disagree with the docstring above.
+        raise
+    except (OSError, ValueError):
+        if tolerant:
+            return []
+        raise
+
+
+def read_line_ids(path):
+    """One ``line_id`` per line from a plain-text id list, blanks skipped.
+
+    The ``--ids`` input every ``<game> dump`` stage takes. Was copy-pasted identically as a
+    private ``_read_ids`` in all three (``games/{ds,hzd,fw}/dump.py``). Opened ``utf-8-sig``
+    for the same reason the CSV reader is: a BOM would otherwise fuse into the FIRST id and
+    make exactly one row of a dump silently go missing.
+    """
+    with open(path, encoding="utf-8-sig") as f:
+        return [line.strip() for line in f if line.strip()]
 
 
 def done_core_paths(csv_path):

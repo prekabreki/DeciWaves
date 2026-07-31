@@ -18,10 +18,13 @@ from dataclasses import dataclass
 from deciwaves.cli.doctor import Availability
 
 # doctor.Availability.value strings, as they appear in each check's "status" field.
+# Only the three that are actually branched on (here and in setup_model).
+# Availability.UNAVAILABLE deliberately has no mirror: severity() reaches it as the
+# fall-through after OK/BROKEN/NOT_CONFIGURED and keys off _GPU_READINESS instead of
+# matching the status string, so a fourth constant would be defined and never compared.
 STATUS_OK = "ok"
 STATUS_NOT_CONFIGURED = "not_configured"
 STATUS_BROKEN = "broken"
-STATUS_UNAVAILABLE = "unavailable"
 
 # GUI-side severities the panel renders (colour/icon), distinct from the CLI's status.
 SEV_OK = "ok"

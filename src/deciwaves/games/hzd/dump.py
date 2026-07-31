@@ -10,20 +10,11 @@ from __future__ import annotations
 import os
 import sys
 
+from deciwaves.engine.catalog_io import read_line_ids
 from deciwaves.engine.pack.hzd_package import HzdPackage
 from deciwaves.games.hzd.atrac9 import decode_wem_to_wav, Atrac9Error
 from deciwaves.games.hzd.catalog import load_hzd_manifest_join
 from deciwaves.games.hzd.profile import VOICE_ARCHIVE
-
-
-def _read_ids(path: str) -> list[str]:
-    ids: list[str] = []
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                ids.append(line)
-    return ids
 
 
 def main(argv=None) -> int:
@@ -45,7 +36,7 @@ def main(argv=None) -> int:
         print(f"  missing: {a.manifest} or {a.clip_index}", file=sys.stderr)
         return 1
 
-    ids = _read_ids(a.ids)
+    ids = read_line_ids(a.ids)
     if not ids:
         print("deciwaves hzd dump: no line IDs in --ids file", file=sys.stderr)
         return 1

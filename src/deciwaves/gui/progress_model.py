@@ -9,6 +9,8 @@ import json
 import os
 from dataclasses import dataclass
 
+from deciwaves.gui.artifact_paths import out_dir, pipeline_render_input
+
 
 @dataclass(frozen=True)
 class StageProgress:
@@ -32,10 +34,6 @@ class StageProgress:
         if self.context:
             return f"{self.context}: {base}"
         return base
-
-
-def _out_dir(workspace: str, game: str) -> str:
-    return os.path.join(workspace, "out") if game == "ds" else os.path.join(workspace, "out", game)
 
 
 def _line_count(path: str) -> int:
@@ -72,7 +70,7 @@ def _file_count(dir_path: str, ext: str) -> int:
 
 
 def catalog_progress(workspace: str, game: str) -> StageProgress:
-    path = os.path.join(_out_dir(workspace, game), "catalog-processed.txt")
+    path = os.path.join(out_dir(workspace, game), "catalog-processed.txt")
     return StageProgress(current=_line_count(path), context="catalog")
 
 
@@ -97,7 +95,7 @@ def asr_transcript_progress(workspace: str) -> StageProgress:
 
 
 def wav_cache_progress(workspace: str, game: str) -> StageProgress:
-    d = os.path.join(_out_dir(workspace, game), "wav-cache")
+    d = os.path.join(out_dir(workspace, game), "wav-cache")
     return StageProgress(current=_wav_count(d), context="WAV cache")
 
 
@@ -107,11 +105,11 @@ def wav_cache_progress(workspace: str, game: str) -> StageProgress:
 
 def _render_out_dir(workspace: str, game: str) -> str:
     subdir = {"ds": "audio", "hzd": "audio", "fw": "reels"}.get(game, "audio")
-    return os.path.join(_out_dir(workspace, game), subdir)
+    return os.path.join(out_dir(workspace, game), subdir)
 
 
 def _render_cache_dir(workspace: str, game: str) -> str:
-    return os.path.join(_out_dir(workspace, game), "wav-cache")
+    return os.path.join(out_dir(workspace, game), "wav-cache")
 
 
 def _decode_wav_count(workspace: str, game: str) -> int:
@@ -132,7 +130,7 @@ def _render_total(workspace: str, game: str) -> int | None:
     count = _csv_row_count(sel_path)
     if count > 0:
         return count
-    source = _render_input_source_path(workspace, game)
+    source = pipeline_render_input(workspace, game)
     if source:
         count = _csv_row_count(source)
         if count > 0:
@@ -140,25 +138,8 @@ def _render_total(workspace: str, game: str) -> int | None:
     return None
 
 
-def _render_input_source_path(workspace: str, game: str) -> str | None:
-    root = _out_dir(workspace, game)
-    if game == "ds":
-        candidates = ["playlist.csv"]
-    elif game == "hzd":
-        candidates = ["asr-manifest.csv"]
-    elif game == "fw":
-        candidates = ["full-reel-manifest.csv", "subtitle-manifest-full.csv"]
-    else:
-        return None
-    for name in candidates:
-        path = os.path.join(root, name)
-        if os.path.isfile(path):
-            return path
-    return None
-
-
 def csv_output_progress(workspace: str, game: str, csv_name: str) -> StageProgress:
-    path = os.path.join(_out_dir(workspace, game), csv_name)
+    path = os.path.join(out_dir(workspace, game), csv_name)
     return StageProgress(current=_csv_row_count(path), context=csv_name)
 
 

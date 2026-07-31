@@ -33,7 +33,8 @@ import re
 import sys
 
 from deciwaves.engine.catalog_io import (
-    CSV_COLUMNS, processed_core_paths, prune_incomplete_rows, write_core_paths_sidecar,
+    CSV_COLUMNS, processed_core_paths, prune_incomplete_rows, read_csv_rows,
+    write_core_paths_sidecar,
 )
 from deciwaves.games.hzd.sentence_fw import parse_sentences_fw
 from deciwaves.games.hzd.profile import (
@@ -269,23 +270,16 @@ def load_hzd_manifest_join(manifest_path: str, clip_index_path: str
     ``asr-manifest`` and ``clip-index`` CSVs. Shared helper imported by preview
     and render instead of each re-implementing the manifest-to-clip-coords join.
 
-    Returns two empty dicts when either file is absent/unreadable, mirroring
-    ``preview_model``'s fail-soft contract so the caller can raise its own
-    domain-specific error."""
-    def _read_csv(path: str) -> list[dict]:
-        try:
-            with open(path, "r", newline="", encoding="utf-8-sig") as f:
-                return list(csv.DictReader(f))
-        except (OSError, ValueError):
-            return []
-
+    Returns two empty dicts when either file is absent/unreadable (``read_csv_rows``'s
+    ``tolerant`` mode), mirroring ``preview_model``'s fail-soft contract so the caller
+    can raise its own domain-specific error."""
     line_to_clip: dict[str, str] = {
         r.get("line_id", ""): r.get("clip_row", "")
-        for r in _read_csv(manifest_path)
+        for r in read_csv_rows(manifest_path, tolerant=True)
         if r.get("line_id")
     }
     clip_coords: dict[int, tuple[int, int]] = {}
-    for r in _read_csv(clip_index_path):
+    for r in read_csv_rows(clip_index_path, tolerant=True):
         try:
             clip_coords[int(r["clip_row"])] = (int(r["offset"]), int(r["a_bytes"]))
         except (KeyError, TypeError, ValueError):

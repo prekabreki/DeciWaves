@@ -13,6 +13,7 @@ import sys
 
 from deciwaves.cli import config
 from deciwaves.engine.audio_clip import clip_wav, ClipError
+from deciwaves.engine.catalog_io import read_line_ids
 from deciwaves.engine.pack.bin_index import PackIndex
 
 
@@ -34,16 +35,6 @@ def _load_catalog(csv_path: str) -> dict[str, str]:
     return mapping
 
 
-def _read_ids(path: str) -> list[str]:
-    ids: list[str] = []
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                ids.append(line)
-    return ids
-
-
 def main(argv=None) -> int:
     import argparse
     ap = argparse.ArgumentParser(description="DS: decode selected lines to WAV files")
@@ -60,7 +51,7 @@ def main(argv=None) -> int:
               file=sys.stderr)
         return 1
 
-    ids = _read_ids(a.ids)
+    ids = read_line_ids(a.ids)
     if not ids:
         print("deciwaves ds dump: no line IDs in --ids file", file=sys.stderr)
         return 1
