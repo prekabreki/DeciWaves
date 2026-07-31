@@ -39,7 +39,6 @@ def test_bare_falls_back_to_guided_when_gui_absent(monkeypatch):
 
 def test_gui_subcommand_launches_when_available(monkeypatch):
     calls = {}
-    monkeypatch.setattr(cli_main, "_gui_is_available", lambda: True)
     monkeypatch.setattr("deciwaves.gui.launch",
                         lambda argv=None: calls.update(gui=True) or 0)
     assert cli_main.main(["gui"]) == 0
@@ -47,7 +46,9 @@ def test_gui_subcommand_launches_when_available(monkeypatch):
 
 
 def test_gui_subcommand_hint_when_absent(monkeypatch, capsys):
-    monkeypatch.setattr(cli_main, "_gui_is_available", lambda: False)
+    # The availability check and INSTALL_HINT live in gui.launch() (issue #308) -- the
+    # subcommand just delegates, so force launch's own check to fail and assert the hint.
+    monkeypatch.setattr("deciwaves.gui.is_available", lambda: False)
     rc = cli_main.main(["gui"])
     assert rc != 0
     assert 'pip install "deciwaves[gui]"' in capsys.readouterr().out
