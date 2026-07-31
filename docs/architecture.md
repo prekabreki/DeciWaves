@@ -47,7 +47,8 @@ now lives under `games/ds/` alongside DS's other game-specific modules.
 `deciwaves.engine.profile.GameProfile` is a frozen dataclass that carries the knobs a
 game-agnostic module needs without hardcoding a specific game's paths:
 
-- `pack_reader` — the object that knows how to read this game's archives.
+- `pack_reader` — the object that knows how to read this game's archives, typed as the
+  `PackReader` Protocol (`engine/pack/base.py`) since issue #305.
 - `decima_version` — the string passed to the vendored pydecima reader (e.g. `"DSPC"`).
 - `core_prefixes` — a `{virtual_path_prefix: category}` mapping used to select and classify
   which `.core` files hold dialogue.
