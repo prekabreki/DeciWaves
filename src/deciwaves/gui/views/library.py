@@ -175,6 +175,8 @@ class _LibraryTableView(QTableView):
 
     @property
     def overlay_text(self) -> str | None:
+        if not self._view._workspace:
+            return "Choose an output folder for your reels"
         if not self._view._rows:
             return "No catalog yet — run Scan on the Pipeline tab"
         if not self._view._visible:
@@ -243,7 +245,7 @@ class LibraryView(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._game: str | None = None  # no game loaded yet -> first refresh is a game change
-        self._workspace = "."
+        self._workspace = ""
         self._rows: list[LineRow] = []
         self._visible: list[LineRow] = []
         self._unchecked: set[str] = set()
@@ -407,6 +409,23 @@ class LibraryView(QWidget):
         game_changed = game != self._game
         self._game = game
         self._workspace = workspace
+        if not workspace:
+            self._rows = []
+            self._visible = []
+            self._unchecked = set()
+            self._checked_count = 0
+            self._undo.clear()
+            self._bind_done = False
+            self._available = {}
+            self._can_export_mp3 = False
+            self._has_catalog = False
+            self._order_active = False
+            self._order_count = 0
+            self._duration_generation += 1
+            if game_changed:
+                self._reset_filter_state()
+            self._apply_filters()
+            return
         self._rows = load_lines(workspace, game)
         self._unchecked = load_selection(workspace, game)
         self._checked_count = sum(
@@ -553,6 +572,8 @@ class LibraryView(QWidget):
     def _flush_selection(self) -> None:
         """Persist the unchecked set to disk (called by the debounce timer, or immediately
         for bulk commands)."""
+        if not self._workspace:
+            return
         save_selection(self._workspace, self._game, self._unchecked)
 
     def flush_pending_selection(self) -> None:
@@ -567,6 +588,8 @@ class LibraryView(QWidget):
 
     def _apply_selection(self, new_unchecked: set[str]) -> None:
         """Apply a bulk selection command — flush immediately, not debounced."""
+        if not self._workspace:
+            return
         self._selection_timer.stop()
         self._undo.append(set(self._unchecked))
         self._unchecked = new_unchecked
