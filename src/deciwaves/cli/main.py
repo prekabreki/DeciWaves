@@ -1,6 +1,7 @@
 """DeciWaves -- voice-audio extraction for Decima-engine games you own."""
 import argparse
 import importlib
+import os
 import sys
 from pathlib import Path
 
@@ -98,6 +99,12 @@ def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     ap = argparse.ArgumentParser(prog="deciwaves", description=__doc__)
     ap.add_argument("--version", action="version", version=f"deciwaves {__version__}")
+    ap.add_argument("--debug", action="store_true", help=(
+        "re-raise an unhandled error so the full traceback prints (instead of "
+        "a one-line message); also enabled by DECIWAVES_DEBUG=1. Must come "
+        "BEFORE the game name, like --workspace -- after it, the token is "
+        "swallowed as that stage's own argument instead."
+    ))
     ap.add_argument("--workspace", default=".", help=(
         "directory outputs are written under (default: current dir). Must come "
         "BEFORE the game name, e.g. `deciwaves --workspace DIR ds run` -- placed "
@@ -149,6 +156,31 @@ def main(argv=None) -> int:
             raise
         return e.code
 
+    try:
+        return _main_dispatch(args, rest, game_parsers)
+    except Exception as exc:
+        # An unhandled error from a dispatched target -- or anything else in the
+        # pipeline -- must not land as a raw traceback: the GUI runs the child
+        # with QProcess.MergedChannels, so a traceback would be the primary
+        # error UI (issue #297). Report one human line on stderr and a nonzero
+        # exit code; --debug / DECIWAVES_DEBUG=1 re-raises for the full
+        # traceback. KeyboardInterrupt and SystemExit are BaseException
+        # subclasses and deliberately pass through uncaught.
+        if args.debug or os.environ.get("DECIWAVES_DEBUG") == "1":
+            raise
+        detail = str(exc) or type(exc).__name__
+        print(f"deciwaves: error: {detail} -- re-run with --debug "
+              f"(or DECIWAVES_DEBUG=1) for the full traceback", file=sys.stderr)
+        return 1
+
+
+def _main_dispatch(args, rest, game_parsers) -> int:
+    """The work main() routes to after parsing: apply the config env, resolve
+    and enter the workspace, then hand off to the GUI / guided prompt / setup /
+    doctor / a single game stage / `run`. Split out of main() so main() can
+    wrap it in one top-level ``except Exception`` (issue #297: an unhandled
+    error from a stage must be a one-line stderr message plus a nonzero exit
+    code, not a raw traceback)."""
     cfg = _apply_config_env()  # sets DECIWAVES_VGMSTREAM/DECIWAVES_VGAUDIO (and
     # PATH) from saved config; engine.tool_paths.resolve() reads them when the
     # decoder subprocess is actually spawned, not at stage-module import time.

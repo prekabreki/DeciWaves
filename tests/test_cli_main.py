@@ -298,3 +298,63 @@ def test_workspace_ambiguous_relative_path_refuses_with_exit_2(monkeypatch, tmp_
     assert "gamescript.md" in err
     assert str(cwd_gamescript.resolve()) in err
     assert str(ws_gamescript.resolve()) in err
+
+
+def test_raising_stage_returns_nonzero_friendly_message_no_traceback(monkeypatch, tmp_path, capsys):
+    """An unhandled exception from a stage must surface as one human line on
+    stderr plus a nonzero exit code -- never a raw traceback (issue #297). The
+    GUI runs the child with QProcess.MergedChannels, so a traceback would
+    otherwise be the primary error UI; the friendly line is what the user sees
+    instead."""
+    def _boom(argv):
+        raise RuntimeError("kaboom")
+
+    monkeypatch.setattr(cli, "_import_stage", lambda mod: _boom)
+
+    rc = cli.main(["--workspace", str(tmp_path), "ds", "catalog"])
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "kaboom" in err
+    assert "--debug" in err and "DECIWAVES_DEBUG" in err
+    assert "Traceback (most recent call last)" not in err
+
+
+def test_raising_stage_debug_flag_re_raises_full_traceback(monkeypatch, tmp_path):
+    """--debug (before the game name, like --workspace) is the escape hatch:
+    the exception re-raises so Python prints the full traceback instead of the
+    one-line message (issue #297)."""
+    def _boom(argv):
+        raise RuntimeError("kaboom")
+
+    monkeypatch.setattr(cli, "_import_stage", lambda mod: _boom)
+
+    with pytest.raises(RuntimeError, match="kaboom"):
+        cli.main(["--debug", "--workspace", str(tmp_path), "ds", "catalog"])
+
+
+def test_raising_stage_debug_env_var_re_raises_full_traceback(monkeypatch, tmp_path):
+    """DECIWAVES_DEBUG=1 enables the same full-traceback escape hatch as
+    --debug, from any argv position (issue #297)."""
+    def _boom(argv):
+        raise RuntimeError("kaboom")
+
+    monkeypatch.setattr(cli, "_import_stage", lambda mod: _boom)
+    monkeypatch.setenv("DECIWAVES_DEBUG", "1")
+
+    with pytest.raises(RuntimeError, match="kaboom"):
+        cli.main(["--workspace", str(tmp_path), "ds", "catalog"])
+
+
+def test_raising_stage_does_not_swallow_systemexit(monkeypatch, tmp_path):
+    """The top-level except Exception must not swallow SystemExit from a stage
+    -- e.g. a clean --help/--version exit still propagates as a real
+    SystemExit, not a friendly-return 1 (issue #297 constraints)."""
+    def _stage(argv):
+        raise SystemExit(0)
+
+    monkeypatch.setattr(cli, "_import_stage", lambda mod: _stage)
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["--workspace", str(tmp_path), "ds", "catalog"])
+    assert exc.value.code == 0
