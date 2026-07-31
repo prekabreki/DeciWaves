@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 
 from PySide6.QtCore import QSettings, QTimer
-from PySide6.QtWidgets import QMainWindow, QStackedWidget, QTabBar, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QMainWindow, QMessageBox, QStackedWidget, QTabBar, QVBoxLayout, QWidget
 
 from deciwaves.cli import config, doctor
 from deciwaves.gui.global_bar import GlobalBar
@@ -480,6 +480,33 @@ class MainWindow(QMainWindow):
     # --- session persistence ------------------------------------------------
 
     def closeEvent(self, event) -> None:
+        runner_running = self._controller.runner.is_running
+        dump_running = self._controller.dump.is_running
+
+        if runner_running or dump_running:
+            parts = []
+            if runner_running:
+                if self._controller._job_kind == "export":
+                    parts.append("an export job")
+                else:
+                    parts.append("a pipeline job")
+            if dump_running:
+                parts.append("a WAV dump")
+            what = " and ".join(parts)
+
+            resp = QMessageBox.warning(
+                self, "Confirm close",
+                f"{what.capitalize()} is running. Cancel it and close?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if resp != QMessageBox.Yes:
+                event.ignore()
+                return
+
+            if runner_running:
+                self._controller.runner.cancel()
+            if dump_running:
+                self._controller.dump.cancel()
+
         self.library.flush_pending_selection()
         self._settings.setValue("window/geometry", self.saveGeometry())
         self._settings.setValue("window/state", self.saveState())

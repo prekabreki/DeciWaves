@@ -4,6 +4,8 @@ import sys
 import pytest
 
 pytest.importorskip("PySide6")
+from PySide6.QtWidgets import QMessageBox  # noqa: E402
+
 from deciwaves.gui.shell import MainWindow  # noqa: E402
 
 _SLOW = "import time\nfor i in range(200):\n print(i, flush=True); time.sleep(0.02)"
@@ -141,3 +143,48 @@ def test_busy_clear_keeps_failed_chip_colour(qtbot):
     w._controller.busy_changed.emit(False)
     assert w.bar._chip.text() == "failed"
     assert "color: #b00020" in w.bar._chip.styleSheet()
+
+
+# --- close-with-job confirmation (#295 / audit H2) ---------------------------
+
+
+@pytest.mark.allow_dialogs
+def test_close_with_running_job_cancels_and_persists(qtbot, tmp_path):
+    """Close with a pipeline job running: dialog accepted -> cancel() + state persisted."""
+    from PySide6.QtCore import QSettings
+    settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
+    w = MainWindow(settings=settings)
+    qtbot.addWidget(w)
+    w.bar.select_game("hzd")
+
+    w._controller.runner.start([sys.executable, "-c", _SLOW])
+    assert w._controller.runner.is_running
+
+    with qtbot.waitSignal(w._controller.runner.finished, timeout=5000):
+        w.close()
+
+    assert not w._controller.runner.is_running
+    assert settings.value("game") == "hzd"
+
+
+@pytest.mark.allow_dialogs
+def test_close_with_running_job_declined_leaves_job_untouched(qtbot, monkeypatch):
+    """Declining the close confirm dialog leaves the window open and the job running."""
+    w = MainWindow()
+    qtbot.addWidget(w)
+
+    w._controller.runner.start([sys.executable, "-c", _SLOW])
+    assert w._controller.runner.is_running
+
+    monkeypatch.setattr(
+        "PySide6.QtWidgets.QMessageBox.warning",
+        lambda *a, **kw: QMessageBox.No,
+    )
+    w.close()
+
+    assert w._controller.runner.is_running
+    assert not w._controller.runner.was_cancelled
+
+    w._controller.runner.cancel()
+    with qtbot.waitSignal(w._controller.runner.finished, timeout=5000):
+        pass
