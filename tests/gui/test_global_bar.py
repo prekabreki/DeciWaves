@@ -79,18 +79,62 @@ def test_set_install_status_broken(qtbot):
     assert "color: #b00020" in bar._status.styleSheet()
 
 
-# --- set_busy: marquee bar + RUNNING chip colour (#278) ---------------------
+# --- set_job_chip: text + colour per state (#296) ---------------------------
 
 
-def test_set_busy_shows_marquee_and_running_color(qtbot):
+def test_set_job_chip_idle(qtbot):
+    bar = GlobalBar()
+    qtbot.addWidget(bar)
+    bar.set_job_chip("idle")
+    assert bar._chip.text() == "idle"
+    assert "color: #666666" in bar._chip.styleSheet()
+
+
+def test_set_job_chip_running(qtbot):
+    bar = GlobalBar()
+    qtbot.addWidget(bar)
+    bar.set_job_chip("running")
+    assert bar._chip.text() == "running"
+    assert "color: #1b6ec2" in bar._chip.styleSheet()
+
+
+def test_set_job_chip_failed(qtbot):
+    bar = GlobalBar()
+    qtbot.addWidget(bar)
+    bar.set_job_chip("failed")
+    assert bar._chip.text() == "failed"
+    assert "color: #b00020" in bar._chip.styleSheet()
+
+
+def test_set_busy_does_not_reset_failed_chip_colour(qtbot):
+    bar = GlobalBar()
+    qtbot.addWidget(bar)
+    bar.set_job_chip("failed")
+    bar.set_busy(True)
+    bar.set_busy(False)
+    assert bar._chip.text() == "failed"
+    assert "color: #b00020" in bar._chip.styleSheet()
+
+
+def test_set_busy_does_not_reset_running_chip_colour(qtbot):
+    bar = GlobalBar()
+    qtbot.addWidget(bar)
+    bar.set_job_chip("running")
+    bar.set_busy(False)
+    assert bar._chip.text() == "running"
+    assert "color: #1b6ec2" in bar._chip.styleSheet()
+
+
+# --- set_busy: marquee bar only (#278) --------------------------------------
+
+
+def test_set_busy_toggles_marquee_bar(qtbot):
     bar = GlobalBar()
     qtbot.addWidget(bar)
     bar.set_busy(True)
     assert not bar._busy_bar.isHidden()
-    assert "color: #1b6ec2" in bar._chip.styleSheet()
     bar.set_busy(False)
     assert bar._busy_bar.isHidden()
-    assert "color: #666666" in bar._chip.styleSheet()
 
 
 def test_busy_bar_is_indeterminate(qtbot):
