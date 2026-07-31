@@ -86,16 +86,16 @@ def test_hzd_package_satisfies_pack_reader(tmp_path):
 def test_read_core_roundtrip(tmp_path):
     payload = b"SENTENCES-RESOURCE-" * 50
     pkg = _make_package(tmp_path, [("localized/x/sentences.core", payload),
-                                   ("localized/y/other.core", b"other")])
+                                    ("localized/y/other.core", b"other")])
     hzd = HzdPackage(pkg)
-    assert hzd.has_core("localized/x/sentences")
+    assert hzd.has("localized/x/sentences.core")
     assert hzd.read_core("localized/x/sentences") == payload
     assert hzd.read("localized/y/other.core") == b"other"
 
 
 def test_missing_path(tmp_path):
     hzd = HzdPackage(_make_package(tmp_path, [("a.core", b"a")]))
-    assert not hzd.has_core("nope/missing")
+    assert not hzd.has("nope/missing.core")
     with pytest.raises(KeyError):
         hzd.read("nope/missing.core")
     with pytest.raises(KeyError):
@@ -109,12 +109,6 @@ def test_has_present_and_missing(tmp_path):
     assert hzd.has("localized/x/sentences.core") is True
     assert hzd.has("localized/y/other.core") is True
     assert hzd.has("nope/missing.core") is False
-
-
-def test_has_core_delegates_to_has(tmp_path):
-    pkg = _make_package(tmp_path, [("localized/x/sentences.core", b"payload")])
-    hzd = HzdPackage(pkg)
-    assert hzd.has_core("localized/x/sentences") == hzd.has("localized/x/sentences.core")
 
 
 def test_read_by_hash_matches_read(tmp_path):

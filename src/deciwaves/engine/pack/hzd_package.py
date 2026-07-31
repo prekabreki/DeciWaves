@@ -44,9 +44,6 @@ class HzdPackage:
     def read_core(self, virtual_path: str) -> bytes:
         return self.read(virtual_path + ".core")
 
-    def has_core(self, virtual_path: str) -> bool:
-        return self.has(virtual_path + ".core")
-
     def has(self, virtual_path_with_ext: str) -> bool:
         return file_hash(virtual_path_with_ext) in self._locators
 
