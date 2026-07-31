@@ -133,6 +133,44 @@ def test_absolutize_existing_paths_skips_until_equals_form_too(tmp_path, monkeyp
     assert out == ["--until=extract", "--from=extract"]
 
 
+def test_absolutize_existing_paths_skips_stem_and_other_name_values(tmp_path, monkeypatch):
+    """#316: --stem is a filename stem, never a path -- `fw run` injects
+    `--stem fw_story_full` itself, and a same-named dir in the invocation dir
+    used to get the value absolutized, silently relocating every reel out of
+    the workspace. --model/--quest/--language are the same class (a model name,
+    quest id, language code that could name a local file/dir). All four must be
+    left exactly as typed in both spellings; a path-taking flag in the same
+    argv keeps being rewritten."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "fw_story_full").mkdir()
+    (tmp_path / "large-v3").mkdir()
+    (tmp_path / "mq04").mkdir()
+    (tmp_path / "en").write_text("x", encoding="utf-8")
+    existing = tmp_path / "real.md"
+    existing.write_text("x", encoding="utf-8")
+    workspace = tmp_path / "ws"
+
+    argv = ["--stem", "fw_story_full", "--model", "large-v3",
+            "--quest", "mq04", "--language", "en",
+            "--gamescript", "real.md"]
+    out = config.absolutize_existing_paths(argv, workspace=str(workspace))
+
+    assert out == ["--stem", "fw_story_full", "--model", "large-v3",
+                   "--quest", "mq04", "--language", "en",
+                   "--gamescript", str(existing)]
+
+
+def test_absolutize_existing_paths_skips_stem_equals_form_too(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "fw_story_full").mkdir()
+    workspace = tmp_path / "ws"
+
+    out = config.absolutize_existing_paths(["--stem=fw_story_full", "--model=large-v3"],
+                                           workspace=str(workspace))
+
+    assert out == ["--stem=fw_story_full", "--model=large-v3"]
+
+
 def test_absolutize_existing_paths_prints_notice_when_rewriting(tmp_path, monkeypatch, capsys):
     """Whenever a token is rewritten (bare or '=' form) a one-line notice must be
     printed, so the invocation-dir -> absolute redirect is never silent."""

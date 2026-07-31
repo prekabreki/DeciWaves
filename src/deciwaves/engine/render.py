@@ -227,6 +227,10 @@ def assemble_reels(spine, ep_secs, durations, *, out_dir, cache_dir, stem, colum
     Returns the number of reel files written (0 if every packed group ended up empty,
     e.g. every segment in it failed to decode).
     """
+    if os.path.isabs(stem):
+        raise ValueError(
+            f"assemble_reels: stem must be a bare filename stem, not a path "
+            f"-- got {stem!r}; reels are written under out_dir")
     concat_fn = concat_fn or _ffmpeg_concat
     silence_fn = silence_fn or silence_wav
     concat_kwargs = concat_kwargs or {}
