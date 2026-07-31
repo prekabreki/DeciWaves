@@ -362,6 +362,39 @@ def test_hzd_render_main_empty_spine_drops_stale_errors_log(tmp_path, monkeypatc
     assert not stale.exists()   # gone, not silently attributed to this no-op
 
 
+def test_hzd_render_main_missing_manifest_errors_cleanly(tmp_path, monkeypatch, capsys):
+    """Running render before bind leaves the asr-manifest absent -- the most
+    likely way to hit this stage wrong (issue #311). The intolerant
+    read_csv_rows read must handle absence (the tolerant load_hzd_manifest_join
+    read already returns empty for a missing file, so the two reads must agree
+    absence is an error): rc 1, a one-line hint naming the file and the stage
+    to run, and NO traceback."""
+    _write_dict_csv(tmp_path / "catalog.csv",
+                    [{"line_id": "MQ04_a", "category": "mission", "subtitle_en": "Four",
+                      "speaker_name": "aloy", "scene": "mq04_mothersheart", "line_index": "0"}],
+                    ["line_id", "category", "subtitle_en", "speaker_name", "scene", "line_index"])
+    # manifest.csv and clip-index.csv deliberately absent (clip-index's tolerant read is fine)
+    pkg = tmp_path / "pkg"
+    pkg.mkdir(exist_ok=True)
+    (pkg / "PackFileLocators.bin").write_bytes(b"x")
+    argv = ["--package", str(pkg),
+            "--manifest", str(tmp_path / "manifest.csv"),
+            "--catalog", str(tmp_path / "catalog.csv"),
+            "--clip-index", str(tmp_path / "clip-index.csv"),
+            "--out-dir", str(tmp_path / "audio"),
+            "--cache", str(tmp_path / "cache"),
+            "--errors", str(tmp_path / "render-errors.log")]
+
+    rc = render.main(argv)
+
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert str(tmp_path / "manifest.csv") in captured.out   # names the missing file
+    assert "deciwaves hzd bind" in captured.out             # the stage to run
+    assert "Traceback" not in captured.out
+    assert "Traceback" not in captured.err
+
+
 def test_hzd_render_bitrate_affects_budget_and_concat_kwargs(tmp_path, monkeypatch):
     """HZD render --bitrate changes both the packing budget and the ffmpeg encode arg."""
     from deciwaves.engine.render import budget_seconds as bs

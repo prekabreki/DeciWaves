@@ -147,6 +147,13 @@ def main(argv=None):
     tiers = {t.strip() for t in a.tiers.split(",") if t.strip()}
     try:
         manifest_rows = read_csv_rows(a.manifest, required=REQUIRED_COLS)
+    except FileNotFoundError:
+        # Running render before full-reel (issue #311): the file doesn't exist
+        # at all. Sibling of the CsvFormatError arm below -- a MISSING manifest
+        # and a MALFORMED one are different diagnostics, both rc 1.
+        print(f"render: ERROR - {a.manifest} does not exist -- expected a "
+              f"full-reel manifest. Run `deciwaves fw full-reel` first.")
+        return 1
     except CsvFormatError as e:
         print(f"render: ERROR - {e}. Expected a full-reel manifest -- run "
               f"`deciwaves fw full-reel`.")

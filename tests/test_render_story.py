@@ -366,6 +366,24 @@ def test_render_main_zero_reels_from_non_empty_spine_returns_1(tmp_path, monkeyp
     assert "0 reel files written" in out
 
 
+def test_render_main_missing_playlist_errors_cleanly(tmp_path, monkeypatch, capsys):
+    """Running render before order leaves the playlist absent -- the most likely
+    way to hit this stage wrong (issue #311). A missing playlist must be rc 1
+    with a one-line hint naming the file and the stage to run, and NO traceback."""
+    monkeypatch.chdir(tmp_path)
+    playlist = tmp_path / "playlist.csv"   # never written
+    errors = tmp_path / "render-errors.log"
+
+    rc = ds_render.main(_render_argv(tmp_path, playlist, errors))
+
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert str(playlist) in captured.out       # names the missing file
+    assert "deciwaves ds order" in captured.out  # the stage to run
+    assert "Traceback" not in captured.out
+    assert "Traceback" not in captured.err
+
+
 def test_render_main_explicit_missing_speech_trim_path_errors_loudly(tmp_path, monkeypatch, capsys):
     """An explicitly-passed --speech-trim path that doesn't exist must fail loudly
     (nonzero exit code, actionable message) instead of silently behaving as if
