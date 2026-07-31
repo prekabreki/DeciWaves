@@ -2,8 +2,7 @@
 
 A frozen dataclass that carries the game-specific knobs the shared engine modules
 actually read (the per-game ``catalog`` stage, ``engine.speakers``) so they can be
-parameterised without hard-coding DS paths.  The PackReader Protocol is not yet
-formalised; for now ``pack_reader`` is typed as ``Any``.
+parameterised without hard-coding DS paths.
 
 Usage::
 
@@ -18,7 +17,9 @@ Usage::
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Callable
+
+from deciwaves.engine.pack.base import PackReader
 
 
 @dataclass(frozen=True)
@@ -33,9 +34,9 @@ class GameProfile:
     Fields
     ------
     pack_reader
-        Object that exposes ``read()``, ``read_core()``, ``has_core()`` on
-        the game's archives.  Typed as ``Any`` until a ``PackReader`` Protocol
-        is formalised.
+        Object that exposes ``read()``, ``read_core()``, ``has()``, and
+        ``read_by_hash()`` on the game's archives, conforming to the
+        :class:`~deciwaves.engine.pack.base.PackReader` Protocol.
     decima_version
         Decima engine version string passed to ``pydecima.reader.set_globals``
         (e.g. ``"DSPC"`` for Death Stranding PC Director's Cut).
@@ -48,7 +49,7 @@ class GameProfile:
         inline filter ``"sentences/voices/" in p and p.strip().endswith("/simpletext")``.
     """
 
-    pack_reader: Any
+    pack_reader: PackReader
     decima_version: str
     core_prefixes: dict  # dict[str, str] — path-prefix → category
     speaker_simpletext_filter: Callable  # Callable[[str], bool]
