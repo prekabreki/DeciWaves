@@ -99,6 +99,46 @@ def test_ordered_parallel_bounded_in_flight():
     assert peak <= 8, f"in-flight peak {peak} not bounded"
 
 
+def test_ordered_parallel_bounded_window_against_source():
+    # The bounded window must hold against the *source iterable*, not just
+    # against a concurrency peak inside the workers: a mutation that raises
+    # max_in_flight (e.g. to 10**9) still caps how many workers run at once, so
+    # the in-flight-peak test above stays green while a streaming input is
+    # drained all at once. The invariant: the pool pre-submits exactly jobs*2
+    # items, then pulls one more per result the caller consumes -- so at any
+    # point the number of items drawn from the source but not yet handed over
+    # (drawn - consumed) is at most jobs*2. Equivalently, after consuming k
+    # results, drawn <= k + jobs*2. Counting pulls from the source generator
+    # (which runs on the calling thread) is race-free and needs no lock or
+    # sleep.
+    jobs = 2
+    total = 50
+    drawn = 0
+
+    def source():
+        nonlocal drawn
+        for i in range(total):
+            drawn += 1
+            yield i
+
+    gen = parallel.ordered_parallel(source(), lambda i: i, jobs=jobs)
+
+    # First result: jobs*2 pre-submitted plus the one refill pull that hands
+    # over this result -- a handful of items, not the whole 50-item input.
+    assert next(gen) == 0
+    consumed = 1
+    assert drawn - consumed <= jobs * 2, f"drew {drawn} items before the first result"
+
+    # Mid-stream: after k results consumed, at most k + jobs*2 items drawn.
+    for k in range(1, total):
+        assert next(gen) == k
+        consumed += 1
+        assert drawn - consumed <= jobs * 2, (
+            f"after {consumed} results consumed, drew {drawn}, "
+            f"window jobs*2 = {jobs * 2}"
+        )
+
+
 def test_ordered_parallel_empty_input():
     assert list(parallel.ordered_parallel([], lambda x: x, jobs=4)) == []
     assert list(parallel.ordered_parallel([], lambda x: x, jobs=1)) == []
