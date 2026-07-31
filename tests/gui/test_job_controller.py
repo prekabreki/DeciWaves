@@ -505,3 +505,60 @@ def test_export_mp3_proceeds_with_checked_rows(qtbot, tmp_path):
     assert err != "export: nothing selected — check some rows first.\n"
     assert err is not None
     assert not calls
+
+
+# -- catalog copy mutual-exclusion (issue #300) -------------------------------
+
+def test_busy_runner_blocks_catalog_copy(qtbot):
+    ctrl = JobController()
+    _make_busy(ctrl)
+    logs = []
+    ctrl.log_message.connect(logs.append)
+    ctrl.start_catalog_copy("ds", ".", "/tmp/dest.csv")
+    qtbot.wait(100)
+    assert not logs
+
+
+def test_busy_runner_blocks_order_copy(qtbot):
+    ctrl = JobController()
+    _make_busy(ctrl)
+    logs = []
+    ctrl.log_message.connect(logs.append)
+    ctrl.start_order_copy("ds", ".", "/tmp/dest.csv")
+    qtbot.wait(100)
+    assert not logs
+
+
+def test_two_catalog_copies_emit_both_messages(qtbot, tmp_path):
+    src = os.path.join(str(tmp_path), "out", "catalog.csv")
+    os.makedirs(os.path.dirname(src), exist_ok=True)
+    with open(src, "w", encoding="utf-8") as f:
+        f.write("line_id\na\n")
+    ctrl = JobController()
+    logs = []
+    ctrl.log_message.connect(logs.append)
+    dest1 = os.path.join(str(tmp_path), "exported1.csv")
+    dest2 = os.path.join(str(tmp_path), "exported2.csv")
+    ctrl.start_catalog_copy("ds", str(tmp_path), dest1)
+    ctrl.start_catalog_copy("ds", str(tmp_path), dest2)
+    for _ in range(50):
+        if len(logs) >= 2:
+            break
+        qtbot.wait(100)
+    assert len(logs) == 2
+    assert all("copied" in m.lower() for m in logs)
+
+
+def test_catalog_copy_emits_busy_changed(qtbot, tmp_path):
+    src = os.path.join(str(tmp_path), "out", "catalog.csv")
+    os.makedirs(os.path.dirname(src), exist_ok=True)
+    with open(src, "w", encoding="utf-8") as f:
+        f.write("line_id\na\n")
+    ctrl = JobController()
+    busy = []
+    ctrl.busy_changed.connect(busy.append)
+    dest = os.path.join(str(tmp_path), "exported.csv")
+    ctrl.start_catalog_copy("ds", str(tmp_path), dest)
+    qtbot.wait(1000)
+    assert True in busy
+    assert False in busy
