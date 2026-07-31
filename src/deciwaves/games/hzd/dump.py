@@ -41,7 +41,7 @@ def main(argv=None) -> int:
         print("deciwaves hzd dump: no line IDs in --ids file", file=sys.stderr)
         return 1
 
-    line_to_clip, clip_coords = load_hzd_manifest_join(a.manifest, a.clip_index)
+    _, line_to_clip, clip_coords = load_hzd_manifest_join(a.manifest, a.clip_index)
     if not line_to_clip:
         print("deciwaves hzd dump: no lines in manifest -- run `deciwaves hzd bind` first",
               file=sys.stderr)

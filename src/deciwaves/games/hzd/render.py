@@ -25,7 +25,6 @@ import re
 import wave
 from dataclasses import dataclass
 
-from deciwaves.engine.catalog_io import read_csv_rows
 from deciwaves.engine.render import (
     accumulate_episode_seconds, assemble_reels, budget_seconds, finish_render,
     format_ts, ReelColumns, DEFAULT_BITRATE_KBPS,
@@ -97,7 +96,9 @@ def build_spine(manifest_rows, catalog, clip_index, episode_map=None) -> list[Sp
     """Ordered playlist of bound story lines, in story order.
 
     ``catalog``: line_id -> row dict (category, subtitle_en, speaker_name, scene, line_index).
-    ``clip_index``: int clip_row -> {offset, a_bytes}. Lines whose clip is absent are skipped.
+    ``clip_index``: int clip_row -> (offset, a_bytes), integer decode coordinates into
+    the voice DSAR archive (parsed by ``load_hzd_manifest_join``). Lines whose clip is
+    absent are skipped.
     ``episode_map``: None = main-quest spine only; else questline-prefix -> unlock rank,
     interleaving side/DLC content (nothing is dropped — unmapped questlines sort last).
     """
@@ -122,7 +123,8 @@ def build_spine(manifest_rows, catalog, clip_index, episode_map=None) -> list[Sp
         if not clip:                           # no decode coords -> can't render
             continue
         seen.add(lid)
-        items.append((rank, meta, lid, cr, int(clip["offset"]), int(clip["a_bytes"])))
+        off, ab = clip
+        items.append((rank, meta, lid, cr, off, ab))
 
     # scene order within a quest: by the scene's min embedded line-sequence (handles the
     # prologue's thewalk->namingceremony), then scene name as a stable tiebreak.
@@ -219,25 +221,21 @@ def main(argv=None):
         return 1
 
     catalog = load_catalog_dict(a.catalog)
-    _, clip_coords = load_hzd_manifest_join(a.manifest, a.clip_index)
-    clip_index = {cr: {"offset": str(off), "a_bytes": str(lgth)}
-                  for cr, (off, lgth) in clip_coords.items()}
+    manifest_rows, _, clip_coords = load_hzd_manifest_join(a.manifest, a.clip_index)
+    if not manifest_rows and not os.path.isfile(a.manifest):
+        # Running render before bind (issue #311): a missing asr-manifest is an
+        # "upstream produced nothing" failure, not a traceback. load_hzd_manifest_join's
+        # tolerant read surfaces absence as empty rows; distinguish it from a
+        # present-but-empty manifest (a separate empty-INPUT error, issue #85).
+        print(f"render: ERROR - {a.manifest} does not exist -- run "
+              f"`deciwaves hzd bind` to create it first.")
+        return 1
     if a.spine_only:
         episode_map = None
     else:
         from deciwaves.games.hzd.episode_map import HZD_EPISODE_MAP
         episode_map = HZD_EPISODE_MAP
-    try:
-        manifest_rows = read_csv_rows(a.manifest)
-    except FileNotFoundError:
-        # Running render before bind (issue #311): a missing asr-manifest is an
-        # "upstream produced nothing" failure, not a traceback. This is the
-        # intolerant read agreeing with load_hzd_manifest_join's tolerant one:
-        # absence is an error here, surfaced loudly with rc 1.
-        print(f"render: ERROR - {a.manifest} does not exist -- run "
-              f"`deciwaves hzd bind` to create it first.")
-        return 1
-    spine = build_spine(manifest_rows, catalog, clip_index, episode_map=episode_map)
+    spine = build_spine(manifest_rows, catalog, clip_coords, episode_map=episode_map)
     kind = "main-quest spine" if a.spine_only else "full story reel"
     print(f"{kind}: {len(spine)} lines across {len({s.episode for s in spine})} scenes")
     if spine:

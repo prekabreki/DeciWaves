@@ -73,7 +73,7 @@ class PreviewResolver:
         self._ds_index: PackIndex | None = None
         self._ds_index_key: tuple[str, str] | None = None
         self._hzd_pkg: HzdPackage | None = None
-        self._hzd_maps: tuple[dict[str, str], dict[int, tuple[int, int]]] | None = None
+        self._hzd_maps: tuple[list[dict], dict[str, str], dict[int, tuple[int, int]]] | None = None
 
     def resolve_wav(self, line_id: str, audio_path: str | None) -> str:
         """Return a playable WAV path for *line_id*, decoding+caching on a miss. *audio_path*
@@ -124,7 +124,7 @@ class PreviewResolver:
     # --- HZD ---------------------------------------------------------------
 
     def _resolve_hzd(self, line_id: str) -> str:
-        line_to_clip, clip_coords = self._load_hzd_maps()
+        _, line_to_clip, clip_coords = self._load_hzd_maps()
         clip_row = line_to_clip.get(line_id)
         if clip_row is None:
             raise PreviewError(f"No audio clip is bound to line {line_id!r} yet.")
@@ -157,9 +157,9 @@ class PreviewResolver:
                     self._hzd_pkg = HzdPackage(package)
         return self._hzd_pkg.dsar_for(VOICE_ARCHIVE)
 
-    def _load_hzd_maps(self) -> tuple[dict[str, str], dict[int, tuple[int, int]]]:
-        """``(line_id -> clip_row, clip_row -> (offset, a_bytes))`` from the HZD
-        manifests, loaded once and cached. Delegates to the shared
+    def _load_hzd_maps(self) -> tuple[list[dict], dict[str, str], dict[int, tuple[int, int]]]:
+        """``(manifest_rows, line_id -> clip_row, clip_row -> (offset, a_bytes))`` from the
+        HZD manifests, loaded once and cached. Delegates to the shared
         ``catalog.load_hzd_manifest_join`` instead of re-implementing the join."""
         if self._hzd_maps is None:
             with self._lock:
