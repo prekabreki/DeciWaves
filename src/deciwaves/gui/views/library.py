@@ -12,7 +12,7 @@ from PySide6.QtCore import (
     QAbstractTableModel, QEvent, QModelIndex, QObject, QRunnable, Qt,
     QThreadPool, QTimer, Signal,
 )
-from PySide6.QtGui import QColor, QPainter
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -159,12 +159,65 @@ class _TableModel(QAbstractTableModel):
         return False
 
 
-class _LibraryTableView(QTableView):
-    """QTableView subclass that paints a viewport overlay when no rows are visible.
+class _EmptyStateOverlay(QWidget):
+    """Child-of-viewport overlay that renders the empty-state guidance as real, accessible
+    widgets (a ``QLabel`` plus, in the no-results case, a "Clear filters" button) instead of
+    the old painted ``drawText`` pixels (issue #302, audit L4).
 
-    Two distinct messages:
+    Being a viewport child, it pins to the visible area (it never scrolls away with rows) and
+    is hidden whenever rows are present so it can never swallow table events. The two states
+    keep their old look: grey for "no catalog"/"no workspace", amber for "no results".
+    """
+
+    _GREY = "#888888"
+    _AMBER = "#CC8800"
+
+    def __init__(self, viewport: QWidget, view: LibraryView):
+        super().__init__(viewport)
+        self._view = view
+        self._label = QLabel(self)
+        self._label.setAlignment(Qt.AlignCenter)
+        self._label.setWordWrap(True)
+        font = self._label.font()
+        font.setPointSize(font.pointSize() + 4)
+        self._label.setFont(font)
+        self._clear = QPushButton("Clear filters", self)
+        self._clear.setAccessibleName("Clear filters")
+        self._clear.clicked.connect(self._clear_filters)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.addStretch(1)
+        layout.addWidget(self._label)
+        layout.addWidget(self._clear, 0, Qt.AlignHCenter)
+        layout.addStretch(1)
+        self.hide()
+
+    def set_message(self, text: str | None, has_rows: bool) -> None:
+        """Show *text* (grey when the catalog is empty, amber when it's a filter hit) with the
+        "Clear filters" button only in the no-results case; hide the overlay entirely when
+        rows are present so it cannot intercept clicks."""
+        if text is None:
+            self.hide()
+            return
+        self._label.setText(text)
+        self._label.setAccessibleName(text)
+        self._label.setStyleSheet(f"color: {self._AMBER if has_rows else self._GREY};")
+        self._clear.setVisible(has_rows)
+        self.show()
+
+    def _clear_filters(self) -> None:
+        self._view._search.clear()
+
+
+class _LibraryTableView(QTableView):
+    """QTableView subclass that overlays empty-state guidance on the viewport when no rows are
+    visible — the message is a real ``QLabel``, not painted text, so assistive tech sees it.
+
+    Three distinct messages:
+    * no workspace → "Choose an output folder for your reels"
     * ``total == 0`` → "No catalog yet — run Scan on the Pipeline tab"
-    * ``total > 0`` and ``visible == 0`` → "No lines match — [Clear filters]"
+    * ``total > 0`` and ``visible == 0`` → "No lines match —" + a "Clear filters" button
 
     The overlay disappears once rows are present/visible.
     """
@@ -172,6 +225,10 @@ class _LibraryTableView(QTableView):
     def __init__(self, view: LibraryView):
         super().__init__()
         self._view = view
+        self._overlay = _EmptyStateOverlay(self.viewport(), view)
+        self._overlay.setGeometry(self.viewport().rect())
+        self.viewport().installEventFilter(self)
+        self._sync_overlay()
 
     @property
     def overlay_text(self) -> str | None:
@@ -180,28 +237,28 @@ class _LibraryTableView(QTableView):
         if not self._view._rows:
             return "No catalog yet — run Scan on the Pipeline tab"
         if not self._view._visible:
-            return "No lines match — [Clear filters]"
+            return "No lines match —"
         return None
 
-    def paintEvent(self, event):
-        super().paintEvent(event)
-        text = self.overlay_text
-        if text is None:
-            return
-        color = QColor(0x88, 0x88, 0x88) if not self._view._rows else QColor(0xCC, 0x88, 0x00)
-        p = QPainter(self.viewport())
-        p.setPen(color)
-        font = p.font()
-        font.setPointSize(font.pointSize() + 4)
-        p.setFont(font)
-        p.drawText(self.viewport().rect(), Qt.AlignCenter, text)
-        p.end()
+    def _sync_overlay(self) -> None:
+        # Re-pin geometry on every state change: while the view is hidden (e.g. during
+        # construction) Qt delivers no resize events, so the overlay would otherwise keep a
+        # stale size until the widget is shown.
+        self._overlay.setGeometry(self.viewport().rect())
+        self._overlay.set_message(self.overlay_text, bool(self._view._rows))
 
-    def mouseReleaseEvent(self, event):
-        if self._view.total_count() > 0 and self._view.visible_count() == 0:
-            self._view._search.clear()
-            return
-        super().mouseReleaseEvent(event)
+    def showEvent(self, event):
+        # Re-pin when first shown: the viewport may have been resized while hidden, which
+        # Qt applies without delivering a resize event.
+        super().showEvent(event)
+        self._overlay.setGeometry(self.viewport().rect())
+
+    def eventFilter(self, obj, event):
+        # Keep the overlay pinned to the visible viewport area (it shrinks when a scrollbar
+        # appears, so it must follow the viewport, not the table).
+        if obj is self.viewport() and event.type() == QEvent.Resize:
+            self._overlay.setGeometry(self.viewport().rect())
+        return super().eventFilter(obj, event)
 
 
 class _DurationSignaller(QObject):
@@ -498,6 +555,7 @@ class LibraryView(QWidget):
                          hide_no_subtitle=self._hide_nosub.isChecked()),
             self._sort_key, self._sort_desc)
         self._model.set_rows(self._visible)
+        self._table._sync_overlay()
         self._update_status()
 
     def _on_durations_ready(self, generation: int, durations: dict[str, float | None]) -> None:

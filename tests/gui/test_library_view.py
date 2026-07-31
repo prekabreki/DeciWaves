@@ -10,7 +10,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 from PySide6.QtCore import QEvent, Qt  # noqa: E402
-from PySide6.QtGui import QKeyEvent  # noqa: E402
+from PySide6.QtGui import QAccessible, QKeyEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from deciwaves.gui.library_model import STORY_ORDER_HINT, load_selection  # noqa: E402
@@ -369,25 +369,76 @@ def test_stale_duration_task_results_are_dropped(qtbot, tmp_path, monkeypatch):
 
 
 def test_empty_state_overlay(qtbot, tmp_path):
-    """No catalog yet → overlay says 'No catalog yet'."""
+    """No catalog yet → a real overlay widget says 'No catalog yet', exposed to the
+    accessibility tree, with no 'Clear filters' button."""
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("ds", str(tmp_path))
+    overlay = v._table._overlay
     assert v._table.overlay_text == "No catalog yet — run Scan on the Pipeline tab"
+    assert not overlay.isHidden()
+    assert overlay._label.text() == "No catalog yet — run Scan on the Pipeline tab"
+    assert overlay._label.accessibleName() == "No catalog yet — run Scan on the Pipeline tab"
+    assert overlay._clear.isHidden()
+    # accessible via QAccessible, not just widget state
+    acc = QAccessible.queryAccessibleInterface(overlay._label)
+    assert acc is not None
+    assert acc.text(QAccessible.Name) == "No catalog yet — run Scan on the Pipeline tab"
 
 
 def test_no_results_overlay_disappears_with_rows(qtbot, tmp_path):
-    """Overlay is None when rows are visible, 'No lines match' when filtered out."""
+    """Overlay is hidden when rows are visible (never intercepting clicks), and shows the
+    no-results message plus a focusable 'Clear filters' button when filtered out."""
     ws = str(tmp_path)
     _write_ds_catalog(ws, [_cat_row(line_id="a", subtitle_en="hello")])
     v = LibraryView()
     qtbot.addWidget(v)
     v.refresh("ds", ws)
     assert v._table.overlay_text is None
+    assert v._table._overlay.isHidden()
 
     v._search.setText("zzz_nonexistent")
     assert v.visible_count() == 0
-    assert v._table.overlay_text == "No lines match — [Clear filters]"
+    overlay = v._table._overlay
+    assert v._table.overlay_text == "No lines match —"
+    assert not overlay.isHidden()
+    assert overlay._label.text() == "No lines match —"
+    # amber (a filter hit), not the grey of the empty-catalog state
+    assert overlay._AMBER in overlay._label.styleSheet()
+    assert overlay._GREY not in overlay._label.styleSheet()
+    # real, focusable button reachable by keyboard
+    assert not overlay._clear.isHidden()
+    assert overlay._clear.isEnabled()
+    assert overlay._clear.text() == "Clear filters"
+    assert overlay._clear.accessibleName() == "Clear filters"
+    assert (overlay._clear.focusPolicy() & Qt.TabFocus) != 0
+    acc = QAccessible.queryAccessibleInterface(overlay._label)
+    assert acc is not None
+    assert acc.text(QAccessible.Name) == "No lines match —"
+
+    # the button clears the filter and the overlay disappears with the rows
+    overlay._clear.click()
+    v._debounce_timer.timeout.emit()   # flush the search debounce
+    assert v.visible_count() == 1
+    assert v._table._overlay.isHidden()
+
+
+def test_empty_state_overlay_geometries_follow_viewport(qtbot, tmp_path):
+    """The overlay is pinned to the viewport and resizes with it (never drifting off after
+    scrollbars appear)."""
+    v = LibraryView()
+    qtbot.addWidget(v)
+    v.refresh("ds", str(tmp_path))
+    overlay = v._table._overlay
+    assert overlay.geometry() == v._table.viewport().rect()
+    # once shown (real usage), the overlay stays pinned and follows live viewport resizes
+    with qtbot.waitExposed(v):
+        v.show()
+    assert overlay.geometry() == v._table.viewport().rect()
+    v._table.resize(800, 600)
+    qtbot.wait(50)
+    QApplication.processEvents()
+    assert overlay.geometry() == v._table.viewport().rect()
 
 
 def test_filter_state_resets_on_game_change_but_persists_same_game(qtbot, tmp_path):
