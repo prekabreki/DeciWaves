@@ -125,10 +125,19 @@ def test_busy_changed_propagates_to_bar_and_library(qtbot):
 
     w._controller.busy_changed.emit(True)
     assert not w.bar._busy_bar.isHidden()
-    assert "color: #1b6ec2" in w.bar._chip.styleSheet()
     assert not w.library._job_running_banner.isHidden()
 
     w._controller.busy_changed.emit(False)
     assert w.bar._busy_bar.isHidden()
-    assert "color: #666666" in w.bar._chip.styleSheet()
     assert w.library._job_running_banner.isHidden()
+
+
+def test_busy_clear_keeps_failed_chip_colour(qtbot):
+    """#296: busy_changed must not overwrite the chip colour set by set_job_chip."""
+    w = MainWindow()
+    qtbot.addWidget(w)
+    w._controller.job_chip_changed.emit("failed")
+    w._controller.busy_changed.emit(True)
+    w._controller.busy_changed.emit(False)
+    assert w.bar._chip.text() == "failed"
+    assert "color: #b00020" in w.bar._chip.styleSheet()

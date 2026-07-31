@@ -11,7 +11,14 @@ from PySide6.QtWidgets import (
 
 from deciwaves.cli.doctor import Availability
 from deciwaves.gui.doctor_model import install_status_attrs
-from deciwaves.gui.theme import NEUTRAL, RUNNING
+from deciwaves.gui.theme import ERROR, NEUTRAL, RUNNING
+
+# chip text vocabulary (idle / running / failed) -> chip colour (#296)
+_JOB_CHIP_COLOURS = {
+    "idle": NEUTRAL,
+    "running": RUNNING,
+    "failed": ERROR,
+}
 
 # (key, menu label) -- keys match the CLI game tokens / doctor check map.
 _GAMES = [("ds", "Death Stranding"),
@@ -107,11 +114,12 @@ class GlobalBar(QWidget):
 
     def set_job_chip(self, text: str) -> None:
         self._chip.setText(text)
+        self._chip.setStyleSheet(f"color: {_JOB_CHIP_COLOURS.get(text, NEUTRAL)};")
 
     def set_busy(self, busy: bool) -> None:
+        # busy only drives the marquee bar; the chip colour belongs to set_job_chip so a
+        # finished-failed chip stays red after busy clears (#296).
         if busy:
             self._busy_bar.show()
-            self._chip.setStyleSheet(f"color: {RUNNING};")
         else:
             self._busy_bar.hide()
-            self._chip.setStyleSheet(f"color: {NEUTRAL};")

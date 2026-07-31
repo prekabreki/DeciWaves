@@ -179,7 +179,10 @@ class JobController(QObject):
         if kind == "export":
             msg = self._report_export_result(game, code)
             self.log_message.emit(msg)
-            self.job_chip_changed.emit("idle")
+            if code == 0 or self.runner.was_cancelled:
+                self.job_chip_changed.emit("idle")
+            else:
+                self.job_chip_changed.emit("failed")
         elif code == 0 or self.runner.was_cancelled:
             self.job_chip_changed.emit("idle")
         else:

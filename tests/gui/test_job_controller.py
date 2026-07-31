@@ -11,6 +11,7 @@ pytest.importorskip("PySide6")
 from PySide6.QtCore import QProcess  # noqa: E402
 from PySide6.QtWidgets import QMessageBox  # noqa: E402
 
+from deciwaves.gui.global_bar import GlobalBar  # noqa: E402
 from deciwaves.gui.job_controller import JobController  # noqa: E402
 
 _CUDA_OK = {"ok": True, "checks": [
@@ -324,6 +325,41 @@ def test_on_job_finished_export_failure_logs(qtbot):
     ctrl._on_job_finished(1)
     failure_msgs = [m for m in logs if "fail" in m.lower()]
     assert failure_msgs
+
+
+def test_on_job_finished_export_failure_emits_failed_chip(qtbot):
+    ctrl = JobController()
+    ctrl._job_kind = "export"
+    ctrl._job_game = "ds"
+    chips = []
+    ctrl.job_chip_changed.connect(chips.append)
+    ctrl._on_job_finished(1)
+    assert chips == ["failed"]
+
+
+def test_on_job_finished_export_success_emits_idle_chip(qtbot):
+    ctrl = JobController()
+    ctrl._job_kind = "export"
+    ctrl._job_game = "ds"
+    chips = []
+    ctrl.job_chip_changed.connect(chips.append)
+    ctrl._on_job_finished(0)
+    assert chips == ["idle"]
+
+
+def test_on_job_finished_export_failure_chip_stays_red_through_busy_clear(qtbot):
+    """Danger zone (#296): busy_changed(False) fires after the chip change and must not
+    rewrite the chip colour -- assert the final stylesheet after the full cascade."""
+    ctrl = JobController()
+    bar = GlobalBar()
+    qtbot.addWidget(bar)
+    ctrl.job_chip_changed.connect(bar.set_job_chip)
+    ctrl.busy_changed.connect(bar.set_busy)
+    ctrl._job_kind = "export"
+    ctrl._job_game = "ds"
+    ctrl._on_job_finished(1)
+    assert bar._chip.text() == "failed"
+    assert "color: #b00020" in bar._chip.styleSheet()
 
 
 def test_on_job_finished_clears_state(qtbot):
