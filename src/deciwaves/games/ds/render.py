@@ -13,8 +13,8 @@ import os
 import re
 
 from deciwaves.engine.render import (
-    accumulate_episode_seconds, assemble_reels, budget_seconds, ReelColumns,
-    DEFAULT_BITRATE_KBPS, format_ts,
+    accumulate_episode_seconds, assemble_reels, budget_seconds, finish_render,
+    ReelColumns, DEFAULT_BITRATE_KBPS, format_ts,
 )
 from deciwaves.engine.parallel import default_jobs
 
@@ -123,20 +123,21 @@ def main(argv=None):
     idx = PackIndex(args.data_dir, args.oodle)
     os.makedirs(args.out_dir, exist_ok=True)
     try:
-        segs = story_order.read_playlist(args.playlist)
+        rows = story_order.read_playlist(args.playlist)
     except FileNotFoundError:
         # Running render before order (issue #311): a missing playlist is an
         # "upstream produced nothing" failure, not a traceback.
         print(f"render: ERROR - {args.playlist} does not exist -- run "
               f"`deciwaves ds order` to create it first.")
         return 1
+    n_rows = len(rows)
     if args.main_story:
-        kept = main_story_only(segs, non_story_cs_groups=em.NON_STORY_CS_GROUPS,
+        kept = main_story_only(rows, non_story_cs_groups=em.NON_STORY_CS_GROUPS,
                                group_of=em.cs_group)
-        print(f"main-story filter: kept {len(kept)}/{len(segs)} segments "
-              f"(dropped {len(segs) - len(kept)} side + non-story cutscene groups "
+        print(f"main-story filter: kept {len(kept)}/{n_rows} segments "
+              f"(dropped {n_rows - len(kept)} side + non-story cutscene groups "
               f"{sorted(em.NON_STORY_CS_GROUPS)})")
-        segs = kept
+        rows = kept
     stem = file_stem(args.main_story)
 
     if args.speech_trim and not os.path.isfile(args.speech_trim):
@@ -146,12 +147,11 @@ def main(argv=None):
         return 1
     keepspans = load_keepspans(args.speech_trim) if args.speech_trim else {}
     if keepspans:
-        n_drop = sum(1 for s in segs if keepspans.get(s.stream_path, (None, False))[1])
+        n_drop = sum(1 for s in rows if keepspans.get(s.stream_path, (None, False))[1])
         print(f"speech-trim: {len(keepspans)} tracks in map; {n_drop} segments will be dropped")
 
-    decode_segs = [s for s in segs
+    decode_segs = [s for s in rows
                    if not (keepspans.get(s.stream_path) and keepspans[s.stream_path][1])]
-    n_attempted = len(decode_segs)
 
     def _decode(s):
         entry = keepspans.get(s.stream_path)
@@ -166,30 +166,47 @@ def main(argv=None):
                 keep=args.silence_keep)
         return wav, dur
 
-    decoded, ep_secs, n_failed = accumulate_episode_seconds(
-        decode_segs, _decode, gap_key=lambda s: s.scene, err_key=lambda s: s.stream_path,
-        errors_path=args.errors, catch=audio_clip.ClipError, jobs=args.jobs)
-
-    n_decoded = len(decoded)
-    print(f"render: decoded {n_decoded} clips, {n_failed} failed (see {args.errors})")
-    if n_decoded == 0 and n_attempted > 0:
-        print(f"render: ERROR - no audio could be decoded out of {n_attempted} "
-              f"segment(s) attempted. See {args.errors} for the per-clip failures. "
-              f"Try `deciwaves doctor` to check your decode tools, and see the "
-              f"README's Windows Store Python troubleshooting note if vgmstream-cli "
-              f"is dying with a DLL-not-found / exit-code error.")
-        return 1
+    decoded, ep_secs, n_failed = {}, {}, 0
+    if decode_segs:
+        decoded, ep_secs, n_failed = accumulate_episode_seconds(
+            decode_segs, _decode, gap_key=lambda s: s.scene, err_key=lambda s: s.stream_path,
+            errors_path=args.errors, catch=audio_clip.ClipError, jobs=args.jobs)
+        print(f"render: decoded {len(decoded)} clips, {n_failed} failed (see {args.errors})")
 
     columns = ReelColumns(
         header=["timestamp", "episode", "category", "speaker", "subtitle", "line_id"],
         row_of=lambda s, t: [format_ts(t), s.episode, s.category, s.speaker, s.subtitle,
                              s.line_id])
-    assemble_reels(
-        segs, ep_secs, decoded, out_dir=args.out_dir, cache_dir=args.cache, stem=stem,
-        columns=columns, budget=budget_seconds(target_mb=args.target_mb, kbps=args.bitrate),
-        gap_key=lambda s: s.scene, concat_kwargs={"kbps": args.bitrate},
+    return finish_render(
+        decode_segs, n_rows == 0, args.errors,
+        msg_empty_input=(
+            f"render: ERROR - {args.playlist} has no rows -- upstream "
+            f"produced no lines to render. Re-run `deciwaves ds order`; "
+            f"no reels written to {args.out_dir}."
+        ),
+        msg_empty_selection=(
+            f"render: nothing to render: none of the {n_rows} rows in "
+            f"{args.playlist} survived the --main-story / --speech-trim "
+            f"filters -- no reels written to {args.out_dir}."
+        ),
+        msg_nothing_decoded=(
+            f"render: ERROR - no audio could be decoded out of "
+            f"{len(decode_segs)} segment(s) attempted. See {args.errors} for "
+            f"the per-clip failures. Try `deciwaves doctor` to check your "
+            f"decode tools, and see the README's Windows Store Python "
+            f"troubleshooting note if vgmstream-cli is dying with a "
+            f"DLL-not-found / exit-code error."
+        ),
+        msg_zero_files=(
+            f"render: ERROR - 0 reel files written to {args.out_dir} from "
+            f"{len(decode_segs)} spine segments -- see {args.errors}."
+        ),
+        durations=decoded, ep_secs=ep_secs,
+        out_dir=args.out_dir, cache_dir=args.cache, stem=stem, columns=columns,
+        budget=budget_seconds(target_mb=args.target_mb, kbps=args.bitrate),
+        gap_key=lambda s: s.scene,
+        _assemble=assemble_reels, concat_kwargs={"kbps": args.bitrate},
         unit_label="segments")
-    return 0
 
 
 if __name__ == "__main__":
