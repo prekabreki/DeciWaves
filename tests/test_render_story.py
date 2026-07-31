@@ -284,9 +284,10 @@ def test_render_main_zero_decode_returns_1_and_prints_actionable_error(tmp_path,
     assert "Windows Store Python" in out
 
 
-def test_render_main_all_decode_ok_but_no_segments_returns_0(tmp_path, monkeypatch, capsys):
-    """An empty playlist (nothing to decode at all) must not be treated as the
-    zero-decode failure -- there's simply nothing to do."""
+def test_render_main_zero_row_playlist_returns_1(tmp_path, monkeypatch, capsys):
+    """A header-only playlist (upstream produced nothing) is a loud rc 1 naming
+    the upstream stage to re-run -- NOT a quiet no-op, so `ds run` won't stamp
+    out/ds/.done-render on an empty upstream result (#310)."""
     monkeypatch.chdir(tmp_path)
     playlist = tmp_path / "playlist.csv"
     write_playlist([], str(playlist))
@@ -294,9 +295,75 @@ def test_render_main_all_decode_ok_but_no_segments_returns_0(tmp_path, monkeypat
 
     rc = ds_render.main(_render_argv(tmp_path, playlist, errors))
 
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "has no rows" in out
+    assert "deciwaves ds order" in out
+    assert "no reels written" in out
+
+
+def test_render_main_everything_filtered_by_main_story_returns_0(tmp_path, monkeypatch, capsys):
+    """Rows present but every one narrowed out by --main-story (all side content):
+    a deliberate selection, so rc 0 with a "nothing to render" message and no
+    decode run at all (#310)."""
+    monkeypatch.chdir(tmp_path)
+    playlist = tmp_path / "playlist.csv"
+    write_playlist([_seg(1, "side_a"), _seg(1, "side_b")], str(playlist))
+    errors = tmp_path / "render-errors.log"
+
+    rc = ds_render.main(_render_argv(tmp_path, playlist, errors, extra=["--main-story"]))
+
     assert rc == 0
     out = capsys.readouterr().out
-    assert "render: decoded 0 clips, 0 failed" in out
+    assert "nothing to render" in out
+    assert "decoded" not in out  # decode never ran -- nothing survived to decode
+
+
+def test_render_main_everything_dropped_by_speech_trim_returns_0(tmp_path, monkeypatch, capsys):
+    """Rows present but every row's track is speech-trim-dropped (dropped=1): the
+    same deliberate-narrowing rc 0 as --main-story (#310)."""
+    monkeypatch.chdir(tmp_path)
+    playlist = tmp_path / "playlist.csv"
+    write_playlist(_playlist_segs(n_good=2), str(playlist))
+    ks = tmp_path / "keepspans.csv"
+    ks.write_text(
+        "stream_path,line_id,speech_ratio,keep_spans,dropped\n"
+        "good/stream0.core.stream,,0,,1\n"
+        "good/stream1.core.stream,,0,,1\n",
+        encoding="utf-8")
+    errors = tmp_path / "render-errors.log"
+
+    rc = ds_render.main(_render_argv(tmp_path, playlist, errors,
+                                     extra=["--speech-trim", str(ks)]))
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "nothing to render" in out
+
+
+def test_render_main_zero_reels_from_non_empty_spine_returns_1(tmp_path, monkeypatch, capsys):
+    """assemble_reels returning 0 files from a non-empty spine is a loud rc 1
+    (defensive backstop), not a silent zero-file "success" (#64/#310)."""
+    monkeypatch.chdir(tmp_path)
+    playlist = tmp_path / "playlist.csv"
+    write_playlist(_playlist_segs(n_good=1), str(playlist))
+    errors = tmp_path / "render-errors.log"
+
+    def fake_clip_wav(idx, stream_path, cache_dir, vgmstream=None):
+        os.makedirs(cache_dir, exist_ok=True)
+        wav_path = os.path.join(cache_dir, "good.wav")
+        _write_wav(wav_path, nchannels=1, seconds=1.0)
+        return wav_path, 1.0
+
+    monkeypatch.setattr(ac, "clip_wav", fake_clip_wav)
+    monkeypatch.setattr(ds_render, "assemble_reels", lambda *a, **k: 0)
+
+    rc = ds_render.main(_render_argv(tmp_path, playlist, errors,
+                                     extra=["--min-silence", "0"]))
+
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "0 reel files written" in out
 
 
 def test_render_main_explicit_missing_speech_trim_path_errors_loudly(tmp_path, monkeypatch, capsys):
