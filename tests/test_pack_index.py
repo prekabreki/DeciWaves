@@ -58,12 +58,6 @@ def test_has_false_for_missing_path():
     assert idx.has("a/missing.core") is False
 
 
-def test_has_core_delegates_to_has():
-    idx = _make_index({"a/b.core": b"AB"})
-    assert idx.has_core("a/b") is True
-    assert idx.has_core("a/missing") is False
-
-
 def test_read_by_hash_returns_bytes():
     idx = _make_index({"a/b.core": b"payload-bytes"})
     h = file_hash("a/b.core")

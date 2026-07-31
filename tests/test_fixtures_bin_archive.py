@@ -170,8 +170,8 @@ def test_pack_index_reads_across_multiple_archives(tmp_path):
     idx = PackIndex(str(tmp_path), oodle_dll="unused")
     assert idx.read_core(path_a) == payload_a
     assert idx.read_core(path_b) == payload_b
-    assert idx.has_core(path_a) is True
-    assert idx.has_core("synthetic/nope") is False
+    assert idx.has(path_a + ".core") is True
+    assert idx.has("synthetic/nope.core") is False
 
 
 def test_pack_index_missing_core_raises_keyerror(tmp_path):

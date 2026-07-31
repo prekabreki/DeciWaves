@@ -5,7 +5,7 @@ satisfy this Protocol so `GameProfile.pack_reader` has a concrete type.
 
 Using `typing.Protocol` (structural subtyping) so `PackIndex` and future
 implementations need no inheritance change — they conform automatically if they
-carry the three methods with matching signatures.
+carry the four methods with matching signatures.
 
 `@runtime_checkable` lets callers do ``isinstance(obj, PackReader)`` in tests
 and guard code.
@@ -26,14 +26,12 @@ class PackReader(Protocol):
         e.g. ``"localized/sentences/.../sentences.core"``).
     read_core(virtual_path)
         Convenience wrapper: appends ``.core`` and calls :meth:`read`.
-    has_core(virtual_path)
-        Return ``True`` if the pack contains a ``.core`` entry for *virtual_path*.
     has(virtual_path_with_ext)
         Return ``True`` if the pack contains an entry for the exact virtual path
-        (extension included) — the generic existence check :meth:`read` mirrors,
-        for arbitrary paths (not just the ``.core`` convention ``has_core`` tests).
+        (extension included) — the generic existence check :meth:`read` mirrors.
         Lets callers test membership without reaching into a reader's internal
-        hash table.
+        hash table.  For ``.core`` paths, callers compose ``.has(path + ".core")``
+        instead.
     read_by_hash(path_hash)
         Extract raw bytes directly by a precomputed path hash, skipping the
         string-hashing step in :meth:`read`. Useful for callers that already
@@ -45,9 +43,6 @@ class PackReader(Protocol):
         ...
 
     def read_core(self, virtual_path: str) -> bytes:
-        ...
-
-    def has_core(self, virtual_path: str) -> bool:
         ...
 
     def has(self, virtual_path_with_ext: str) -> bool:

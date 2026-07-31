@@ -242,6 +242,23 @@ def test_fw_render_main_missing_required_column_errors_cleanly(tmp_path, capsys)
     assert "deciwaves fw full-reel" in out   # a RUNNABLE command (issue #23)
 
 
+def test_fw_render_main_missing_manifest_errors_cleanly(tmp_path, capsys):
+    """Running render before full-reel leaves the manifest absent -- the most
+    likely way to hit this stage wrong (issue #311). The missing-file case is a
+    sibling of the malformed-header one: rc 1, a one-line hint naming the file
+    and the stage to run, and NO traceback."""
+    manifest = tmp_path / "full-reel-manifest.csv"   # never written
+
+    rc = render.main(_render_argv(tmp_path, manifest))
+
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert str(manifest) in captured.out       # names the missing file
+    assert "deciwaves fw full-reel" in captured.out   # the stage to run
+    assert "Traceback" not in captured.out
+    assert "Traceback" not in captured.err
+
+
 def test_fw_render_main_surfaces_partial_measure_failures(tmp_path, monkeypatch, capsys):
     """A PARTIAL measure failure stays fail-soft (render proceeds), but the
     count must be surfaced like DS/HZD do -- FW used to discard n_failed
