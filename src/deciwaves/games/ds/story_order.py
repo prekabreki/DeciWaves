@@ -18,9 +18,9 @@ from collections import defaultdict
 from dataclasses import dataclass, asdict
 
 from deciwaves.games.ds import episode_map as em
-from deciwaves.engine import transcript_anchor as ta
+from deciwaves.games.ds import transcript_anchor as ta
 from deciwaves.engine.coverage import clear_stage_coverage, default_coverage_path
-from deciwaves.engine.selection import filter_and_dedup
+from deciwaves.games.ds.selection import filter_and_dedup
 
 SECTION = {"cutscene": 0, "mission": 1, "terminal": 2, "npc": 3, "radio": 4}
 SPINE = {"cutscene", "mission"}

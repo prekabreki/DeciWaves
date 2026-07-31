@@ -1,6 +1,6 @@
 """Tests for engine.selection.filter_and_dedup — the portable creative rules.
 
-Rules (source of truth: deciwaves.engine.selection; see docs/architecture.md for how selection
+Rules (source of truth: deciwaves.games.ds.selection; see docs/architecture.md for how selection
 fits the pipeline):
   (a) Require non-empty subtitle_en (drop empty/whitespace-only/placeholder rows).
   (b) Require non-empty wem_path_en (prevents degenerate ".core.stream" with no audio).
@@ -11,7 +11,7 @@ fits the pipeline):
 
 These rules are extracted verbatim from deciwaves.games.ds.story_order.build_playlist.
 """
-from deciwaves.engine.selection import filter_and_dedup, PLACEHOLDER_SUBTITLE
+from deciwaves.games.ds.selection import filter_and_dedup, PLACEHOLDER_SUBTITLE
 from conftest import catalog_row as _row
 
 

@@ -197,7 +197,7 @@ def _stage_tokens(argv):
 
 
 def test_ds_argv_carries_required_install_flags_and_bitrate(tmp_path, parsed_stage_args):
-    from deciwaves.engine import render as ds_render
+    from deciwaves.games.ds import render as ds_render
     ws = str(tmp_path)
     _make_ds_playlist(ws, ["a"])
     csv_path = write_render_selection(ws, "ds", unchecked=set())
@@ -214,7 +214,7 @@ def test_ds_argv_carries_required_install_flags_and_bitrate(tmp_path, parsed_sta
 
 
 def test_ds_argv_uses_explicit_oodle_dll_override(tmp_path, parsed_stage_args):
-    from deciwaves.engine import render as ds_render
+    from deciwaves.games.ds import render as ds_render
     ws = str(tmp_path)
     _make_ds_playlist(ws, ["a"])
     csv_path = write_render_selection(ws, "ds", unchecked=set())
@@ -292,7 +292,7 @@ def test_fw_argv_tiers_cover_every_tier_present(tmp_path, parsed_stage_args):
 # --- render_selection_argv scope kwargs (#73, backward-compatible) ---------
 
 def test_ds_main_story_kwarg_appends_flag(tmp_path, parsed_stage_args):
-    from deciwaves.engine import render as ds_render
+    from deciwaves.games.ds import render as ds_render
     ws = str(tmp_path)
     _make_ds_playlist(ws, ["a"])
     csv_path = write_render_selection(ws, "ds", unchecked=set())

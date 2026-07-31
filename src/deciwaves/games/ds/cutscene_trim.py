@@ -10,7 +10,7 @@ from __future__ import annotations
 import csv
 import os
 
-from deciwaves.engine.speech_trim import keep_spans, format_spans
+from deciwaves.games.ds.speech_trim import keep_spans, format_spans
 
 FIELDS = ["stream_path", "line_id", "speech_ratio", "keep_spans", "dropped"]
 
