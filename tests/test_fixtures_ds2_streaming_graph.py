@@ -36,7 +36,7 @@ def _filename(name: str) -> bytes:
     return struct.pack("<II", len(b), 0) + b
 
 
-def _build_ds2_streaming_graph_bytes(trailing_uuids_count=1):
+def _build_ds2_streaming_graph_bytes(trailing_uuids_count=1, groups_count=1):
     object_uuid = bytes(range(16))
     is_packed = 1
 
@@ -62,10 +62,13 @@ def _build_ds2_streaming_graph_bytes(trailing_uuids_count=1):
     # sub_group_count, root_start, root_count, span_start, span_count,
     # type_start, type_count, link_start, link_size, locator_start,
     # locator_count, reserved_ds2
-    groups = np.array(
-        [(1, 2, 0, 0, 0, 0, 0, 0, 2, 0, 2, 0, 0, 0, 2, 0xDEAD)],
-        dtype=_GROUP_DTYPE_DS2,
-    )
+    if groups_count:
+        groups = np.array(
+            [(1, 2, 0, 0, 0, 0, 0, 0, 2, 0, 2, 0, 0, 0, 2, 0xDEAD)],
+            dtype=_GROUP_DTYPE_DS2,
+        )
+    else:
+        groups = np.array([], dtype=_GROUP_DTYPE_DS2)
 
     sub_groups = np.array([], dtype="<u4")
     root_uuids = np.array([], dtype="S16")
@@ -182,3 +185,23 @@ def test_ds2_inflated_size_raises_size_mismatch():
     inflated = struct.pack("<QI", type_hash, size + 4) + good[12:]
     with pytest.raises(ValueError, match="not size-exact"):
         StreamingGraph(inflated)
+
+
+def test_ds2_zero_groups_still_parses_as_ds2():
+    """Zero-group DS2 graph must select ds2 variant — the FW attempt is not
+    size-exact (it skips the trailing UUIDs), so the loop must fall through."""
+    g = StreamingGraph(_build_ds2_streaming_graph_bytes(groups_count=0, trailing_uuids_count=1))
+    assert g.variant == "ds2"
+    assert len(g.groups) == 0
+    assert len(g.trailing_uuids) == 1
+    assert bytes(g.trailing_uuids[0]) == bytes(range(32, 48))
+
+
+def test_ds2_all_variants_fail_message():
+    """Genuinely corrupt bytes still raise, and the message names both variants."""
+    corrupt = struct.pack("<QI", STREAMING_GRAPH_RESOURCE, 0)
+    with pytest.raises(ValueError, match="FW and DS2") as excinfo:
+        StreamingGraph(corrupt)
+    msg = str(excinfo.value)
+    assert "fw" in msg
+    assert "ds2" in msg
