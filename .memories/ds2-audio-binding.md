@@ -127,20 +127,11 @@ indices rather than treating them as corruption.
 
 ## Decoder provisioning was already solved — do not rebuild it
 
-`vgmstream-cli` is already a first-class registered tool: `cli.config.TOOLS` pins it (r2117)
-with env var `DECIWAVES_VGMSTREAM`, `cli.setup` downloads and unpacks it into `tools_dir` with
-a per-tool file manifest, `cli.doctor.check_tool` reports it, and `config.apply_tool_env`
-prepends `tools_dir` to `PATH` and sets the env var at CLI/GUI startup. Since DS2 is Wwise,
-DS2 needs exactly this existing tool and **not** `VGAudioCli`.
+`vgmstream-cli` is already a pinned, registered tool that `deciwaves setup` installs, so DS2
+being Wwise means it needs **no new tooling** — it reuses that entry and specifically not
+`VGAudioCli`. Do not vendor a binary or add a download path for it. The two traps that make a
+configured machine look like it has no decoder (runtime-set env vars; the `.venv`
+`%LOCALAPPDATA%` virtualization) are in [[decoder-tool-resolution]].
 
-Because `apply_tool_env` sets `DECIWAVES_VGMSTREAM` at *runtime* from config rather than
-persisting it, a shell check for that env var (or a `PATH` lookup for `vgmstream-cli`) reports
-"no decoder installed" on a perfectly configured machine. Ask `deciwaves doctor`, not the
-shell. Related trap: the `.venv` interpreter virtualizes `%LOCALAPPDATA%`, so
-`config.path()` prints `C:\Users\<u>\AppData\Local\DeciWaves\config.json` while Git Bash `ls`
-and PowerShell `Test-Path` both report that literal path missing. Verify config through
-`deciwaves.cli.config.load()`.
-
-The real DS2 gap is the reverse direction: there is no `ds2_install` config key, no
-`setup --ds2-install`, and no doctor DS2 line — that is Phase 1+ wiring, per
-`docs/ds2-support-spec.md`.
+The real DS2 gap is the reverse direction: there is no `ds2_package` config key, no
+`setup --ds2-package`, and no doctor DS2 line — issue #355, per `docs/ds2-support-spec.md`.
