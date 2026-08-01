@@ -75,7 +75,7 @@ def load_catalog_dict(csv_path: str) -> dict:
     core can drop out of the reel with no error at all. This is the loud guard on that
     failure mode; regenerating catalog.csv AND wem-metadata.csv together clears it.
     """
-    with open(csv_path, newline="", encoding="utf-8") as f:
+    with open(csv_path, newline="", encoding="utf-8-sig") as f:
         rows = list(csv.DictReader(f))
     catalog: dict = {}
     collisions = 0

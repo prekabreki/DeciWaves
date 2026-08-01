@@ -63,7 +63,7 @@ def load_keepspans(path):
     if not os.path.isfile(path):
         return {}
     out = {}
-    with open(path, newline="", encoding="utf-8") as f:
+    with open(path, newline="", encoding="utf-8-sig") as f:
         for r in csv.DictReader(f):
             out[r["stream_path"]] = (parse_spans(r["keep_spans"]), r["dropped"] == "1")
     return out

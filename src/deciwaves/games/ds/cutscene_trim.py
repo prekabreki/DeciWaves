@@ -45,14 +45,14 @@ def run(rows, decode_fn, transcribe_fn, done=frozenset(),
 
 
 def _read_rows(path):
-    with open(path, newline="", encoding="utf-8") as f:
+    with open(path, newline="", encoding="utf-8-sig") as f:
         return list(csv.DictReader(f))
 
 
 def _done_streams(out_path):
     if not os.path.isfile(out_path):
         return set()
-    with open(out_path, newline="", encoding="utf-8") as f:
+    with open(out_path, newline="", encoding="utf-8-sig") as f:
         return {r["stream_path"] for r in csv.DictReader(f)}
 
 

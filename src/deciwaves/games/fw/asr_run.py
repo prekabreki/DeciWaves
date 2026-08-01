@@ -47,7 +47,7 @@ def load_initial_prompt(roster_md: str | Path | None) -> str | None:
 
 
 def load_clip_index(path: str | Path) -> list[dict]:
-    with open(path, newline="", encoding="utf-8") as f:
+    with open(path, newline="", encoding="utf-8-sig") as f:
         return list(csv.DictReader(f))
 
 
@@ -62,7 +62,7 @@ def read_done_ids(transcripts_csv: str | Path) -> set[str]:
     p = Path(transcripts_csv)
     if not p.exists():
         return set()
-    with p.open(newline="", encoding="utf-8") as f:
+    with p.open(newline="", encoding="utf-8-sig") as f:
         return {row["line_id"] for row in csv.DictReader(f)}
 
 

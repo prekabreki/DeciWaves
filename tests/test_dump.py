@@ -298,3 +298,33 @@ def test_fw_dump_copies_wavs(tmp_path):
                         "--out", str(out_dir)])
     assert rc == 0
     assert os.path.isfile(out_dir / "known_1.wav")
+
+
+def test_fw_dump_manifest_reads_bom_prefixed_csv(tmp_path):
+    """Issue #304: a manifest.csv re-saved with a UTF-8 BOM must still map line_ids
+    to WAV paths (a fused BOM on the first header key would make row["line_id"] a
+    KeyError, breaking the dump)."""
+    manifest_dir = tmp_path / "out" / "fw"
+    manifest_dir.mkdir(parents=True)
+    audio_dir = manifest_dir / "audio"
+    audio_dir.mkdir()
+    src_wav = audio_dir / "known_1.wav"
+    import wave
+    with wave.open(str(src_wav), "wb") as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(48000)
+        w.writeframes(b"\x00\x00" * 480)
+
+    manifest = manifest_dir / "manifest.csv"
+    manifest.write_bytes(
+        b"\xef\xbb\xbf" + b"line_id,wav,speaker\nknown_1,audio/known_1.wav,aloy\n")
+    ids_file = tmp_path / "ids.txt"
+    _write_ids(ids_file, "known_1")
+
+    from deciwaves.games.fw import dump as fw_dump
+    out_dir = tmp_path / "dump"
+    rc = fw_dump.main(["--ids", str(ids_file),
+                        "--manifest", str(manifest),
+                        "--audio-dir", str(manifest_dir),
+                        "--out", str(out_dir)])
+    assert rc == 0
+    assert os.path.isfile(out_dir / "known_1.wav")

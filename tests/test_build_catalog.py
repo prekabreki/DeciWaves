@@ -96,6 +96,20 @@ def test_done_core_paths(tmp_path):
     assert done_core_paths(str(tmp_path / "missing.csv")) == set()
 
 
+def test_done_core_paths_reads_bom_prefixed_csv(tmp_path):
+    """Issue #304: a catalog.csv re-saved on Windows (PowerShell 5.1 Set-Content
+    -Encoding utf8) carries a UTF-8 BOM. done_core_paths must still resolve
+    core_paths -- otherwise every core reads as not-done and a multi-hour
+    catalog silently restarts from zero. Fixture bytes are explicit so the
+    fixture's own encoding is not the thing under test."""
+    p = tmp_path / "catalog.csv"
+    rows = [",".join((cp if c == "core_path" else "" for c in CSV_COLUMNS))
+            for cp in ["a/b/sentences", "c/d/sentences"]]
+    p.write_bytes(b"\xef\xbb\xbf" +
+                  (",".join(CSV_COLUMNS) + "\n" + "\n".join(rows) + "\n").encode("utf-8"))
+    assert done_core_paths(str(p)) == {"a/b/sentences", "c/d/sentences"}
+
+
 def test_processed_core_paths(tmp_path):
     p = tmp_path / "catalog-processed.txt"
     p.write_text("a/b/sentences\nc/d/sentences\n\n", encoding="utf-8")
@@ -273,6 +287,27 @@ def test_prune_incomplete_rows_supports_a_custom_key_column(tmp_path):
     with open(csv_path, newline="", encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
     assert [r["line_id"] for r in rows] == ["done_line"]
+
+
+def test_prune_incomplete_rows_reads_bom_prefixed_csv(tmp_path):
+    """Issue #304: a BOM'd catalog.csv (PowerShell 5.1 Set-Content -Encoding utf8)
+    must still prune against the processed sidecar instead of silently re-running
+    every core. Explicit fixture bytes -- the fixture's own encoding is not the
+    thing under test."""
+    csv_path = tmp_path / "catalog.csv"
+    rows = [",".join((cp if c == "core_path" else "" for c in CSV_COLUMNS))
+            for cp in ["done/core/sentences", "crashed/core/sentences"]]
+    csv_path.write_bytes(b"\xef\xbb\xbf" +
+                         (",".join(CSV_COLUMNS) + "\n" + "\n".join(rows) + "\n").encode("utf-8"))
+    proc_path = tmp_path / "catalog-processed.txt"
+    _write_processed(proc_path, ["done/core/sentences"])
+
+    dropped = prune_incomplete_rows(str(csv_path), str(proc_path))
+
+    assert dropped == 1
+    with open(csv_path, newline="", encoding="utf-8") as f:
+        kept = list(csv.DictReader(f))
+    assert [r["core_path"] for r in kept] == ["done/core/sentences"]
 
 
 # ---------------------------------------------------------------------------

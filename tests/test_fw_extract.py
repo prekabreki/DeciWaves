@@ -38,6 +38,26 @@ def test_resume_authority_is_sidecar_only_not_manifest_union(tmp_path):
     assert fx.processed_core_paths(str(processed)) == set()
 
 
+def test_prune_incomplete_rows_reads_bom_prefixed_manifest(tmp_path):
+    """Issue #304: a clip-index.csv re-saved with a UTF-8 BOM must still prune
+    against the processed sidecar (fw's resume bookkeeping keys on "line_id" --
+    a fused BOM would KeyError the prune and abort the resume)."""
+    manifest = tmp_path / "clip-index.csv"
+    manifest.write_bytes(
+        b"\xef\xbb\xbf" + b"line_id,group_id,lssr_index,file_index,offset,clip_bytes,wav\n"
+                           b"done_line,1,0,15,0,10,audio/done.wav\n"
+                           b"torn_line,1,1,15,0,10,audio/torn.wav\n")
+    processed = tmp_path / "processed.txt"
+    processed.write_text("done_line\n", encoding="utf-8")
+
+    dropped = fx.prune_incomplete_rows(str(manifest), str(processed), key_column="line_id")
+
+    assert dropped == 1
+    with open(manifest, newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    assert [r["line_id"] for r in rows] == ["done_line"]
+
+
 def test_processed_core_paths_missing_files(tmp_path):
     assert fx.processed_core_paths(str(tmp_path / "nope.txt")) == set()
 

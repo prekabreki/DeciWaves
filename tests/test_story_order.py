@@ -263,6 +263,18 @@ def test_playlist_round_trip(tmp_path):
     assert so.read_playlist(str(p)) == segs
 
 
+def test_read_playlist_parses_bom_prefixed_csv(tmp_path):
+    """Issue #304: a playlist.csv re-saved with a UTF-8 BOM must parse identically
+    to a BOM-less one (read_playlist reads r["episode"] etc. directly, so a fused
+    BOM on the first header key would KeyError every row)."""
+    segs = [so.Segment(0, 0, 12.5, 0, "sq_cs00_s00100", 0, 0, "cutscene", "(scene)", "",
+                       "a.core.stream", "x#track0")]
+    p = tmp_path / "pl.csv"
+    so.write_playlist(segs, str(p))
+    p.write_bytes(b"\xef\xbb\xbf" + p.read_bytes())
+    assert so.read_playlist(str(p)) == segs
+
+
 def test_order_invalidates_render_marker_and_coverage(tmp_path, monkeypatch):
     """Issue #277: standalone ds order must invalidate .done-render and its
     coverage section so that a later ds run / GUI export re-renders in the
