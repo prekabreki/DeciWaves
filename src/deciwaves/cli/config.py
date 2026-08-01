@@ -101,26 +101,56 @@ def apply_tool_env(cfg: dict | None = None) -> dict:
                 os.environ.setdefault(tool.env_var, str(p))
     return cfg
 
-# Flags whose value is a NAME, never a path. `--until`/`--from` take stage
-# names (run.py, issue #62); `--stem` is an output filename stem (`fw run`
-# injects `--stem fw_story_full` itself, issue #316 -- a same-named dir in the
-# invocation dir used to get the stem absolutized, and assemble_reels'
-# os.path.join then discarded the output dir, relocating every reel
-# near-silently); `--model`/`--quest`/`--language` are a whisperx model name, a
-# quest id, and a language code. A cwd file/dir that happens to share any of
-# these values (`extract`, `render`, `catalog`, `fw_story_full`, `large-v3`,
-# `mq04`, `en`, ...) must not get absolutized into an argparse-choices
-# rejection -- or worse, an exists-in-both-trees exit-2 refusal.
-_NON_PATH_VALUE_FLAGS = frozenset({
-    "--until", "--from", "--stem", "--model", "--quest", "--language",
+# Flags whose value is a filesystem path. Any new stage flag that takes a
+# path must be added here -- otherwise a relative value you pass to it will
+# resolve inside --workspace (after the chdir), instead of against the
+# directory you ran `deciwaves` from.  A flag that does NOT appear here is
+# passed through verbatim in both the bare `--flag VALUE` and joined
+# `--flag=VALUE` spellings, never rewritten -- no hand-maintained denylist of
+# non-path flags or lookahead state machine needed.
+_PATH_VALUE_FLAGS = frozenset({
+    "--anchors",
+    "--audio-dir",
+    "--audio-root",
+    "--cache",
+    "--catalog",
+    "--clip-index",
+    "--cores",
+    "--cores-out",
+    "--coverage-out",
+    "--cutscene-tracks",
+    "--data-dir",
+    "--dupes",
+    "--errors",
+    "--file-list",
+    "--gamescript",
+    "--ids",
+    "--manifest",
+    "--oodle",
+    "--out",
+    "--out-dir",
+    "--package",
+    "--package-dir",
+    "--playlist",
+    "--processed",
+    "--roster",
+    "--speech-trim",
+    "--subtitles",
+    "--tracks",
+    "--transcript",
+    "--transcripts",
+    "--transcripts-out",
+    "--types-json",
+    "--wem-metadata",
 })
 
 
-def absolutize_existing_paths(argv: list, workspace=None) -> list:
-    """Resolve any argv token that refers to an EXISTING file/dir relative to
-    the CURRENT (pre-chdir) cwd to its absolute form -- but only when a
-    *different* --workspace is actually about to move "relative" out from
-    under it, and only when doing so is unambiguous.
+def absolutize_existing_paths(argv: list, workspace=None, game=None, stage=None) -> list:
+    """Resolve the value of every known path-taking flag in *argv* that refers
+    to an EXISTING file/dir relative to the CURRENT (pre-chdir) cwd to its
+    absolute form -- but only when a *different* --workspace is actually
+    about to move "relative" out from under it, and only when doing so is
+    unambiguous.
 
     Call this before `enter_workspace()` changes what "relative" means. A
     relative path the user typed to mean "relative to where I ran deciwaves"
@@ -134,6 +164,12 @@ def absolutize_existing_paths(argv: list, workspace=None) -> list:
     both sides of the (no-op) chdir, so there is nothing to pin. This is
     itself a behavior fix (issue #44): a plain no-workspace run used to
     rewrite tokens and print notices for no reason.
+
+    Only flags enumerated in `_PATH_VALUE_FLAGS` are rewritten; every other
+    token (non-path flags, bare tokens, stage names, stem strings, model
+    names, ...) passes through verbatim. This is an allowlist design (issue
+    #307) -- a new path-taking flag must be added to `_PATH_VALUE_FLAGS`;
+    there is no hand-maintained denylist to fall out of date.
 
     With a workspace that genuinely differs from cwd, each existing-under-cwd
     token is checked against the workspace too, since a token can just as
@@ -164,6 +200,12 @@ def absolutize_existing_paths(argv: list, workspace=None) -> list:
     to be skipped wholesale because the whole token starts with '-', leaving the
     #32 bug alive for that spelling (finding 2). Every rewrite prints a one-line
     notice so the invocation-dir -> absolute redirect is never silent.
+
+    *game* and *stage* identify which stage is about to run, so the function
+    can absolutize positional (bare) path tokens for the one stage that has
+    them. Currently only ``fw assemble`` declares positional path arguments
+    (``manifests nargs="+"``); for every other stage, bare tokens pass
+    through untouched.
     """
     if workspace is None:
         return list(argv)
@@ -172,19 +214,24 @@ def absolutize_existing_paths(argv: list, workspace=None) -> list:
         return list(argv)
 
     out = []
-    value_is_stage_name = False
+    looking_for_path_value = False
+    is_fw_assemble = (game == "fw" and stage == "assemble")
     for tok in argv:
-        if value_is_stage_name:
-            value_is_stage_name = False
+        if looking_for_path_value:
+            looking_for_path_value = False
+            if tok and not tok.startswith("-") and not os.path.isabs(tok) and os.path.exists(tok):
+                resolved = _resolve_against_workspace(tok, workspace_path)
+                if resolved is not None:
+                    tok = resolved
         elif tok.startswith("--") and "=" in tok:
             flag, _, value = tok.partition("=")
-            if flag not in _NON_PATH_VALUE_FLAGS:
+            if flag in _PATH_VALUE_FLAGS:
                 resolved = _resolve_against_workspace(value, workspace_path)
                 if resolved is not None:
                     tok = f"{flag}={resolved}"
-        elif tok in _NON_PATH_VALUE_FLAGS:
-            value_is_stage_name = True
-        elif tok and not tok.startswith("-") and not os.path.isabs(tok) and os.path.exists(tok):
+        elif tok in _PATH_VALUE_FLAGS:
+            looking_for_path_value = True
+        elif is_fw_assemble and tok and not tok.startswith("-") and not os.path.isabs(tok) and os.path.exists(tok):
             resolved = _resolve_against_workspace(tok, workspace_path)
             if resolved is not None:
                 tok = resolved
