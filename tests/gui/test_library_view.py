@@ -639,37 +639,42 @@ def test_superseded_parse_does_not_overwrite_rows(qtbot, tmp_path, monkeypatch):
     v = LibraryView()
     qtbot.addWidget(v)
 
-    # First refresh: parse is dispatched, blocks inside blocking_load
-    v.refresh("ds", ws)
+    try:
+        # First refresh: parse is dispatched, blocks inside blocking_load
+        v.refresh("ds", ws)
 
-    # Wait until the first call is inside the stub (call_count bumped to 1).
-    while call_count[0] == 0:
+        # Wait until the first call is inside the stub (call_count bumped to 1).
+        while call_count[0] == 0:
+            QApplication.processEvents()
+            time.sleep(0.001)
+        assert call_count[0] == 1
+
+        # Second refresh: supersedes the first.
+        v.refresh("ds", ws)
+
+        # Wait for the second parse to finish and be processed on the main thread.
+        assert second_done.wait(10), "second_done.wait() timed out"
         QApplication.processEvents()
-        time.sleep(0.001)
-    assert call_count[0] == 1
 
-    # Second refresh: supersedes the first.
-    v.refresh("ds", ws)
+        assert call_count[0] == 2  # the stub actually ran twice
 
-    # Wait for the second parse to finish and be processed on the main thread.
-    second_done.wait()
-    QApplication.processEvents()
+        # Verify the second (non-stale) parse populated the view correctly.
+        assert v.total_count() == 2
+        assert v.rows()[0].line_id == "a"
 
-    assert call_count[0] == 2  # the stub actually ran twice
+        # Now unblock the stale first parse. Its result carries line_id="STALE"
+        # and a stale generation — _on_lines_loaded must discard it.
+        first_block.set()
+        QApplication.processEvents()
+        time.sleep(0.1)
+        QApplication.processEvents()
 
-    # Verify the second (non-stale) parse populated the view correctly.
-    assert v.total_count() == 2
-    assert v.rows()[0].line_id == "a"
-
-    # Now unblock the stale first parse. Its result carries line_id="STALE"
-    # and a stale generation — _on_lines_loaded must discard it.
-    first_block.set()
-    QApplication.processEvents()
-    time.sleep(0.1)
-    QApplication.processEvents()
-
-    # The view must still reflect the second (non-stale) parse.
-    assert v.total_count() == 2
-    assert v.rows()[0].line_id == "a"
-    assert v.rows()[0].line_id != "STALE"
-    assert call_count[0] == 2
+        # The view must still reflect the second (non-stale) parse.
+        assert v.total_count() == 2
+        assert v.rows()[0].line_id == "a"
+        assert v.rows()[0].line_id != "STALE"
+        assert call_count[0] == 2
+    finally:
+        first_block.set()
+        QApplication.processEvents()
+        assert v._parse_pool.waitForDone(5000), "worker thread leaked"
