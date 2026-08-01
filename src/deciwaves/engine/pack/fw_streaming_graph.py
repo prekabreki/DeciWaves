@@ -1,15 +1,23 @@
-"""Parse Horizon Forbidden West's ``streaming_graph.core`` (StreamingGraphResource).
+"""Parse Horizon Forbidden West / Death Stranding 2 ``streaming_graph.core``
+(StreamingGraphResource).
 
-FW (and Burning Shores) index every package archive through this single ~55 MB
-resource instead of HZD-Remastered's ``PackFileLocators.bin`` (which FW does not
-ship). It carries the archive name table (``Files``), the per-line audio stream
-``LocatorTable`` (consumed positionally — see :mod:`fw_object_reader`), the object
-storage ``SpanTable``, and the ``Groups`` that slice into all of them.
+FW (and Burning Shores) and DS2 each index every package archive through this
+single resource (~55 MB FW, larger for DS2) instead of HZD-Remastered's
+``PackFileLocators.bin`` (which neither game ships). It carries the archive name
+table (``Files``), the per-line audio stream ``LocatorTable`` (consumed
+positionally — see :mod:`fw_object_reader`), the object storage ``SpanTable``,
+and the ``Groups`` that slice into all of them.
 
-Layout reverse-engineered from ShadelessFox/odradek
+FW layout reverse-engineered from ShadelessFox/odradek
 (``odradek-game-hfw`` ``StreamingGraphImpl`` + generated ``types.json``) and
 verified byte-exact against the retail install. See
 ``.memories/fw-streaming-graph.md``.
+
+DS2 ships the same resource type (same ``type_hash``) with two layout deltas
+documented in ``.memories/ds2-streaming-graph.md``: ``StreamingGroupData`` is
+68 bytes (not 64), with a trailing ``reserved_ds2`` u32, and the body carries
+an extra ``Array<GGUUID(16)>`` after ``PackFileMaxCompressedBlockSize``. Variant
+is auto-detected by attempting the FW layout first and falling back to DS2.
 
 On-disk framing is a standard Decima ``.core`` object::
 
@@ -100,8 +108,8 @@ class ObjectLocator:
 
 @dataclass(frozen=True)
 class Group:
-    """One ``StreamingGroupData`` record (64 bytes). Fields are slice bounds
-    into the graph-global tables (see :class:`StreamingGraph`)."""
+    """One ``StreamingGroupData`` record (64 bytes FW, 68 bytes DS2). Fields are
+    slice bounds into the graph-global tables (see :class:`StreamingGraph`)."""
     group_id: int
     num_objects: int
     group_size: int
@@ -117,6 +125,7 @@ class Group:
     link_size: int
     locator_start: int
     locator_count: int
+    reserved_ds2: int = 0
 
 
 class _Cursor:
@@ -176,6 +185,16 @@ _GROUP_DTYPE = np.dtype([
     ("type_start", "<u4"), ("type_count", "<u4"),
     ("link_start", "<u4"), ("link_size", "<u4"),
     ("locator_start", "<u4"), ("locator_count", "<u4"),
+])
+_GROUP_DTYPE_DS2 = np.dtype([
+    ("group_id", "<i4"), ("num_objects", "<i4"), ("group_size", "<i8"),
+    ("sub_group_start", "<u4"), ("sub_group_count", "<u4"),
+    ("root_start", "<u4"), ("root_count", "<u4"),
+    ("span_start", "<u4"), ("span_count", "<u4"),
+    ("type_start", "<u4"), ("type_count", "<u4"),
+    ("link_start", "<u4"), ("link_size", "<u4"),
+    ("locator_start", "<u4"), ("locator_count", "<u4"),
+    ("reserved_ds2", "<u4"),
 ])
 _SPAN_DTYPE = np.dtype([("file_and_patch", "<u4"), ("length", "<i4"), ("offset", "<i4")])
 _OBJLOC_DTYPE = np.dtype([
@@ -267,6 +286,29 @@ class StreamingGraph:
         body_start = c.pos
         body_end = body_start + size
 
+        end_pos = None
+        for group_dtype, variant in ((_GROUP_DTYPE, "fw"), (_GROUP_DTYPE_DS2, "ds2")):
+            try:
+                end_pos = self._parse_body(core_bytes, body_start, group_dtype, variant)
+            except (ValueError, struct.error, IndexError):
+                continue
+            if end_pos == body_end:
+                break
+            raise ValueError(
+                f"body not size-exact (variant={variant}): "
+                f"consumed {end_pos - body_start} of {body_end - body_start} bytes"
+            )
+        else:
+            raise ValueError(
+                "streaming graph body parse failed for both FW and DS2 layouts"
+            )
+
+        self._by_id: dict[int, Group] = {g.group_id: g for g in self.groups}
+        self.type_table: np.ndarray = self._read_type_table()
+
+    def _parse_body(self, core_bytes, body_start, group_dtype, variant):
+        c = _Cursor(core_bytes, body_start)
+
         c.raw(16)                      # ObjectUUID
         self.is_packed = c.u8() != 0   # IsPacked
 
@@ -287,7 +329,7 @@ class StreamingGraph:
             spans["offset"].astype(np.int64), spans["length"].astype(np.int64),
         )
 
-        group_arr = c.bulk(_GROUP_DTYPE, c.u32())
+        group_arr = c.bulk(group_dtype, c.u32())
         self.groups: list[Group] = [Group(*rec) for rec in group_arr.tolist()]
 
         self.sub_groups: np.ndarray = c.bulk(np.dtype("<u4"), c.u32())
@@ -303,15 +345,14 @@ class StreamingGraph:
         self.pack_file_uncompressed_block_size = c.u32()
         self.pack_file_max_compressed_block_size = c.u32()
 
-        if c.pos != body_end:
-            raise ValueError(
-                f"body not size-exact: consumed {c.pos - body_start} of {size} bytes"
-            )
+        if variant == "ds2":
+            self.trailing_uuids = c.bulk(np.dtype("S16"), c.u32())
+        else:
+            self.trailing_uuids = np.array([], dtype="S16")
 
-        # group id -> group (ids are NOT necessarily array indices)
-        self._by_id: dict[int, Group] = {g.group_id: g for g in self.groups}
+        self.variant = variant
 
-        self.type_table: np.ndarray = self._read_type_table()
+        return c.pos
 
     def _read_type_table(self) -> np.ndarray:
         """Resolve ``TypeTableData`` to a flat array of type hashes (one per
