@@ -84,7 +84,7 @@ def done_core_paths(csv_path):
     if not os.path.isfile(csv_path):
         return set()
     done = set()
-    with open(csv_path, "r", newline="", encoding="utf-8") as f:
+    with open(csv_path, "r", newline="", encoding="utf-8-sig") as f:
         for row in csv.DictReader(f):
             done.add(row["core_path"])
     return done
@@ -149,7 +149,7 @@ def prune_incomplete_rows(csv_path, processed_path, key_column="core_path"):
     """
     if not os.path.isfile(csv_path):
         return 0
-    with open(csv_path, "r", newline="", encoding="utf-8") as f:
+    with open(csv_path, "r", newline="", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
         fieldnames = reader.fieldnames
         rows = list(reader)

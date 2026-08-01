@@ -21,7 +21,7 @@ def _load_catalog(csv_path: str) -> dict[str, str]:
     if not os.path.isfile(csv_path):
         return {}
     mapping: dict[str, str] = {}
-    with open(csv_path, newline="", encoding="utf-8") as f:
+    with open(csv_path, newline="", encoding="utf-8-sig") as f:
         for row in csv.DictReader(f):
             lid = row.get("line_id", "")
             if not lid:

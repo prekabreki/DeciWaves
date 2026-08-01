@@ -197,6 +197,20 @@ def test_write_tracks_csv_one_row_per_track(tmp_path):
     assert rows[2]["voice_track_stream"] == ""
 
 
+def test_cutscene_scenes_from_catalog_reads_bom_prefixed_csv(tmp_path):
+    """Issue #304: a catalog.csv re-saved with a UTF-8 BOM must yield the same
+    distinct cutscene scene names, in first-seen order, as a BOM-less one."""
+    content = (
+        "line_id,core_path,line_index,category,scene,speaker_code,speaker_name,"
+        "subtitle_en,wem_path_en,language\n"
+        "a,,0,cutscene,sq_cs00_s00400,,,,,\n"
+        "b,,1,mission,lines_m00010,,,,,\n"
+        "c,,2,cutscene,sq_cs11_s00100,,,,,\n")
+    p = tmp_path / "catalog.csv"
+    p.write_bytes(b"\xef\xbb\xbf" + content.encode("utf-8"))
+    assert ca.cutscene_scenes_from_catalog(str(p)) == ["sq_cs00_s00400", "sq_cs11_s00100"]
+
+
 # ------------------------------------------------- integration (real install)
 
 PROVEN_STREAM = (

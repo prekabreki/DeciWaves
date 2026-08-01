@@ -46,6 +46,16 @@ def test_read_done_ids_empty_when_missing(tmp_path):
     assert asr_run.read_done_ids(tmp_path / "nope.csv") == set()
 
 
+def test_read_done_ids_parses_bom_prefixed_csv(tmp_path):
+    """Issue #304: a transcripts.csv re-saved with a UTF-8 BOM must still resolve
+    line_ids (read_done_ids reads row["line_id"] directly, so a fused BOM would
+    silently mark every pending clip as done-forever-missing)."""
+    p = tmp_path / "t.csv"
+    p.write_bytes(
+        b"\xef\xbb\xbf" + b"line_id,transcript,speech_ratio\ng1_0,hi,0.9\n")
+    assert asr_run.read_done_ids(p) == {"g1_0"}
+
+
 def test_read_done_ids_reads_existing(tmp_path):
     p = tmp_path / "t.csv"
     with open(p, "w", newline="", encoding="utf-8") as f:
@@ -53,6 +63,16 @@ def test_read_done_ids_reads_existing(tmp_path):
         w.writeheader()
         w.writerow({"line_id": "g1_0", "transcript": "hi", "speech_ratio": 0.9})
     assert asr_run.read_done_ids(p) == {"g1_0"}
+
+
+def test_load_clip_index_parses_bom_prefixed_csv(tmp_path):
+    """Issue #304: a clip-index.csv re-saved with a UTF-8 BOM must parse to the
+    same rows as a BOM-less one."""
+    p = tmp_path / "clips.csv"
+    p.write_bytes(b"\xef\xbb\xbf" + b"line_id,wav\ng1_0,audio/a.wav\ng1_1,audio/b.wav\n")
+    rows = asr_run.load_clip_index(p)
+    assert [r["line_id"] for r in rows] == ["g1_0", "g1_1"]
+    assert rows[0]["wav"] == "audio/a.wav"
 
 
 def test_run_transcribes_pending_and_appends(tmp_path):

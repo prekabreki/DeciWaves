@@ -36,7 +36,7 @@ def main(argv=None) -> int:
         return 1
 
     id_to_wav: dict[str, str] = {}
-    with open(a.manifest, newline="", encoding="utf-8") as f:
+    with open(a.manifest, newline="", encoding="utf-8-sig") as f:
         for row in csv.DictReader(f):
             lid = row.get("line_id", "")
             wav = row.get("wav", "")

@@ -61,7 +61,7 @@ def _load_transcripts_sidecar(path):
         with open(path, "rb") as fb:
             fb.seek(-1, os.SEEK_END)
             torn = fb.read(1) != b"\n"
-    with open(path, newline="", encoding="utf-8") as f:
+    with open(path, newline="", encoding="utf-8-sig") as f:
         rows = list(csv.DictReader(f))
     dropped = 1 if (torn and rows) else 0
     if dropped:

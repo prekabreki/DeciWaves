@@ -60,14 +60,14 @@ def coverage_report(metadata_csv: str, catalog_csv: str) -> dict:
         except (ValueError, AttributeError):
             return 0
 
-    with open(metadata_csv, newline="", encoding="utf-8") as f:
+    with open(metadata_csv, newline="", encoding="utf-8-sig") as f:
         have = {
             r["line_id"]
             for r in csv.DictReader(f)
             if _pos_int(r.get("a_bytes", "")) > 0 and _pos_int(r.get("b_samples", "")) > 0
         }
     story, with_ab = 0, 0
-    with open(catalog_csv, newline="", encoding="utf-8") as f:
+    with open(catalog_csv, newline="", encoding="utf-8-sig") as f:
         for r in csv.DictReader(f):
             # Defensive .get (mirrors the metadata-side reads above): an older/partial/
             # hand-edited catalog missing these columns degrades to "not story" rather

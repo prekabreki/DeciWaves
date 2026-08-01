@@ -208,7 +208,7 @@ def write_playlist(segments, path):
 
 def read_playlist(path):
     out = []
-    with open(path, newline="", encoding="utf-8") as f:
+    with open(path, newline="", encoding="utf-8-sig") as f:
         for r in csv.DictReader(f):
             out.append(Segment(
                 episode=int(r["episode"]), is_side=int(r["is_side"]), pos=float(r["pos"]),
@@ -234,9 +234,9 @@ def main(argv=None):
     ap.add_argument("--dupes", default="out/render-dupes.csv")
     args = ap.parse_args(argv)
 
-    with open(args.catalog, newline="", encoding="utf-8") as f:
+    with open(args.catalog, newline="", encoding="utf-8-sig") as f:
         catalog_rows = list(csv.DictReader(f))
-    with open(args.cutscene_tracks, newline="", encoding="utf-8") as f:
+    with open(args.cutscene_tracks, newline="", encoding="utf-8-sig") as f:
         cutscene_rows = list(csv.DictReader(f))
 
     if args.transcript:

@@ -159,7 +159,7 @@ def packindex_accessors(idx):
 def cutscene_scenes_from_catalog(catalog_path):
     """Distinct cutscene scene names from a Phase-B catalog.csv, in first-seen order."""
     seen = {}
-    with open(catalog_path, newline="", encoding="utf-8") as f:
+    with open(catalog_path, newline="", encoding="utf-8-sig") as f:
         for row in csv.DictReader(f):
             if row.get("category") == "cutscene" and row["scene"] not in seen:
                 seen[row["scene"]] = None

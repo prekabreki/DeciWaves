@@ -227,6 +227,20 @@ def test_load_keepspans_parses_map(tmp_path):
     assert m["g.core.stream"] == ([], True)
 
 
+def test_load_keepspans_reads_bom_prefixed_csv(tmp_path):
+    """Issue #304: a keepspans.csv re-saved with a UTF-8 BOM must parse
+    identically (otherwise the first header key fuses \\ufeff into it)."""
+    p = tmp_path / "ks.csv"
+    p.write_bytes(
+        b"\xef\xbb\xbf"
+        + b"stream_path,line_id,speech_ratio,keep_spans,dropped\n"
+          b"a.core.stream,sq_cs00#track0,0.5,0.65:2.35;3.0:4.0,0\n"
+          b"g.core.stream,sq_cs71#track0,0.01,,1\n")
+    m = ds_render.load_keepspans(str(p))
+    assert m["a.core.stream"] == ([(0.65, 2.35), (3.0, 4.0)], False)
+    assert m["g.core.stream"] == ([], True)
+
+
 def test_load_keepspans_missing_file_is_empty():
     assert ds_render.load_keepspans("does/not/exist.csv") == {}
 
