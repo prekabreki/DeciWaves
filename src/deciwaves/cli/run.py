@@ -24,7 +24,7 @@ Per-game chains (see task-9 brief):
     hzd: catalog -> clip-index -> wem-metadata -> bind[GPU] -> render
     fw:  extract -> asr[GPU] -> subtitle-bind -- (BYO gamescript gate) --
          match -> full-reel -> render
-    ds2: extract
+    ds2: extract -> asr[GPU]
 """
 from __future__ import annotations
 
@@ -697,7 +697,7 @@ def _run_ds2(cfg: dict, extra_argv: list) -> int:
     chain = run_chain("ds2")
     ap = argparse.ArgumentParser(
         prog="deciwaves ds2 run",
-        description="Run the DS2 pipeline end-to-end: extract.",
+        description="Run the DS2 pipeline end-to-end: extract -> asr.",
     )
     ap.add_argument("--package", help="DS2 package/install path (default: from `deciwaves setup`)")
     _add_slice_flags(ap, chain)
@@ -746,6 +746,7 @@ def run_chain(game: str) -> list[Stage]:
         ],
         "ds2": [
             Stage("extract", STAGES["ds2"]["extract"][0], _ds2_extract_argv),
+            Stage("asr", STAGES["ds2"]["asr"][0], gpu=True),
         ],
     }[game]
 
