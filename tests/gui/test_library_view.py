@@ -654,7 +654,18 @@ def test_superseded_parse_does_not_overwrite_rows(qtbot, tmp_path, monkeypatch):
 
         # Wait for the second parse to finish and be processed on the main thread.
         assert second_done.wait(10), "second_done.wait() timed out"
-        QApplication.processEvents()
+
+        # second_done fires INSIDE the stub -- i.e. BEFORE _ParseTask.run emits its Qt
+        # signal -- so the event has not necessarily been delivered yet (issue #346:
+        # asserting straight after the wait flaked ~1 full-suite run in 6). Poll for the
+        # result to actually be APPLIED, with a bounded deadline, rather than assuming
+        # one processEvents() pass is enough. Only the second parse can land here: the
+        # first is still held on first_block, so this cannot swallow the stale result.
+        deadline = time.monotonic() + 5
+        while v.total_count() == 0 and time.monotonic() < deadline:
+            QApplication.processEvents()
+            time.sleep(0.001)
+        assert v.total_count() != 0, "second parse was never applied within 5s"
 
         assert call_count[0] == 2  # the stub actually ran twice
 
