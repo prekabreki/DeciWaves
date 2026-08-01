@@ -5,7 +5,7 @@ Resumable (skips `line_id`s already cached) and fail-soft (per-clip errors are
 logged, never abort the run; a failed clip is simply absent and retried next
 run). Rows are appended and flushed incrementally so a crash keeps progress.
 The WhisperX model is primed with the FW character-name roster (`initial_prompt`)
-to cut name mistranscriptions — see `load_initial_prompt`.
+to cut name mistranscriptions -- see `load_initial_prompt`.
 
 The transcription itself is injected (`transcribe_fn`) so the orchestration is
 testable without the GPU stack; `main()` wires the real WhisperX model.
@@ -13,13 +13,11 @@ testable without the GPU stack; `main()` wires the real WhisperX model.
 
 from __future__ import annotations
 
-import csv
 import re
 from pathlib import Path
 
 from deciwaves import data
-
-TRANSCRIPT_COLS = ["line_id", "transcript", "speech_ratio"]
+from deciwaves.engine.asr_run import TRANSCRIPT_COLS, load_clip_index, read_done_ids, run  # noqa: F401
 
 # Packaged roster's primer: a fenced block tagged ```initial_prompt.
 _PROMPT_RE = re.compile(r"```initial_prompt\s*\n(.*?)\n```", re.S)
@@ -46,57 +44,11 @@ def load_initial_prompt(roster_md: str | Path | None) -> str | None:
     return " ".join(m.group(1).split())
 
 
-def load_clip_index(path: str | Path) -> list[dict]:
-    with open(path, newline="", encoding="utf-8-sig") as f:
-        return list(csv.DictReader(f))
-
-
 def select_clips(rows, file_index=None, limit=0):
     """Subset clip rows by stream `file_index` (e.g. "101" = DLC) and/or a count cap."""
     if file_index:
         rows = [r for r in rows if r.get("file_index") == file_index]
     return rows[:limit] if limit else rows
-
-
-def read_done_ids(transcripts_csv: str | Path) -> set[str]:
-    p = Path(transcripts_csv)
-    if not p.exists():
-        return set()
-    with p.open(newline="", encoding="utf-8-sig") as f:
-        return {row["line_id"] for row in csv.DictReader(f)}
-
-
-def run(clip_rows, transcripts_csv, audio_root, transcribe_fn, log=print):
-    """Transcribe each pending clip and append `(line_id, transcript, speech_ratio)`.
-
-    `transcribe_fn(wav_path)` returns an object with `.text` and `.speech_ratio`.
-    `audio_root` is the directory the clip-index `wav` paths are relative to
-    (i.e. `out/fw`). Returns `(n_ok, n_err)`.
-    """
-    transcripts_csv = Path(transcripts_csv)
-    audio_root = Path(audio_root)
-    done = read_done_ids(transcripts_csv)
-    pending = [r for r in clip_rows if r["line_id"] not in done]
-    transcripts_csv.parent.mkdir(parents=True, exist_ok=True)
-    new_file = not transcripts_csv.exists() or transcripts_csv.stat().st_size == 0
-
-    n_ok = n_err = 0
-    with transcripts_csv.open("a", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=TRANSCRIPT_COLS)
-        if new_file:
-            w.writeheader()
-        for r in pending:
-            wav = audio_root / r["wav"]
-            try:
-                t = transcribe_fn(str(wav))
-                w.writerow({"line_id": r["line_id"], "transcript": t.text,
-                            "speech_ratio": round(t.speech_ratio, 4)})
-                f.flush()
-                n_ok += 1
-            except Exception as e:  # fail-soft: log and keep going
-                log(f"ERROR {r['line_id']}: {e}")
-                n_err += 1
-    return n_ok, n_err
 
 
 def main(argv=None):
