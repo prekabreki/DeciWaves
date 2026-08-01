@@ -21,7 +21,8 @@ import subprocess
 from deciwaves.engine.catalog_io import read_csv_rows, CsvFormatError
 from deciwaves.engine.render import (
     SR, DEFAULT_BITRATE_KBPS, accumulate_episode_seconds, assemble_reels,
-    budget_seconds, finish_render, format_ts, ReelColumns,
+    assemble_single_file, budget_seconds, finish_render, finish_single_file,
+    format_ts, ReelColumns,
 )
 
 # Default --manifest: the full-reel stage (story_full.py)'s own default --out.
@@ -94,6 +95,14 @@ class RenderItem:
     wav: str                # path relative to the audio root
 
 
+def is_story(item):
+    """Story/filler split for FW (deliverable 1): a line is 'story' when it is
+    bound to the gamescript -- non-empty `speaker`. The full-reel manifest's
+    tier-S rows are exact-subtitle-only lines with no gamescript match (empty
+    speaker); they are filler for the story-only single-file deliverable."""
+    return bool((item.speaker or "").strip())
+
+
 def build_spine(manifest_rows, bound_tiers=BOUND_TIERS) -> list[RenderItem]:
     """Ordered playlist of bound lines, sorted by gamescript index.
 
@@ -133,6 +142,12 @@ def main(argv=None):
     ap.add_argument("--tiers", default=DEFAULT_TIERS,
                     help="comma-separated tiers to ship (e.g. '1' confident-only, 'D' for DLC)")
     ap.add_argument("--stem", default="fw_story_reel", help="output MP3 filename stem")
+    ap.add_argument("--single-file", action="store_true",
+                    help="render ONE story-only MP3 (deliverable 1): keeps only "
+                         "gamescript-bound lines (non-empty speaker), auto-picks "
+                         "the highest standard MP3 bitrate that fits --target-mb, "
+                         "and prints the chosen kbps + predicted size before "
+                         "encoding (ignores --bitrate)")
     ap.add_argument("--bitrate", type=int, default=DEFAULT_BITRATE_KBPS,
                     help="MP3 CBR bitrate in kbps (drives both encode and the "
                          "byte-budget packing math). Default %(default)s")
@@ -181,6 +196,40 @@ def main(argv=None):
         header=["timestamp", "quest", "speaker", "subtitle", "line_id"],
         row_of=lambda s, t: [format_ts(t), s.quest, s.speaker, s.subtitle, s.line_id])
 
+    if a.single_file:
+        return finish_single_file(
+            spine, not manifest_rows, a.errors,
+            msg_empty_input=(
+                f"render: ERROR - {a.manifest} has no rows -- upstream "
+                f"produced no lines to render. Run `deciwaves fw "
+                f"full-reel`; no file written to {a.out_dir}."
+            ),
+            msg_empty_selection=(
+                f"render: nothing to render: none of the {len(manifest_rows)} "
+                f"rows in {a.manifest} match --tiers {a.tiers} -- no file "
+                f"written to {a.out_dir}."
+            ),
+            msg_nothing_decoded=(
+                f"render: ERROR - none of the {len(spine)} manifest clips could "
+                f"be measured (see {a.errors}). Are the "
+                f"manifest's wav paths present under --audio-root "
+                f"({a.audio_root})? Run `deciwaves fw extract` first if this "
+                f"workspace has no decoded audio yet."
+            ),
+            msg_zero_story=(
+                f"render: ERROR - none of the {len(spine)} spine lines is story "
+                f"(all are gamescript-unbound subtitle-only lines). Deliverable 1 "
+                f"needs gamescript-bound lines -- run `deciwaves fw match` with a "
+                f"BYO gamescript first; no file written to {a.out_dir}."
+            ),
+            durations=durations,
+            out_dir=a.out_dir, cache_dir=a.cache, stem=a.stem, columns=columns,
+            gap_key=lambda s: s.quest,
+            story_predicate=is_story,
+            _assemble=assemble_single_file,
+            concat_fn=_concat_uniform if a.uniform_mono else None,
+            silence_fn=mono_silence_wav if a.uniform_mono else None,
+            unit_label="lines")
     return finish_render(
         spine, not manifest_rows, a.errors,
         msg_empty_input=(

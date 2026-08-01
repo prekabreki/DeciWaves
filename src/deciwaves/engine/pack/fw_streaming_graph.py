@@ -287,26 +287,32 @@ class StreamingGraph:
         body_end = body_start + size
 
         end_pos = None
+        failures: dict[str, str] = {}
         for group_dtype, variant in ((_GROUP_DTYPE, "fw"), (_GROUP_DTYPE_DS2, "ds2")):
             try:
                 end_pos = self._parse_body(core_bytes, body_start, group_dtype, variant)
-            except (ValueError, struct.error, IndexError):
+            except (ValueError, struct.error, IndexError) as e:
+                failures[variant] = f"raised {type(e).__name__}: {e}"
                 continue
             if end_pos == body_end:
                 break
-            raise ValueError(
-                f"body not size-exact (variant={variant}): "
+            failures[variant] = (
+                f"body not size-exact: "
                 f"consumed {end_pos - body_start} of {body_end - body_start} bytes"
             )
         else:
+            detail = "; ".join(f"{v}: {msg}" for v, msg in failures.items())
             raise ValueError(
-                "streaming graph body parse failed for both FW and DS2 layouts"
+                f"streaming graph body parse failed for both FW and DS2 layouts: {detail}"
             )
 
         self._by_id: dict[int, Group] = {g.group_id: g for g in self.groups}
         self.type_table: np.ndarray = self._read_type_table()
 
     def _parse_body(self, core_bytes, body_start, group_dtype, variant):
+        # Every attribute must be assigned unconditionally on every path: a
+        # failed attempt leaves partial state that the next attempt in the
+        # variant loop relies on being fully overwritten.
         c = _Cursor(core_bytes, body_start)
 
         c.raw(16)                      # ObjectUUID
