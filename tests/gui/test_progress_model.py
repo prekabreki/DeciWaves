@@ -3,6 +3,7 @@ import csv
 import json
 import os
 
+import deciwaves.gui.progress_model as progress_model
 from deciwaves.gui.progress_model import (
     StageProgress,
     asr_transcript_progress,
@@ -317,6 +318,93 @@ def test_probe_render_wav_cache_progress_still_usable(tmp_path):
     assert p.current == 0
     assert p.total is None
     assert p.context == "WAV cache"
+
+
+# --- CSV total caching (issue #303) ----------------------------------------
+
+def _selection_path(ws, game):
+    return os.path.join(ws, "out", game, "gui", "render-selection.csv")
+
+
+def _count_csv_reads(monkeypatch):
+    calls = []
+    orig = progress_model._csv_row_count
+
+    def counting(path):
+        calls.append(path)
+        return orig(path)
+
+    monkeypatch.setattr(progress_model, "_csv_row_count", counting)
+    return calls
+
+
+def test_render_total_csv_not_reread_when_unchanged(tmp_path, monkeypatch):
+    _make_wavs(str(tmp_path), "ds", 2)
+    _make_render_selection(str(tmp_path), "ds", 50)
+    sel = _selection_path(str(tmp_path), "ds")
+    calls = _count_csv_reads(monkeypatch)
+    assert probe_progress(str(tmp_path), "ds", "render")[0].total == 50
+    assert probe_progress(str(tmp_path), "ds", "render")[0].total == 50
+    assert calls.count(sel) == 1
+
+
+def test_render_total_csv_reread_after_change(tmp_path, monkeypatch):
+    _make_wavs(str(tmp_path), "ds", 2)
+    _make_render_selection(str(tmp_path), "ds", 50)
+    sel = _selection_path(str(tmp_path), "ds")
+    calls = _count_csv_reads(monkeypatch)
+    assert probe_progress(str(tmp_path), "ds", "render")[0].total == 50
+    assert probe_progress(str(tmp_path), "ds", "render")[0].total == 50
+    assert calls.count(sel) == 1
+    with open(sel, "a", newline="", encoding="utf-8") as f:
+        csv.writer(f).writerow(["line50", "x50"])
+    assert probe_progress(str(tmp_path), "ds", "render")[0].total == 51
+    assert calls.count(sel) == 2
+
+
+def test_render_total_csv_cache_scoped_by_path(tmp_path, monkeypatch):
+    _make_wavs(str(tmp_path), "hzd", 1)
+    _make_render_selection(str(tmp_path), "ds", 5)
+    _make_render_selection(str(tmp_path), "hzd", 9)
+    calls = _count_csv_reads(monkeypatch)
+    assert probe_progress(str(tmp_path), "ds", "render")[0].total == 5
+    assert probe_progress(str(tmp_path), "hzd", "render")[0].total == 9
+    assert calls == [_selection_path(str(tmp_path), "ds"), _selection_path(str(tmp_path), "hzd")]
+
+
+# --- case-insensitive suffix filters (issue #303) ---------------------------
+
+def test_probe_render_decode_counts_uppercase_wav(tmp_path):
+    _make_wavs(str(tmp_path), "ds", 3)
+    d = os.path.join(_out(str(tmp_path), "ds"), "wav-cache")
+    open(os.path.join(d, "clipUPPER.WAV"), "w").close()
+    open(os.path.join(d, "clip.txt"), "w").close()
+    signals = probe_progress(str(tmp_path), "ds", "render")
+    assert signals[0].current == 4
+
+
+def test_probe_render_normalize_counts_uppercase_wav(tmp_path):
+    d = os.path.join(_out(str(tmp_path), "ds"), "wav-cache", "norm")
+    os.makedirs(d, exist_ok=True)
+    open(os.path.join(d, "norm.UPPER.WAV"), "w").close()
+    signals = probe_progress(str(tmp_path), "ds", "render")
+    assert signals[1].current == 1
+
+
+def test_probe_render_reels_counts_uppercase_mp3(tmp_path):
+    d = _out(str(tmp_path), "ds")
+    os.makedirs(os.path.join(d, "audio"), exist_ok=True)
+    open(os.path.join(d, "audio", "REEL_01.MP3"), "w").close()
+    signals = probe_progress(str(tmp_path), "ds", "render")
+    assert signals[2].current == 1
+
+
+def test_probe_render_decode_excludes_uppercase_silence(tmp_path):
+    _make_wavs(str(tmp_path), "ds", 2)
+    d = os.path.join(_out(str(tmp_path), "ds"), "wav-cache")
+    open(os.path.join(d, "SILENCE_250MS.WAV"), "w").close()
+    signals = probe_progress(str(tmp_path), "ds", "render")
+    assert signals[0].current == 2
 
 
 def test_probe_unknown_stage_returns_empty(tmp_path):
