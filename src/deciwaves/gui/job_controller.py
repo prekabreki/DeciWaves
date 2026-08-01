@@ -48,6 +48,7 @@ class JobController(QObject):
         self.dump = DumpRunner(self)
         self._job_game: str | None = None
         self._job_kind: str | None = None
+        self._catalog_signals_set: set = set()
 
         self.runner.started.connect(self._on_job_started)
         self.runner.finished.connect(self._on_job_finished)
@@ -149,22 +150,32 @@ class JobController(QObject):
         return None
 
     def start_catalog_copy(self, game: str, workspace: str, dest: str) -> None:
+        if self.runner.is_running or self.dump.is_running:
+            return
         signals = _CatalogCopySignals()
         signals.finished.connect(self._on_catalog_copy_finished)
         worker = _CatalogCopyWorker(game, workspace, dest, signals)
-        self._catalog_signals = signals
+        self._catalog_signals_set.add(signals)
         QThreadPool.globalInstance().start(worker)
+        self.busy_changed.emit(True)
 
     def start_order_copy(self, game: str, workspace: str, dest: str) -> None:
+        if self.runner.is_running or self.dump.is_running:
+            return
         signals = _CatalogCopySignals()
         signals.finished.connect(self._on_catalog_copy_finished)
         worker = _CatalogCopyWorker(game, workspace, dest, signals, kind="order")
-        self._catalog_signals = signals
+        self._catalog_signals_set.add(signals)
         QThreadPool.globalInstance().start(worker)
+        self.busy_changed.emit(True)
 
     def _on_catalog_copy_finished(self, msg: str) -> None:
         self.log_message.emit(msg)
-        self._catalog_signals = None
+        sender = self.sender()
+        if sender is not None:
+            self._catalog_signals_set.discard(sender)
+        if not self._catalog_signals_set:
+            self._sync_running()
 
     # -- job lifecycle -------------------------------------------------------
 
