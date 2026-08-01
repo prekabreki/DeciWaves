@@ -166,7 +166,10 @@ plugin's `foreman-init` skill (locate via the plugin, not a saved path).
   reconciling a wave, treat `in-progress` + branch exists +
   `git rev-list --count origin/main..foreman/issue-<N>` == 0 + no open PR as
   **failed silently** (re-dispatch/hand off), not stalled. Seen with #74 on
-  2026-07-20: its verify correctly failed and it exited without a PR.
+  2026-07-20: its verify correctly failed and it exited without a PR. Test "branch
+  exists" with `git ls-remote --heads origin 'refs/heads/foreman/*'`, not
+  `git branch -r` — tracking refs go stale and keep listing branches deleted
+  elsewhere until a `fetch --prune` (it reported 5 live branches when 2 were gone).
 - **Don't trust self-reported greens.** Re-run each PR's verify in a clean
   single-worktree checkout via `./.venv/Scripts/python.exe -m pytest` before
   merging — especially any PR produced before `pythonpath=["src"]` landed. See
@@ -188,6 +191,11 @@ plugin's `foreman-init` skill (locate via the plugin, not a saved path).
   `mergeStateStatus: BLOCKED`. If a branch is lost this way, recover it with
   `git fetch origin pull/<PR>/head:foreman/issue-<N>`, push, and `gh pr reopen`.
   Cost two PRs (#325, #342) on 2026-08-01 before it was understood.
+  The protection binds **PRs only**: a direct `git push origin main` from this
+  machine succeeds while printing `Bypassed rule violations: Required status check
+  "test" is expected` — CI never runs, so a bad push reddens `main` silently and
+  every later `update-branch` inherits it. Docs-only commits are fine that way;
+  put code through a PR so the gate actually fires.
 - **A leaked thread in a GUI test fails the whole suite, not just itself.** A test
   that blocks a worker and releases it only on the happy path strands that worker
   on any assertion failure, holding a `QThreadPool` thread until `--timeout=60`
