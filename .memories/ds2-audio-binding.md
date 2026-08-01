@@ -75,34 +75,72 @@ Workshop v0.1.27 ("Odradek") targets HFW and DS2 as one lineage
 ([[decima-workshop-wrong-for-death-stranding-1]]), so generating one is plausible — but it is
 a prerequisite, not a detail, and it is where Phase 3 will stall if unaddressed.
 
-## The 12-locator block is NOT twelve languages
+## The `lNNN_*` directories are CONTENT partitions, not languages
 
-FW's fast path relies on 12 locators per LSSR = 12 dubbed languages with **English at block
-offset 0** (`fw_fast_extract.iter_english_lines`). DS2 has the same width-12 shape and it
-means something else: across all 8,776 width-12 blocks, **all twelve slots point at the same
-file**, with an identical per-slot file distribution. Language is therefore a property of the
-whole block, and copying FW's "offset 0 is English" gives silent nonsense — it reads
-whichever language that block belongs to.
+This corrects the natural reading of the directory names, and it is the single easiest way to
+mis-scope DS2. The seven `lNNN_*` dirs look like locale codes (`l800_fra` especially) and are
+not. Verified by decoding 3 of the longest clips from each directory with `vgmstream-cli` and
+running language ID over all 21: **every clip is English** (p = 0.69–1.00, mostly > 0.95), with
+coherent in-game dialogue. The `l` prefix reads as *level*:
 
-Width-12 arith-clean blocks by directory:
+| dir | content |
+| --- | --- |
+| `l100_mex` | Mexico region (Villa Libre, Wokka) |
+| `l200_aus` | Australia region (emu, koala) |
+| `l400_nr1` / `l500_nr2` / `l600_nr3` | companion/assistant hint lines |
+| `l700_bea` | Beach / plot-critical material |
+| `root` | base game + lore (the Mary Shelley / Kojima Productions easter egg) |
 
-    (root) 3,359 | l200_aus 4,671 | l100_mex 659 | l700_bea 39
+So on an English-only install **all of it is English**, and English is *not* identifiable by a
+path segment the way FW's `en/` is. `fw_fast_extract._EN_STREAM_RE` has no DS2 equivalent and
+must not be ported; DS2's English selection is "every stream", filtered by content partition
+if anything.
+
+Width-12 arith-clean blocks by directory (all English):
+
+    root 3,359 | l200_aus 4,671 | l100_mex 659 | l700_bea 39
     l400_nr1 23 | l600_nr3 13 | l500_nr2 12
 
 Of 16,921 LSSRs, 8,776 sit in width-12 arith-clean groups (758 clean groups, 33 with a
 non-integer locator ratio); other widths are rare (24: 16, 16: 4, 13: 2).
 
-**Open question, cheap to close:** which directory is English. Phase 0 concluded root, and
-root is much the largest stream (592 MB vs `l200_aus` 256 MB), which is consistent — but
-`l200_aus` holds *more* width-12 blocks, so it is not proven. Decode one clip from each and
-listen. Blocked right now only because **no Wwise decoder is installed on this machine** —
-`DECIWAVES_VGMSTREAM` is unset and no `vgmstream-cli` is on PATH or in a tools dir.
+## FW's stride-12 slot-0 indexing does yield the right line
+
+All twelve slots of a block point at the *same* file (identical per-slot file distribution
+across all 8,776 blocks), so the block is not twelve languages in this install. But
+`locators[locator_start + 12*k]` still resolves the k-th LSSR to its own distinct clip:
+decoding k = 34, 35, 37 of group 2176 returned three **sequential narrative lines**. So the
+arithmetic of `fw_fast_extract.iter_english_lines` transfers; only its English-detection
+regex does not.
+
+Unknown, and irrelevant to English-first scope: what slots 1–11 would address in a
+multi-language install. Do not assume they are language slots just because FW's are.
 
 ## 99 of 241 indexed files are absent from disk — expected, not a broken install
 
-The `Files` table indexes `package.NN.MM` slots per language; only some exist. The absent
-slots carry locator counts *identical* to the present ones per language (root 11,112,
-`l200_aus` 5,081, `l100_mex` 717 …), i.e. they are patch/variant slots addressing the same
-logical content, not missing audio. 78 files also have a max locator offset exceeding their
-physical size — again logical-space addressing, consistent with DSAR. Any DS2 stage must
-tolerate absent file indices rather than treating them as corruption.
+The `Files` table indexes `package.NN.MM` slots per content partition; only some exist. The
+absent slots carry locator counts *identical* to the present ones per partition (root 11,112,
+`l200_aus` 5,081, `l100_mex` 717 …), i.e. they address the same logical content, not missing
+audio. 78 files also have a max locator offset exceeding their physical size — again
+logical-space addressing, consistent with DSAR. Any DS2 stage must tolerate absent file
+indices rather than treating them as corruption.
+
+## Decoder provisioning was already solved — do not rebuild it
+
+`vgmstream-cli` is already a first-class registered tool: `cli.config.TOOLS` pins it (r2117)
+with env var `DECIWAVES_VGMSTREAM`, `cli.setup` downloads and unpacks it into `tools_dir` with
+a per-tool file manifest, `cli.doctor.check_tool` reports it, and `config.apply_tool_env`
+prepends `tools_dir` to `PATH` and sets the env var at CLI/GUI startup. Since DS2 is Wwise,
+DS2 needs exactly this existing tool and **not** `VGAudioCli`.
+
+Because `apply_tool_env` sets `DECIWAVES_VGMSTREAM` at *runtime* from config rather than
+persisting it, a shell check for that env var (or a `PATH` lookup for `vgmstream-cli`) reports
+"no decoder installed" on a perfectly configured machine. Ask `deciwaves doctor`, not the
+shell. Related trap: the `.venv` interpreter virtualizes `%LOCALAPPDATA%`, so
+`config.path()` prints `C:\Users\<u>\AppData\Local\DeciWaves\config.json` while Git Bash `ls`
+and PowerShell `Test-Path` both report that literal path missing. Verify config through
+`deciwaves.cli.config.load()`.
+
+The real DS2 gap is the reverse direction: there is no `ds2_install` config key, no
+`setup --ds2-install`, and no doctor DS2 line — that is Phase 1+ wiring, per
+`docs/ds2-support-spec.md`.

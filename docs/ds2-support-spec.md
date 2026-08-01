@@ -70,17 +70,26 @@ change Phases 2–5:
   subtitles/speaker *before* reaching for ASR, which may drop the GPU stage entirely.
 - **Line count:** 16,921 `LocalizedSimpleSoundResource`, 8,776 of them in
   arithmetically clean width-12 groups.
-- **The width-12 block is not FW's twelve languages.** All twelve slots point at
-  the same file, so FW's "English at block offset 0" fast path does **not**
-  transfer — copying it yields silent, wrong-language output.
+- **The seven `lNNN_*` directories are content partitions, not languages.**
+  Decoding 3 clips from each and running language ID over all 21 returns
+  **English for every one** — `l100_mex` is the Mexico region, `l200_aus`
+  Australia, `l700_bea` the Beach, `l400_nr1`/`l500_nr2`/`l600_nr3` companion
+  hint lines, `root` base + lore. So English-first scope covers *all* streams,
+  and `fw_fast_extract._EN_STREAM_RE` (which keys on an `en/` path segment) has
+  no DS2 equivalent and must not be ported.
+- **FW's stride-12 slot-0 arithmetic does transfer.** All twelve slots of a block
+  point at the same file, but `locators[locator_start + 12*k]` still resolves the
+  k-th LSSR to its own clip — k = 34, 35, 37 of group 2176 decoded as three
+  sequential narrative lines. Only the English-detection regex needs replacing.
 - **Phase 3's real prerequisite is a DS2 `types.json`.** `fw_rtti` deserialises
   objects from odradek's generated type database, which this repo does not ship
   (BYO, FW-specific). Reading a DS2 `SentenceResource` needs a DS2 one.
 
-Still open (cheap): **which directory holds English.** Root is the largest stream
-and Phase 0 concluded root, but `l200_aus` carries more width-12 blocks. One
-decode-and-listen settles it — currently blocked only because no Wwise decoder is
-installed on this machine.
+Decoder provisioning needs **no new work**: `vgmstream-cli` is already pinned in
+`cli.config.TOOLS`, installed by `deciwaves setup` into `tools_dir`, reported by
+`doctor`, and wired by `config.apply_tool_env`. DS2 being Wwise means it uses that
+existing tool rather than `VGAudioCli`. What is missing is the DS2 side: a
+`ds2_install` config key, `setup --ds2-install`, and a doctor DS2 line.
 
 ## Architecture
 
