@@ -4,6 +4,10 @@ import sys
 import pytest
 
 pytest.importorskip("PySide6")
+from PySide6.QtWidgets import QMessageBox  # noqa: E402
+
+from deciwaves.gui.export import DumpRunner  # noqa: E402
+from deciwaves.gui.jobs import JobRunner  # noqa: E402
 from deciwaves.gui.shell import MainWindow  # noqa: E402
 
 _SLOW = "import time\nfor i in range(200):\n print(i, flush=True); time.sleep(0.02)"
@@ -141,3 +145,103 @@ def test_busy_clear_keeps_failed_chip_colour(qtbot):
     w._controller.busy_changed.emit(False)
     assert w.bar._chip.text() == "failed"
     assert "color: #b00020" in w.bar._chip.styleSheet()
+
+
+# --- closeEvent confirm dialog with running job (#295) ----------------------
+
+
+@pytest.mark.allow_dialogs
+def test_close_with_running_pipeline_decline_ignores_event(qtbot, monkeypatch):
+    w = MainWindow()
+    qtbot.addWidget(w)
+    monkeypatch.setattr(JobRunner, "is_running", property(lambda self: True))
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **kw: QMessageBox.No)
+    cancelled = []
+    monkeypatch.setattr(w._controller.runner, "cancel", lambda: cancelled.append(True))
+    monkeypatch.setattr(w._controller.dump, "cancel", lambda: cancelled.append(True))
+
+    w.close()
+
+    assert cancelled == []
+
+
+@pytest.mark.allow_dialogs
+def test_close_with_running_pipeline_accept_cancels_before_persist(qtbot, monkeypatch):
+    w = MainWindow()
+    qtbot.addWidget(w)
+    monkeypatch.setattr(JobRunner, "is_running", property(lambda self: True))
+    events = []
+    monkeypatch.setattr(w._controller.runner, "cancel",
+                        lambda: events.append("cancel_runner"))
+    monkeypatch.setattr(w._controller.dump, "cancel",
+                        lambda: events.append("cancel_dump"))
+    original_setValue = w._settings.setValue
+    def _setValue(key, val):
+        events.append(f"setValue:{key}")
+        return original_setValue(key, val)
+    monkeypatch.setattr(w._settings, "setValue", _setValue)
+
+    w.close()
+
+    assert events.count("cancel_runner") == 1
+    cancel_idx = events.index("cancel_runner")
+    setvalue_indices = [i for i, e in enumerate(events) if e.startswith("setValue:")]
+    assert setvalue_indices
+    assert all(cancel_idx < si for si in setvalue_indices), \
+        f"cancel_runner must come before all setValue calls, got {events}"
+
+
+@pytest.mark.allow_dialogs
+def test_close_with_running_dump_accept_cancels_before_persist(qtbot, monkeypatch):
+    w = MainWindow()
+    qtbot.addWidget(w)
+    monkeypatch.setattr(DumpRunner, "is_running", property(lambda self: True))
+    events = []
+    monkeypatch.setattr(w._controller.runner, "cancel",
+                        lambda: events.append("cancel_runner"))
+    monkeypatch.setattr(w._controller.dump, "cancel",
+                        lambda: events.append("cancel_dump"))
+    original_setValue = w._settings.setValue
+    def _setValue(key, val):
+        events.append(f"setValue:{key}")
+        return original_setValue(key, val)
+    monkeypatch.setattr(w._settings, "setValue", _setValue)
+
+    w.close()
+
+    assert events.count("cancel_dump") == 1
+    cancel_idx = events.index("cancel_dump")
+    setvalue_indices = [i for i, e in enumerate(events) if e.startswith("setValue:")]
+    assert setvalue_indices
+    assert all(cancel_idx < si for si in setvalue_indices), \
+        f"cancel_dump must come before all setValue calls, got {events}"
+
+
+@pytest.mark.allow_dialogs
+def test_close_with_both_running_accept_cancels_runner_then_dump_before_persist(qtbot, monkeypatch):
+    w = MainWindow()
+    qtbot.addWidget(w)
+    monkeypatch.setattr(JobRunner, "is_running", property(lambda self: True))
+    monkeypatch.setattr(DumpRunner, "is_running", property(lambda self: True))
+    events = []
+    monkeypatch.setattr(w._controller.runner, "cancel",
+                        lambda: events.append("cancel_runner"))
+    monkeypatch.setattr(w._controller.dump, "cancel",
+                        lambda: events.append("cancel_dump"))
+    original_setValue = w._settings.setValue
+    def _setValue(key, val):
+        events.append(f"setValue:{key}")
+        return original_setValue(key, val)
+    monkeypatch.setattr(w._settings, "setValue", _setValue)
+
+    w.close()
+
+    assert events.count("cancel_runner") == 1
+    assert events.count("cancel_dump") == 1
+    runner_idx = events.index("cancel_runner")
+    dump_idx = events.index("cancel_dump")
+    assert runner_idx < dump_idx, f"runner cancel must come before dump cancel, got {events}"
+    setvalue_indices = [i for i, e in enumerate(events) if e.startswith("setValue:")]
+    assert setvalue_indices
+    assert all(dump_idx < si for si in setvalue_indices), \
+        f"dump cancel must come before all setValue calls, got {events}"

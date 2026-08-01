@@ -373,6 +373,7 @@ def test_shell_catalog_missing_source_messages(qtbot, tmp_path):
     assert "catalog" in w.pipeline.log_text().lower()
 
 
+@pytest.mark.allow_dialogs
 def test_shell_dump_starts_batch_and_excludes_pipeline(qtbot, tmp_path, monkeypatch):
     _make_ds_playlist(str(tmp_path))       # a checked row must exist to dump
     w = _mainwindow(qtbot, tmp_path, "ds")
@@ -392,6 +393,7 @@ def test_shell_dump_starts_batch_and_excludes_pipeline(qtbot, tmp_path, monkeypa
     assert w.pipeline.strip.rerun_enabled() is False
 
 
+@pytest.mark.allow_dialogs
 def test_shell_dump_running_blocks_pipeline_start(qtbot, tmp_path):
     # A live dump must refuse a pipeline start even if the handler is invoked directly
     # (e.g. via the strip's context menu) -- runner.start must never be reached.
@@ -404,6 +406,7 @@ def test_shell_dump_running_blocks_pipeline_start(qtbot, tmp_path):
     assert calls == [], "a pipeline start must be refused while a dump is running"
 
 
+@pytest.mark.allow_dialogs
 def test_shell_dump_running_blocks_export_mp3(qtbot, tmp_path, monkeypatch):
     ws = str(tmp_path)
     _make_ds_playlist(ws)
