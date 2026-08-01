@@ -108,6 +108,25 @@ Workshop v0.1.27 ("Odradek") targets HFW and DS2 as one lineage
 ([[decima-workshop-wrong-for-death-stranding-1]]), so generating one is plausible — but it is
 a prerequisite, not a detail, and it is where Phase 3 will stall if unaddressed.
 
+**Measured 2026-08-01: the FW `types.json` on this machine cannot be reused for DS2.** Hashing
+all 12,173 of its named types and intersecting against each game's graph type table:
+
+| game | distinct graph type hashes | named by the FW `types.json` |
+| --- | --- | --- |
+| FW | 2,367 | **2,367 (100.0%)** |
+| DS2 | 3,677 | **792 (21.5%)** |
+
+So it is definitively FW's database (100% coverage is not a coincidence), and it leaves 2,885 of
+DS2's graph types unnamed. It also contains **none** of `WwiseWemResource`,
+`WwiseWemLocalizedResource` or `WwiseBankResource` — precisely the DS2 audio resource types —
+while it does carry `SentenceResource`, `SentenceGroupResource`, `LocalizedTextResource`,
+`LocalizedSimpleSoundResource` and `VoiceResource`. Those five names hash identically in both
+games, but a shared name does not imply a shared field *layout*, so even they are unproven for
+DS2. Phase 3 needs a DS2-generated `types.json`; do not try to point `--types-json` at this file.
+
+Machine note: it lives at `\\192.168.50.250\NAS10TB\deciwaves-e2e\types.json` and is the
+configured `fw_types` value.
+
 ## The `lNNN_*` directories are CONTENT partitions, not languages
 
 This corrects the natural reading of the directory names, and it is the single easiest way to
