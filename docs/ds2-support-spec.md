@@ -1,6 +1,7 @@
 # Death Stranding 2 support — design spec
 
-Status: approved 2026-08-01. Phase 0 pending.
+Status: approved 2026-08-01. Phase 0 done; the Phase 2/3 gate is measured (see
+[`.memories/ds2-audio-binding.md`]) and Phase 1 is dispatched as #353.
 
 DS2 (`DEATH STRANDING 2: ON THE BEACH`) becomes the fourth game in the
 `GameProfile` seam. This spec fixes the architectural bet and the epic's shape;
@@ -52,16 +53,34 @@ of that desync, not a separate problem.
 fourth distinct binding approach.** That is the single most important finding
 behind this spec.
 
-### What is unknown, and gated behind Phase 0
+### What was unknown — now measured (2026-08-01)
 
-- **The audio codec.** DS1 and HZD are Wwise `.wem`; FW is plain RIFF/ATRAC9
-  decoded with VGAudio. DS2 is unverified.
-- **Whether DS2 ships parseable sentence/subtitle resources** (DS1-style, giving
-  subtitles and speaker directly) or requires ASR (the FW/HZD path).
-- **The voice-line count**, and therefore the size of every downstream stage.
-- **Which package holds English.** DS2's base `package/` has no `en`
-  subdirectory, unlike FW; the seven language dirs are `l100_mex`, `l200_aus`,
-  `l400_nr1`, `l500_nr2`, `l600_nr3`, `l700_bea`, `l800_fra`.
+Answers in [`.memories/ds2-audio-binding.md`]; summarised here because they
+change Phases 2–5:
+
+- **The audio codec is Wwise `.wem`** (RIFF/WAVE, `fmt` tag `0xFFFF`, mono
+  48 kHz), read at real locator addresses — *not* FW's ATRAC9. DS2 decodes on the
+  **vgmstream** path with DS1 and HZD, not with VGAudio.
+- **The audio streams are DSAR containers**, so locator offsets are logical, and
+  `engine.pack.fw_stream.FwStreamStore` already resolves them **unmodified**
+  (15/15 sampled clips). Phase 2 needs no new container or locator work.
+- **DS2 does ship parseable sentence/subtitle resources** — 19,760
+  `SentenceResource`, 27,474 `LocalizedTextResource`, 2,505 `SentenceGroupResource`.
+  This is the DS1-style path, so Phase 3 should try resource-derived
+  subtitles/speaker *before* reaching for ASR, which may drop the GPU stage entirely.
+- **Line count:** 16,921 `LocalizedSimpleSoundResource`, 8,776 of them in
+  arithmetically clean width-12 groups.
+- **The width-12 block is not FW's twelve languages.** All twelve slots point at
+  the same file, so FW's "English at block offset 0" fast path does **not**
+  transfer — copying it yields silent, wrong-language output.
+- **Phase 3's real prerequisite is a DS2 `types.json`.** `fw_rtti` deserialises
+  objects from odradek's generated type database, which this repo does not ship
+  (BYO, FW-specific). Reading a DS2 `SentenceResource` needs a DS2 one.
+
+Still open (cheap): **which directory holds English.** Root is the largest stream
+and Phase 0 concluded root, but `l200_aus` carries more width-12 blocks. One
+decode-and-listen settles it — currently blocked only because no Wwise decoder is
+installed on this machine.
 
 ## Architecture
 
