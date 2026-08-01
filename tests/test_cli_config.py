@@ -472,3 +472,15 @@ def test_fw_types_survives_save_load_round_trip(tmp_path, monkeypatch):
 
     config.save({"fw_types": types_json})
     assert config.load()["fw_types"] == types_json
+
+
+def test_ds2_package_survives_save_load_round_trip(tmp_path, monkeypatch):
+    # #355: ds2_package is a persisted config key, so a value set via
+    # `deciwaves setup --ds2-package` must survive save()->load() the same as
+    # fw_package. Guards that "ds2_package" is in config.KEYS -- save() only
+    # writes keys it knows about, so a missing KEYS entry would silently drop it.
+    monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(tmp_path / "cfg"))
+    ds2_package = str(tmp_path / "ds2.package")
+
+    config.save({"ds2_package": ds2_package})
+    assert config.load()["ds2_package"] == ds2_package

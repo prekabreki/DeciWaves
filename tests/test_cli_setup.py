@@ -137,6 +137,97 @@ def test_setup_saves_hzd_and_fw_package_paths(tmp_path, monkeypatch, capsys):
     assert cfg["ds_install"] == ""
 
 
+def test_setup_saves_ds2_package_path(tmp_path, monkeypatch, capsys):
+    ds2 = tmp_path / "ds2.package"
+    monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.setattr(s, "_download_and_unpack", _stub_download_ok)
+    rc = s.run_setup([
+        "--tools-dir", str(tmp_path / "tools"),
+        "--ds2-package", str(ds2),
+    ])
+    assert rc == 0
+    out = capsys.readouterr().out.lower()
+    assert "no game install configured" not in out  # ds2_package alone counts as configured
+    cfg = json.loads((tmp_path / "cfg" / "config.json").read_text())
+    assert cfg["ds2_package"] == str(ds2)
+
+
+def test_setup_warns_when_ds2_package_missing_streaming_graph(tmp_path, monkeypatch, capsys):
+    ds2 = tmp_path / "ds2_wrong_dir"; ds2.mkdir()  # exists, but no streaming_graph.core
+    monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.setattr(s, "_download_and_unpack", _stub_download_ok)
+    rc = s.run_setup(["--ds2-package", str(ds2), "--tools-dir", str(tmp_path / "tools")])
+    assert rc == 0  # non-blocking, same as the hzd/fw package warnings
+    out = capsys.readouterr().out
+    assert "streaming_graph.core" in out
+    assert "--ds2-package" in out
+    # config is still written with whatever the user passed (consistent with
+    # how a broken hzd_package is still persisted, not silently dropped)
+    cfg = json.loads((tmp_path / "cfg" / "config.json").read_text())
+    assert cfg["ds2_package"] == str(ds2)
+
+
+def test_setup_suggests_localcachewingame_subdir_when_install_root_given(tmp_path, monkeypatch, capsys):
+    # Mirrors the hzd install-root nicety: when the user points --ds2-package
+    # at the install root and the LocalCacheWinGame\package subdir actually
+    # exists (with streaming_graph.core in it), name that exact subdir.
+    root = tmp_path / "DEATH STRANDING 2 ON THE BEACH"
+    pkg_dir = root / "LocalCacheWinGame" / "package"
+    pkg_dir.mkdir(parents=True)
+    (pkg_dir / "streaming_graph.core").write_bytes(b"x")
+    monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.setattr(s, "_download_and_unpack", _stub_download_ok)
+    rc = s.run_setup(["--ds2-package", str(root), "--tools-dir", str(tmp_path / "tools")])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "LocalCacheWinGame" in out
+    assert str(pkg_dir) in out  # names the exact corrected path, not just the pattern
+    assert "--ds2-package" in out
+
+
+def test_setup_no_ds2_warning_when_package_dir_correct(tmp_path, monkeypatch, capsys):
+    ds2 = tmp_path / "ds2_pkg"; ds2.mkdir()
+    (ds2 / "streaming_graph.core").write_bytes(b"x")
+    monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(tmp_path / "cfg"))
+    monkeypatch.setattr(s, "_download_and_unpack", _stub_download_ok)
+    rc = s.run_setup(["--ds2-package", str(ds2), "--tools-dir", str(tmp_path / "tools")])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "WARNING" not in out
+
+
+def test_setup_second_run_preserves_ds2_package_when_omitted(tmp_path, monkeypatch):
+    # Same merge-over-saved contract as the other game keys (issue #36): a
+    # later setup run that doesn't pass --ds2-package must not blank it out.
+    ds2 = tmp_path / "ds2.package"
+    hzd = tmp_path / "hzd.package"
+    cfg_dir = tmp_path / "cfg"
+    monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(cfg_dir))
+    monkeypatch.setattr(s, "_download_and_unpack", _stub_download_ok)
+
+    assert s.run_setup(["--ds2-package", str(ds2), "--tools-dir", str(tmp_path / "tools")]) == 0
+    assert s.run_setup(["--hzd-package", str(hzd), "--tools-dir", str(tmp_path / "tools")]) == 0
+
+    cfg = json.loads((cfg_dir / "config.json").read_text())
+    assert cfg["ds2_package"] == str(ds2)
+    assert cfg["hzd_package"] == str(hzd)
+
+
+def test_setup_explicit_empty_clears_saved_ds2_package(tmp_path, monkeypatch):
+    # The None-default argparse trick makes `--ds2-package ""` distinguishable
+    # from an omitted flag: it CLEARS a previously saved value.
+    ds2 = tmp_path / "ds2.package"
+    cfg_dir = tmp_path / "cfg"
+    monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(cfg_dir))
+    monkeypatch.setattr(s, "_download_and_unpack", _stub_download_ok)
+
+    assert s.run_setup(["--ds2-package", str(ds2), "--tools-dir", str(tmp_path / "tools")]) == 0
+    assert json.loads((cfg_dir / "config.json").read_text())["ds2_package"] == str(ds2)
+
+    assert s.run_setup(["--ds2-package", "", "--tools-dir", str(tmp_path / "tools")]) == 0
+    assert json.loads((cfg_dir / "config.json").read_text())["ds2_package"] == ""
+
+
 def test_setup_saves_absolute_path_for_relative_flags(tmp_path, monkeypatch):
     # A relative path (relative to wherever the user ran `deciwaves setup`
     # from) has no fixed meaning once persisted: a later `deciwaves` run can

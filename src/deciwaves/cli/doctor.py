@@ -212,6 +212,17 @@ def check_fw_package(fw_package: str) -> Check:
                  "run `deciwaves setup --fw-package <...\\LocalCacheWinGame\\package>`.")
 
 
+def check_ds2_package(ds2_package: str) -> Check:
+    if not ds2_package:
+        return Check("ds2_package", Availability.NOT_CONFIGURED,
+                     "DS2 package: not configured (fine if you don't own it)")
+    if Path(ds2_package, "streaming_graph.core").is_file():
+        return Check("ds2_package", Availability.OK, f"DS2 package: {ds2_package}")
+    return Check("ds2_package", Availability.BROKEN,
+                 f"DS2 package: {ds2_package!r} has no streaming_graph.core.",
+                 "run `deciwaves setup --ds2-package <...\\LocalCacheWinGame\\package>`.")
+
+
 def check_fw_gamescript(fw_gamescript: str) -> Check:
     """Unlike check_fw_package, "not configured" here is a normal, fully-supported
     state -- the FW gamescript is BYO and optional even when FW itself is owned (it
@@ -266,6 +277,9 @@ def check_cuda() -> Check:
 
 
 def check_config_file() -> Check:
+    if not config.path().is_file():
+        return Check("config_file", Availability.NOT_CONFIGURED,
+                     f"config file: {config.path()} (not configured)")
     return Check("config_file", Availability.OK, f"config file: {config.path()}")
 
 
@@ -278,6 +292,7 @@ def _all_checks() -> list[Check]:
         check_ds_install(cfg.get("ds_install", "")),
         check_hzd_package(cfg.get("hzd_package", "")),
         check_fw_package(cfg.get("fw_package", "")),
+        check_ds2_package(cfg.get("ds2_package", "")),
         check_fw_gamescript(cfg.get("fw_gamescript", "")),
         check_asr_extra(),
         check_cuda(),
