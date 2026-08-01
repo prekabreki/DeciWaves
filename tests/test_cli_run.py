@@ -1333,6 +1333,76 @@ def test_fw_from_match_reruns_post_gate_slice(tmp_path, monkeypatch):
     assert [m for m, _ in calls] == [mods["match"], mods["full-reel"], mods["render"]]
 
 
+# ---------------------------------------------------------------------------
+# ds2
+# ---------------------------------------------------------------------------
+
+def _ds2_outputs(mods):
+    return {
+        mods["extract"]: "out/ds2/audio",
+        mods["asr"]: "out/ds2/transcripts.csv",
+        mods["match"]: "out/ds2/story-manifest.csv",
+    }
+
+
+def test_ds2_byo_stop_without_gamescript(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    monkeypatch.setattr(run_mod, "cuda_available", lambda: True)
+    mods = _mods("ds2")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _ds2_outputs(mods)))
+
+    rc = run_mod.run_game("ds2", {"ds2_package": "PKG"}, [])
+    assert rc == 0
+
+    called = [m for m, _ in calls]
+    assert called == [mods["extract"], mods["asr"]]
+
+    out = capsys.readouterr().out
+    assert "gamescript" in out.lower()
+    assert "--gamescript" in out
+
+
+def test_ds2_byo_message_shows_exact_rerun_command(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    monkeypatch.setattr(run_mod, "cuda_available", lambda: True)
+    mods = _mods("ds2")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _ds2_outputs(mods)))
+
+    rc = run_mod.run_game("ds2", {"ds2_package": "PKG"}, [])
+    assert rc == 0
+
+    out = capsys.readouterr().out
+    assert "deciwaves ds2 run" in out
+    assert "--package PKG" in out
+    assert "--gamescript" in out
+    assert "deciwaves setup --ds2-gamescript" in out
+
+
+def test_ds2_byo_message_quotes_package_path_with_spaces():
+    msg = run_mod._ds2_byo_message(r"C:\Games\Death Stranding 2\package")
+    assert '"C:\\Games\\Death Stranding 2\\package"' in msg
+
+
+def test_ds2_until_extract_stops_before_gate_without_whisperx_or_byo_noise(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: None)
+    mods = _mods("ds2")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _ds2_outputs(mods)))
+
+    rc = run_mod.run_game("ds2", {"ds2_package": "PKG"}, ["--until", "extract"])
+    assert rc == 0
+
+    assert [m for m, _ in calls] == [mods["extract"]]
+    assert os.path.isfile(_marker("ds2", "extract"))
+    assert not os.path.exists(_marker("ds2", "asr"))
+    assert "gamescript" not in capsys.readouterr().out.lower()
+
+
 def test_hzd_from_after_until_is_usage_error_and_deletes_nothing(tmp_path, monkeypatch, capsys):
     """--from naming a stage AFTER --until can never execute its re-run target --
     reject it as a usage error (exit 2) BEFORE deleting any marker or running

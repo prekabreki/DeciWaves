@@ -31,7 +31,7 @@ def test_fw_chain_tokens_and_asr_is_gpu():
 
 def test_ds2_chain_tokens_and_asr_is_gpu():
     chain = run.run_chain("ds2")
-    assert [s.name for s in chain] == ["extract", "asr"]
+    assert [s.name for s in chain] == ["extract", "asr", "match"]
     assert {s.name for s in chain if s.gpu} == {"asr"}
 
 
