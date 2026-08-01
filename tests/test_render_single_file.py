@@ -79,6 +79,23 @@ def test_bitrate_for_single_file_floor_exceeded_raises():
         rs.bitrate_for_single_file(too_long, target_mb=285.0)
 
 
+def test_bitrate_for_single_file_floor_128_rejects_lower_bitrate():
+    # Without a raised floor this duration rolls down to 112 kbps...
+    subfloor = rs.budget_seconds(target_mb=285.0, kbps=128) + 1.0
+    assert rs.bitrate_for_single_file(subfloor, target_mb=285.0) == 112
+    # ...but a caller who insists on >= 128 kbps gets a clear error instead of
+    # a sub-floor bitrate
+    with pytest.raises(ValueError, match="does not fit"):
+        rs.bitrate_for_single_file(subfloor, target_mb=285.0, floor_kbps=128)
+
+
+def test_bitrate_for_single_file_floor_128_boundary_succeeds():
+    # The raised floor still accepts its own exact boundary
+    at_floor = rs.budget_seconds(target_mb=285.0, kbps=128)
+    assert rs.bitrate_for_single_file(at_floor, target_mb=285.0,
+                                      floor_kbps=128) == 128
+
+
 def test_bitrate_for_single_file_negative_duration_raises():
     with pytest.raises(ValueError, match="negative"):
         rs.bitrate_for_single_file(-1.0)
