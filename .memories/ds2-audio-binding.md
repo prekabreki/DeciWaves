@@ -190,11 +190,31 @@ Consequences, all favourable:
 - `locators[locator_start + 12*k]` slot 0 is the installed language **by construction**, and
   independently confirmed: 100% on-disk, 8,769/8,776 valid mono Wwise RIFF, 10/10 transcribed
   as English DS2 dialogue.
-- `fw_fast_extract.english_file_indices` should be **replaced, not deleted**: DS2's analogue is
-  "the file indices that exist on disk" (7 of them), which is a stronger filter than FW's `en/`
-  path regex and is what makes the 7 bad locators and the absent slots fall out naturally.
 - The earlier framing "DS2's English selection is *every stream*" is too loose — it is *slot 0
   of every dialogue block*, which happens to span 7 stream files.
+
+### `iter_english_lines` needs NO changes at all — verified
+
+`fw_fast_extract.iter_english_lines(graph, en_indices)` already takes the accepted stream-file
+index set as a parameter, so the *only* DS2-specific piece is computing that set. Passing "every
+file index present on disk" reproduces the measurement exactly:
+
+```python
+on_disk = {i for i, f in enumerate(graph.files)
+           if os.path.isfile(os.path.join(package_dir, strip_cache_prefix(f)))}
+lines = list(iter_english_lines(graph, on_disk))     # -> exactly 8,776
+```
+
+    files on disk: 142 of 241
+    FastLines yielded: 8,776          # independent census also said 8,776
+    distinct stream files used: 7     # {40:3359, 39:4671, 42:659, 38:39, 41:23, 36:13, 34:12}
+    line_id unique: True (8,776)
+
+So DS2 Phase 2 needs **no new container reader, no new locator arithmetic, and no new
+resolver** — just an on-disk index helper (~4 lines), a stage that mirrors `games/fw/extract.py`
+with `vgmstream-cli` in place of `VGAudioCli`, and CLI wiring. Note `english_file_indices`
+raises `KeyError` on an empty set, so the helper must fail loudly on a wrong package dir rather
+than yielding zero lines silently.
 
 ## 99 of 241 indexed files are absent from disk — because they are the OTHER 11 LANGUAGES
 
