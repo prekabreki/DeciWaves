@@ -39,7 +39,9 @@ from deciwaves.gui.cuda_probe import asr_extra_installed, cuda_display_text
 from deciwaves.gui.game_panel_model import (
     FW_TIERS_DEFAULT,
     FW_TIERS_HINT,
+    GAMESCRIPT_FORMAT_HINT,
     SAMPLE_CAP_DEFAULT,
+    check_gamescript,
     controls_for,
     render_scope_defaults,
     scan_warning,
@@ -192,16 +194,25 @@ class GamePanel(QWidget):
         # --- FW optional gamescript picker ---
         self._gamescript_edit = QLineEdit()
         self._gamescript_edit.setReadOnly(True)
-        self._gamescript_edit.setPlaceholderText("Gamescript (BYO, optional -- speaker + order)")
+        self._gamescript_edit.setPlaceholderText(
+            'Gamescript — plain text, "Speaker: text" per line (BYO, optional)')
         self._gamescript_edit.setToolTip("Path to a gamescript file for speaker labels and ordering")
         self._gamescript_browse = QPushButton("Browse…")
         self._gamescript_browse.setToolTip("Browse for a gamescript file")
-        gamescript_box = self._wrap(self._row(
-            QLabel("Gamescript:"), HelpIcon(
-                "BYO (Bring Your Own): an optional file that adds speaker "
-                "labels + story ordering when supplied. Persisted via setup. "
-                "Same file as deciwaves fw run --gamescript."),
-            self._gamescript_edit, self._gamescript_browse))
+        # Graded inline (never a modal -- a dialog reachable from GUI code hangs headless CI
+        # forever; see .memories/gui-modal-dialog-headless-hang.md).
+        self._gamescript_status = QLabel("")
+        self._gamescript_status.setWordWrap(True)
+        self._gamescript_status.setStyleSheet(f"color: {NEUTRAL};")
+        gamescript_box = self._wrap(
+            self._row(
+                QLabel("Gamescript:"), HelpIcon(
+                    "BYO (Bring Your Own): an optional file that adds speaker "
+                    "labels + story ordering when supplied. Persisted via setup. "
+                    "Same file as deciwaves fw run --gamescript.\n\n"
+                    + GAMESCRIPT_FORMAT_HINT),
+                self._gamescript_edit, self._gamescript_browse),
+            self._row(self._gamescript_status))
 
         # control-name -> its container widget (the hide-not-grey unit, spec §7)
         self._widgets = {
@@ -289,7 +300,14 @@ class GamePanel(QWidget):
         self._cfg = cfg or {}
         self._refresh_types_status()
         self._refresh_gpu_status(payload)
-        self._gamescript_edit.setText(self._cfg.get("fw_gamescript", "") or "")
+        configured = self._cfg.get("fw_gamescript", "") or ""
+        self._gamescript_edit.setText(configured)
+        # Grade an already-configured path too, so a file that silently stopped parsing (moved,
+        # edited, replaced) surfaces on load rather than only at the next Browse.
+        if configured and os.path.isfile(configured):
+            self._grade_gamescript(configured)
+        else:
+            self._gamescript_status.setText("")
 
     def _refresh_types_status(self) -> None:
         status, path = types_status(self._workspace, self._cfg)
@@ -341,9 +359,21 @@ class GamePanel(QWidget):
 
     def _on_gamescript_browse(self) -> None:
         path, _f = QFileDialog.getOpenFileName(
-            self, "Choose Forbidden West gamescript", self._workspace)
+            self, "Choose Forbidden West gamescript", self._workspace,
+            "Text files (*.md *.txt);;All files (*.*)")
         if path and os.path.isfile(path):   # hygiene: verify existence at pick time (spec §7)
+            self._grade_gamescript(path)
+            # Still persisted even when it grades "empty": the check informs, it does not veto
+            # (a user may know better than the parser, and clearing is done by picking again).
             self.gamescript_picked.emit(path)
+
+    def _grade_gamescript(self, path: str) -> str:
+        """Parse-check a picked gamescript and show the verdict inline. Returns the status."""
+        status, message = check_gamescript(path)
+        colour = {"ok": OK, "empty": ERROR, "unreadable": ERROR}.get(status, NEUTRAL)
+        self._gamescript_status.setStyleSheet(f"color: {colour};")
+        self._gamescript_status.setText(message)
+        return status
 
     # --- accessors (shell + tests) -----------------------------------------
 

@@ -6,9 +6,12 @@ the standalone DS re-order argv. All strings/constants/logic live here so the th
 is unit-tested on the base ``.[test]`` install (mirrors :mod:`deciwaves.gui.export_model`).
 
 Import-light on purpose: reads config dicts and does plain ``os.path`` checks; it never
-imports ``deciwaves.games.*`` (those pull pydecima / heavy parsers). The FW types.json grade
-is a plain :func:`os.path.isfile` on the effective path, matching the existence semantics of
-``games.fw.subtitle_bind.types_json_error`` without importing it.
+imports ``deciwaves.games.*`` at module scope (those pull pydecima / heavy parsers). The FW
+types.json grade is a plain :func:`os.path.isfile` on the effective path, matching the
+existence semantics of ``games.fw.subtitle_bind.types_json_error`` without importing it.
+:func:`check_gamescript` is the one exception and imports lazily *inside* the call:
+``games.fw.gamescript`` is pure-stdlib (``re``/``dataclasses``/``pathlib``, no pydecima), and
+grading a gamescript by anything other than the real parser would let the two drift apart.
 """
 from __future__ import annotations
 
@@ -91,6 +94,42 @@ def types_status(workspace: str, cfg: dict) -> tuple[str, str]:
     grades the FW picker satisfied(green)/required-missing(red)."""
     path = effective_types_path(workspace, cfg)
     return ("ok" if os.path.isfile(path) else "missing"), path
+
+
+# The one-line format contract, shown at the FW gamescript picker so a GUI-only user does
+# not have to find docs/BYO.md to learn what the file should look like.
+GAMESCRIPT_FORMAT_HINT = (
+    'Plain text, one "Speaker: text" line per spoken line. ALL-CAPS lines become '
+    "quest/section headers; [bracketed] lines are skipped. See docs/BYO.md."
+)
+
+
+def check_gamescript(path: str) -> tuple[str, str]:
+    """``("ok"|"empty"|"unreadable", message)`` for a picked BYO gamescript.
+
+    Graded by running the *real* parser (``games.fw.gamescript.parse_file``) rather than a
+    lookalike check, so this can never disagree with what ``fw match`` will actually see.
+
+    This exists because the parser is regex-only and never raises: a file in the wrong shape
+    (timestamps, ``Speaker - text`` dashes, ``**Speaker:**`` markdown) parses to *zero* lines,
+    and ``subtitle_match`` has no empty guard -- it just writes a header-only manifest. Picking
+    such a file used to be indistinguishable from supplying no gamescript at all, so the
+    "empty" grade is the whole point of the check, not an edge case.
+    """
+    # Lazy + local: keeps this module's import graph free of deciwaves.games.* (see docstring).
+    from deciwaves.games.fw.gamescript import parse_file
+    try:
+        lines = parse_file(path)
+    except (OSError, UnicodeDecodeError) as exc:
+        return "unreadable", f"Could not read this file: {exc.__class__.__name__}."
+    if not lines:
+        return "empty", (
+            "No dialogue lines found - this file will behave exactly like no gamescript "
+            "at all (no speakers, no story order). " + GAMESCRIPT_FORMAT_HINT
+        )
+    speakers = len({ln.speaker for ln in lines})
+    sections = len({ln.quest for ln in lines if ln.quest})
+    return "ok", f"Parsed {len(lines):,} lines, {speakers} speakers, {sections} sections."
 
 
 def scan_warning(game: str) -> str:

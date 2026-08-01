@@ -7,7 +7,9 @@ import os
 from deciwaves.gui.game_panel_model import (
     FW_TIERS_DEFAULT,
     FW_TIERS_HINT,
+    GAMESCRIPT_FORMAT_HINT,
     SAMPLE_CAP_DEFAULT,
+    check_gamescript,
     controls_for,
     effective_types_path,
     render_scope_defaults,
@@ -179,3 +181,57 @@ def test_transcript_order_argv_is_standalone_order_with_abs_transcript(tmp_path)
     assert argv[argv.index("--transcript") + 1] == os.path.abspath(str(transcript))
     # threads the packaged cutscene tracks so standalone order matches the chain's order.
     assert "--cutscene-tracks" in argv
+
+
+# --- check_gamescript (BYO gamescript parse-check at pick time) ------------
+
+def test_check_gamescript_ok_reports_lines_speakers_sections(tmp_path):
+    p = tmp_path / "script.md"
+    p.write_text(
+        "THE EMBASSY\n"
+        "Aloy: We should go.\n"
+        "Varl: Right behind you.\n"
+        "[Aloy climbs the cliff]\n"
+        "Aloy: Almost there.\n",
+        encoding="utf-8",
+    )
+    status, message = check_gamescript(str(p))
+    assert status == "ok"
+    assert "3 lines" in message          # the bracketed stage direction is not a line
+    assert "2 speakers" in message
+    assert "1 sections" in message
+
+
+def test_check_gamescript_flags_wrong_format_as_empty(tmp_path):
+    """The whole point: the parser never raises, so a wrong-shaped file must be caught here.
+
+    Without this grade, picking such a file is indistinguishable from supplying none at all -
+    subtitle_match has no empty guard and just writes a header-only manifest.
+    """
+    p = tmp_path / "wrong.md"
+    p.write_text("[00:12] Aloy - We should go.\n**Varl:** Right behind you.\n", encoding="utf-8")
+    status, message = check_gamescript(str(p))
+    assert status == "empty"
+    assert "no gamescript at all" in message.lower()
+    assert GAMESCRIPT_FORMAT_HINT in message     # tells the user what it SHOULD look like
+
+
+def test_check_gamescript_unreadable_when_missing(tmp_path):
+    status, message = check_gamescript(str(tmp_path / "nope.md"))
+    assert status == "unreadable"
+    assert "could not read" in message.lower()
+
+
+def test_check_gamescript_grade_matches_the_real_parser(tmp_path):
+    """Guard against the grade drifting from what `fw match` will actually see."""
+    from deciwaves.games.fw.gamescript import parse_file
+    p = tmp_path / "script.md"
+    p.write_text("A QUEST\nAloy: One.\nSylens: Two.\n", encoding="utf-8")
+    status, message = check_gamescript(str(p))
+    assert status == "ok"
+    assert f"{len(parse_file(str(p))):,} lines" in message
+
+
+def test_gamescript_format_hint_names_the_speaker_shape():
+    assert "Speaker: text" in GAMESCRIPT_FORMAT_HINT
+    assert "BYO.md" in GAMESCRIPT_FORMAT_HINT
