@@ -171,3 +171,27 @@ plugin's `foreman-init` skill (locate via the plugin, not a saved path).
   single-worktree checkout via `./.venv/Scripts/python.exe -m pytest` before
   merging — especially any PR produced before `pythonpath=["src"]` landed. See
   `.memories/worktree-editable-install-contamination.md`.
+- **`main` is protected with `strict: true` — refresh every PR before merging.**
+  The required `test` check is strict ("branch must be up to date"), so merging
+  one PR makes every *other* open PR stale. In a wave that means each merge after
+  the first is `BLOCKED`, and `gh pr merge --squash --delete-branch` on a blocked
+  PR does **not** fail safe: it closes the PR and deletes the remote branch, with
+  no error beyond a passing mention of `--admin`. Merge defensively, every time:
+  ```bash
+  gh pr update-branch "$PR"
+  st=$(gh pr view "$PR" --json mergeStateStatus -q .mergeStateStatus)   # wait for CI to re-run
+  [ "$st" = "CLEAN" ] || { echo "not mergeable: $st"; exit 1; }
+  gh pr merge "$PR" --squash --delete-branch
+  [ "$(gh pr view "$PR" --json state -q .state)" = "MERGED" ] || exit 1  # BEFORE any teardown
+  ```
+  `mergeable: MERGEABLE` is not enough — a stale PR reports `MERGEABLE` with
+  `mergeStateStatus: BLOCKED`. If a branch is lost this way, recover it with
+  `git fetch origin pull/<PR>/head:foreman/issue-<N>`, push, and `gh pr reopen`.
+  Cost two PRs (#325, #342) on 2026-08-01 before it was understood.
+- **A leaked thread in a GUI test fails the whole suite, not just itself.** A test
+  that blocks a worker and releases it only on the happy path strands that worker
+  on any assertion failure, holding a `QThreadPool` thread until `--timeout=60`
+  kills the run — and the visible failure lands on an unrelated PR (it reddened
+  #304/#343 twice while `main` was green). Release in `try/finally`, put a timeout
+  on every wait, and assert the pool drains. See #344, and #346 for the residual
+  race still open in that test.
