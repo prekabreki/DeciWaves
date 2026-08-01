@@ -29,6 +29,12 @@ def test_fw_chain_tokens_and_asr_is_gpu():
     assert {s.name for s in chain if s.gpu} == {"asr"}
 
 
+def test_ds2_chain_tokens_and_no_gpu():
+    chain = run.run_chain("ds2")
+    assert [s.name for s in chain] == ["extract"]
+    assert all(not s.gpu for s in chain)
+
+
 def test_unknown_game_raises():
     with pytest.raises(KeyError):
         run.run_chain("zzz")
