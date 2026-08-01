@@ -193,5 +193,15 @@ plugin's `foreman-init` skill (locate via the plugin, not a saved path).
   on any assertion failure, holding a `QThreadPool` thread until `--timeout=60`
   kills the run — and the visible failure lands on an unrelated PR (it reddened
   #304/#343 twice while `main` was green). Release in `try/finally`, put a timeout
-  on every wait, and assert the pool drains. See #344, and #346 for the residual
-  race still open in that test.
+  on every wait, and assert the pool drains. See #344 (the leak) and #346 (the
+  residual race in the same test), both fixed.
+- **Proving a flaky GUI test is fixed takes more than repeat runs.** N green runs
+  miss a flake with probability `(1-p)^N` — for #346's ~1-in-6 that is a 23% chance
+  of a lucky green over 8 runs, so "ran it 8 times" is not evidence. Force the race
+  instead: inject a delay at the exact interleaving point (for #346, 300 ms in
+  `_ParseTask.run` between the load returning and the signal emit), confirm the
+  pre-fix test fails with the reported assertion, confirm the fixed one passes, then
+  revert and check `git diff` on `src/` is empty. Synchronize with a bounded poll on
+  the real condition, never a longer `sleep`. And re-run the guard-defeat mutation
+  *after* making a test more patient — a too-permissive poll can swallow the very
+  thing the test exists to catch and go vacuously green.
