@@ -20,6 +20,7 @@ oo2core_*.dll
 
 # Subagent-driven-development scratch (briefs, reports, ledger, review packages)
 /.superpowers/
+/docs/superpowers/
 
 # Python
 __pycache__/
@@ -47,4 +48,5 @@ hzd_bindings.csv
 # flip regardless — this is belt-and-suspenders.)
 /AUDIT.md
 /handoff.md
+/pipeline-report.pdf
 /.claude/

@@ -1,5 +1,6 @@
 import csv
 
+from deciwaves.cli import main as cli_main
 from deciwaves.cli import run as run_mod
 from deciwaves.engine.catalog_io import read_csv_rows
 from deciwaves.games.fw import render, story_full
@@ -314,3 +315,97 @@ def test_fw_render_bitrate_affects_budget_and_concat_kwargs(tmp_path, monkeypatc
     _, kwargs = calls[0]
     assert kwargs["budget"] == bs(kbps=96)
     assert kwargs["concat_kwargs"] == {"kbps": 96}
+
+
+# ---------------------------------------------------------------------------
+# #316: --stem must never be absolutized against a same-named dir in the
+# invocation dir. `fw run` injects `--stem fw_story_full` itself; a dir of that
+# name sitting in the invocation dir used to get the stem absolutized, and
+# assemble_reels' os.path.join then discarded --out-dir, so every reel and
+# tracklist landed in the invocation dir instead of out/fw/reels under the
+# workspace -- near-silently. The regression test drives the reported case
+# through the real CLI + render stage and asserts on actual file placement, not
+# just argv or an exit code.
+# ---------------------------------------------------------------------------
+
+def test_fw_stem_not_absolutized_reels_land_in_workspace(tmp_path, monkeypatch):
+    import wave as wave_mod
+
+    invoke_dir = tmp_path / "invoke"
+    invoke_dir.mkdir()
+    (invoke_dir / "fw_story_full").mkdir()      # the trap from the report
+    workspace = tmp_path / "ws"
+    audio = tmp_path / "audio"
+    audio.mkdir()
+    with wave_mod.open(str(audio / "c0.wav"), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(48000)
+        w.writeframes(b"\x00\x00" * 4800)
+    manifest = tmp_path / "full-reel-manifest.csv"
+    _write_manifest(manifest, [_row("c0", 1, "Q1")])
+
+    # The real assemble_reels runs; only the ffmpeg concat is faked (writes the
+    # target file itself), so placement is asserted on real artifacts.
+    def fake_concat(wav_list, out_mp3, list_path, norm_dir, **kwargs):
+        with open(out_mp3, "w", encoding="utf-8") as f:
+            f.write("fake mp3\n")
+    monkeypatch.setattr(render, "_concat_uniform", fake_concat)
+
+    monkeypatch.chdir(invoke_dir)
+    rc = cli_main.main([
+        "--workspace", str(workspace), "fw", "render",
+        "--stem", "fw_story_full", "--uniform-mono",
+        "--manifest", str(manifest), "--audio-root", str(tmp_path),
+        "--out-dir", "out/fw/reels", "--cache", "out/fw/wav-cache",
+        "--errors", "out/fw/render-errors.log"])
+
+    assert rc == 0
+    reels = workspace / "out" / "fw" / "reels"
+    assert (reels / "fw_story_full_00.mp3").is_file()
+    assert (reels / "fw_story_full_00.tracklist.csv").is_file()
+    # and NOTHING landed in the invocation dir
+    assert not (invoke_dir / "fw_story_full_00.mp3").exists()
+    assert not (invoke_dir / "fw_story_full_00.tracklist.csv").exists()
+
+
+def test_fw_absolute_stem_is_refused_not_relocated(tmp_path, monkeypatch, capsys):
+    """The point-of-use guard (engine/render.py): an absolute --stem -- however
+    it got there -- must fail LOUD, never silently write reels outside --out-dir
+    (os.path.join discards out_dir for an absolute second component)."""
+    import wave as wave_mod
+
+    invoke_dir = tmp_path / "invoke"
+    invoke_dir.mkdir()
+    workspace = tmp_path / "ws"
+    audio = tmp_path / "audio"
+    audio.mkdir()
+    with wave_mod.open(str(audio / "c0.wav"), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(48000)
+        w.writeframes(b"\x00\x00" * 4800)
+    manifest = tmp_path / "full-reel-manifest.csv"
+    _write_manifest(manifest, [_row("c0", 1, "Q1")])
+
+    def fake_concat(wav_list, out_mp3, list_path, norm_dir, **kwargs):
+        with open(out_mp3, "w", encoding="utf-8") as f:
+            f.write("fake mp3\n")
+    monkeypatch.setattr(render, "_concat_uniform", fake_concat)
+
+    monkeypatch.chdir(invoke_dir)
+    rc = cli_main.main([
+        "--workspace", str(workspace), "fw", "render",
+        "--stem", str(invoke_dir / "fw_story_full"), "--uniform-mono",
+        "--manifest", str(manifest), "--audio-root", str(tmp_path),
+        "--out-dir", "out/fw/reels", "--cache", "out/fw/wav-cache",
+        "--errors", "out/fw/render-errors.log"])
+
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "stem" in captured.err.lower()
+    # render's mkdir of --out-dir runs before assemble, but no reel may be
+    # written outside it
+    assert not (workspace / "out" / "fw" / "reels" / "fw_story_full_00.mp3").exists()
+    assert not (invoke_dir / "fw_story_full_00.mp3").exists()
+    assert not (invoke_dir / "fw_story_full_00.tracklist.csv").exists()

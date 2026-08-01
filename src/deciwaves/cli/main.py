@@ -207,10 +207,9 @@ def _main_dispatch(args, rest, game_parsers) -> int:
     if args.cmd == "doctor":
         from deciwaves.cli.doctor import run_doctor; return _dispatch(run_doctor, rest)
     if args.cmd == "gui":
+        # gui.launch() owns the availability check and INSTALL_HINT (issue #308) --
+        # the subcommand just delegates, so the hint is printed from exactly one place.
         from deciwaves import gui
-        if not _gui_is_available():
-            print(f"The DeciWaves GUI needs the [gui] extra. Install it with:\n    {gui.INSTALL_HINT}")
-            return 1
         return gui.launch(rest)
 
     # args.stage is the REMAINDER list captured above: the stage name plus that
