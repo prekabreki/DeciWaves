@@ -70,17 +70,28 @@ change Phases 2–5:
   subtitles/speaker *before* reaching for ASR, which may drop the GPU stage entirely.
 - **Line count:** 16,921 `LocalizedSimpleSoundResource`, 8,776 of them in
   arithmetically clean width-12 groups.
-- **The seven `lNNN_*` directories are content partitions, not languages.**
-  Decoding 3 clips from each and running language ID over all 21 returns
-  **English for every one** — `l100_mex` is the Mexico region, `l200_aus`
-  Australia, `l700_bea` the Beach, `l400_nr1`/`l500_nr2`/`l600_nr3` companion
-  hint lines, `root` base + lore. So English-first scope covers *all* streams,
-  and `fw_fast_extract._EN_STREAM_RE` (which keys on an `en/` path segment) has
+- **The `lNNN_*` directories are content partitions, not languages.**
+  Decoding 3 clips from each and running language ID returns **English for every
+  one** — `l100_mex` is the Mexico region, `l200_aus` Australia, `l700_bea` the
+  Beach, `l400_nr1`/`l500_nr2`/`l600_nr3` companion hint lines, `root` base +
+  lore. `fw_fast_extract._EN_STREAM_RE` (which keys on an `en/` path segment) has
   no DS2 equivalent and must not be ported.
-- **FW's stride-12 slot-0 arithmetic does transfer.** All twelve slots of a block
-  point at the same file, but `locators[locator_start + 12*k]` still resolves the
-  k-th LSSR to its own clip — k = 34, 35, 37 of group 2176 decoded as three
-  sequential narrative lines. Only the English-detection regex needs replacing.
+  **`l800_fra` hosts zero dialogue** (0 of 8,776 blocks) — it holds ~800 MB of
+  multichannel music/ambience, so it is out of scope for voice rather than
+  "English". It was not covered by the original language-ID sample; see
+  [`.memories/ds2-audio-binding.md`].
+- **FW's stride-12 arithmetic transfers, and the 12 slots really are 12
+  languages** (corrected 2026-08-01, second pass). Slot 0's file is present on
+  disk for 8,776/8,776 blocks and slots 1–11 for 0/8,776, so
+  `locators[locator_start + 12*k]` slot 0 is the installed language *by
+  construction*. All 8,769 readable slot-0 clips are mono Wwise; 10/10 transcribe
+  as English DS2 dialogue. `english_file_indices` should be **replaced** by an
+  on-disk filter (7 stream files), not deleted.
+- **Phase 2's oracle is per-file adjacency, not within-block adjacency.**
+  `next_offset - offset >= riff_size + 8` holds for 8,709/8,709 adjacent slot-0
+  pairs in the same file (zero overlaps), exact for 98.34%. The
+  `next_locator_in_block` form named in an earlier draft fails 7,574 of 8,032 and
+  must not be used as a test.
 - **Phase 3's real prerequisite is a DS2 `types.json`.** `fw_rtti` deserialises
   objects from odradek's generated type database, which this repo does not ship
   (BYO, FW-specific). Reading a DS2 `SentenceResource` needs a DS2 one.

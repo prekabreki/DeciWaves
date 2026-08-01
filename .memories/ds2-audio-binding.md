@@ -1,5 +1,5 @@
 ---
-description: DS2 dialogue audio is Wwise .wem (RIFF fmt 0xFFFF) inside DSAR containers that the repo's existing FwStreamStore reads unmodified, and DS2 ships parseable SentenceResource/LocalizedTextResource -- but its 12-locator block is NOT FW's 12 languages
+description: DS2 dialogue audio is Wwise .wem (RIFF fmt 0xFFFF, mono) inside DSAR containers that the repo's existing FwStreamStore reads unmodified; its 12-locator block IS FW's 12 languages with only slot 0 installed, and DS2 ships parseable SentenceResource/LocalizedTextResource
 type: reference
 ---
 
@@ -29,12 +29,45 @@ the expected symptom, not a desync.
 15/15 sampled locators across root, `l200_aus` and `l100_mex` returned valid clips with no
 code change. **DS2 Phase 2 needs no new container reader and no new locator arithmetic.**
 
-Verification invariant, byte-exact and independent of the parse that produced it:
+### Phase 2's oracle — CORRECTED 2026-08-01 (second pass)
 
-    next_locator_in_block - locator == RIFF size field + 8   (the clip's total length)
+An earlier version of this file stated the invariant as
+`next_locator_in_block - locator == RIFF size field + 8`. **That is wrong and must not be
+used as a test.** Measured over all 8,776 slot-0 dialogue locators it passes 458 and fails
+7,574 — because consecutive locators *within* a block are twelve different languages in
+twelve different files (see the corrected slot section below), so their offsets have no size
+relation at all.
 
-Confirmed on root (10,560) and `l200_aus` (33,544). Use this as Phase 2's oracle — it is far
-stronger than "the clip started with RIFF".
+The invariant that does hold is per-file adjacency of the slot-0 clips:
+
+    for slot-0 locators of ONE file, sorted by offset:
+        next_offset - offset == RIFF size field + 8      # 8,564 of 8,709 pairs = 98.34%
+        next_offset - offset >= RIFF size field + 8      # 8,709 of 8,709 = 100%, ZERO overlaps
+
+The 145 inexact pairs are always *positive gaps* (max 84,968,898 bytes) where non-dialogue
+assets sit between two runs of dialogue — never overlaps, so the weak form is a true
+invariant and the strong form is a 98% statistical property. **Assert the no-overlap form;
+measure the exact-adjacency rate, don't assert it.**
+
+Stronger and simpler checks that are exactly true, and are the ones a Phase 2 test should use:
+
+| check | measured |
+| --- | --- |
+| slot-0 locators total | 8,776 |
+| start with `RIFF` | 8,769 (99.92%) |
+| `fmt` tag `0xFFFF` (Wwise) | 8,769 / 8,769 |
+| channels == 1 (mono) | 8,769 / 8,769 |
+| distinct stream files holding dialogue | **7** |
+
+Exactly **7 slot-0 locators do not start with `RIFF`** and must be tolerated, not treated as
+corruption — `(file_index, offset)` = (40, 141988345), (39, 116945984), (39, 135705080),
+(39, 146512470), (39, 229474561), (38, 33516875), (38, 33996916). A further **60 offsets are
+duplicated** (two LSSRs sharing one clip — reused lines), so a manifest keyed on
+`(file_index, offset)` would silently lose rows; key it on the line id.
+
+Content confirmed by transcription of 10 slot-0 clips (faster-whisper medium, GPU): all
+English at p = 0.95–0.99, all recognisably DS2 — "Later, Sammy!", "There's a patch of BT
+territory due north of here", "we focus on monitoring the behavior of tar currents".
 
 A refuted hypothesis, recorded so it is not retried: physical clip starts are **not** a
 constant delta from logical offsets. Sweeping one delta over the file matched 1 of 11,112
@@ -78,10 +111,28 @@ a prerequisite, not a detail, and it is where Phase 3 will stall if unaddressed.
 ## The `lNNN_*` directories are CONTENT partitions, not languages
 
 This corrects the natural reading of the directory names, and it is the single easiest way to
-mis-scope DS2. The seven `lNNN_*` dirs look like locale codes (`l800_fra` especially) and are
-not. Verified by decoding 3 of the longest clips from each directory with `vgmstream-cli` and
+mis-scope DS2. The `lNNN_*` dirs look like locale codes (`l800_fra` especially) and are not.
+Verified by decoding 3 of the longest clips from each directory with `vgmstream-cli` and
 running language ID over all 21: **every clip is English** (p = 0.69–1.00, mostly > 0.95), with
-coherent in-game dialogue. The `l` prefix reads as *level*:
+coherent in-game dialogue.
+
+⚠ **Scope of that check, corrected 2026-08-01 (second pass).** It covered six `lNNN_*` dirs
+plus `root` — **not** `l800_fra`, the one dir whose name most suggests a language. The table
+below lists `root` in the seventh position, which disguised the gap. `l800_fra` was then
+checked directly and the conclusion survives, for a better reason than "it is English":
+
+- **`l800_fra` contains zero dialogue.** Of the 744 arith-clean width-12 LSSR groups, **none**
+  addresses an `l800_fra` file (0 of 8,776 blocks). It is not a voice source at all.
+- It does hold ~800 MB of Wwise audio across 6 present files (`package.40.00.core.stream` alone
+  is 368 MB), but sampling it off the stride-12 path yields **6-channel and 2-channel** clips,
+  while every dialogue clip in this game is **mono**. faster-whisper returns empty
+  transcriptions and its classic non-speech hallucinations ("THE END", "Thank you for your
+  viewing") on them — i.e. music/ambience beds, not voice.
+- So English-first scope is safe, and `l800_fra` is *out of scope for dialogue* rather than
+  *English*. Whether `fra` denotes French assets or a level name is still unknown and no longer
+  blocks anything.
+
+The `l` prefix reads as *level*:
 
 | dir | content |
 | --- | --- |
@@ -96,34 +147,67 @@ path segment the way FW's `en/` is. `fw_fast_extract._EN_STREAM_RE` has no DS2 e
 must not be ported; DS2's English selection is "every stream", filtered by content partition
 if anything.
 
-Width-12 arith-clean blocks by directory (all English):
+Width-12 arith-clean blocks by directory (all English; reproduced exactly on the second pass
+with the repo's own `arith_clean_lssr_count`, so these seven numbers are solid):
 
-    root 3,359 | l200_aus 4,671 | l100_mex 659 | l700_bea 39
-    l400_nr1 23 | l600_nr3 13 | l500_nr2 12
+    l200_aus 4,671 | root 3,359 | l100_mex 659 | l700_bea 39
+    l400_nr1 23 | l600_nr3 13 | l500_nr2 12 | l800_fra 0     (total 8,776)
+
+Group-classification counts differ slightly between passes — 744 arith-clean + 47
+non-integer-ratio (second pass) vs 758 + 33 (first). The total 791 and the block total 8,776
+agree exactly, so the disagreement is in how borderline groups are bucketed, not in the
+dialogue set. Prefer the block counts above; treat the group split as approximate.
 
 Of 16,921 LSSRs, 8,776 sit in width-12 arith-clean groups (758 clean groups, 33 with a
 non-integer locator ratio); other widths are rare (24: 16, 16: 4, 13: 2).
 
-## FW's stride-12 slot-0 indexing does yield the right line
+## The 12 slots ARE 12 languages — DS2 is FW's layout exactly
 
-All twelve slots of a block point at the *same* file (identical per-slot file distribution
-across all 8,776 blocks), so the block is not twelve languages in this install. But
-`locators[locator_start + 12*k]` still resolves the k-th LSSR to its own distinct clip:
-decoding k = 34, 35, 37 of group 2176 returned three **sequential narrative lines**. So the
-arithmetic of `fw_fast_extract.iter_english_lines` transfers; only its English-detection
-regex does not.
+**Corrected 2026-08-01 (second pass).** An earlier version of this file said "all twelve slots
+of a block point at the *same* file … so the block is not twelve languages in this install",
+and warned "do not assume they are language slots just because FW's are". Both statements are
+wrong, and the truth is the more convenient one.
 
-Unknown, and irrelevant to English-first scope: what slots 1–11 would address in a
-multi-language install. Do not assume they are language slots just because FW's are.
+Expanding one block slot-by-slot shows twelve *different* files, in strict ascending order:
 
-## 99 of 241 indexed files are absent from disk — expected, not a broken install
+    slot  0  file[ 40] package.01.00.core.stream   offset 5,592,160   on disk: YES
+    slot  1  file[ 49] package.02.00.core.stream   offset 5,901,512   on disk: no
+    slot  2  file[ 54] package.03.00.core.stream   offset 5,916,783   on disk: no
+    ...                                                              (slots 3-11 all absent)
 
-The `Files` table indexes `package.NN.MM` slots per content partition; only some exist. The
-absent slots carry locator counts *identical* to the present ones per partition (root 11,112,
-`l200_aus` 5,081, `l100_mex` 717 …), i.e. they address the same logical content, not missing
-audio. 78 files also have a max locator offset exceeding their physical size — again
-logical-space addressing, consistent with DSAR. Any DS2 stage must tolerate absent file
-indices rather than treating them as corruption.
+Per-slot distinct `file_index` sets over 200 blocks are disjoint and monotone
+(slot 0 ∈ {39,40}, slot 1 ∈ {49,50}, slot 2 ∈ {53,54} … slot 11 ∈ {136,137}). So slot index is
+a real, separate dimension from the block index.
+
+What the earlier pass almost certainly compared was the per-slot **partition** distribution,
+which *is* identical across slots (every slot shows the same `l200_aus` 4,671 / `root` 3,359 /
+`l100_mex` 659 / … split) — because each language ships the same content partitions. Identical
+partition histograms, twelve different files.
+
+Consequences, all favourable:
+
+- `LANGS = 12` in `fw_fast_extract` is semantically correct for DS2, not a coincidence.
+- `locators[locator_start + 12*k]` slot 0 is the installed language **by construction**, and
+  independently confirmed: 100% on-disk, 8,769/8,776 valid mono Wwise RIFF, 10/10 transcribed
+  as English DS2 dialogue.
+- `fw_fast_extract.english_file_indices` should be **replaced, not deleted**: DS2's analogue is
+  "the file indices that exist on disk" (7 of them), which is a stronger filter than FW's `en/`
+  path regex and is what makes the 7 bad locators and the absent slots fall out naturally.
+- The earlier framing "DS2's English selection is *every stream*" is too loose — it is *slot 0
+  of every dialogue block*, which happens to span 7 stream files.
+
+## 99 of 241 indexed files are absent from disk — because they are the OTHER 11 LANGUAGES
+
+**Corrected 2026-08-01 (second pass).** An earlier version of this file called the absent
+slots "patch/variant slots addressing the same logical content". They are not: they are the
+non-installed languages. The per-slot on-disk census makes it unambiguous — of the 8,776
+dialogue blocks, slot 0's file is present **8,776/8,776 (100%)** and every one of slots 1–11
+is present **0/8,776 (0%)**. That is a language dimension, not a patch dimension, and it is
+exactly FW's layout.
+
+The earlier reading was right that absent file indices must be tolerated rather than treated
+as corruption — but the reason matters, because it is what makes slot 0 the correct and
+*principled* choice rather than a lucky one (see below).
 
 ## Decoder provisioning was already solved — do not rebuild it
 
