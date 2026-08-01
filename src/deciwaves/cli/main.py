@@ -37,6 +37,9 @@ STAGES = {
         "dump":          ("deciwaves.games.fw.dump",           "Copy selected WAVs to output dir"),
         "render":        ("deciwaves.games.fw.render",         "Render MP3 reels + tracklists"),
     },
+    "ds2": {
+        "extract": ("deciwaves.games.ds2.extract", "Extract dialogue clips to WAV"),
+    },
 }
 
 def _import_stage(module_name):
