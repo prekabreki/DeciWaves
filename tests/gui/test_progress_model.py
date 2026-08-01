@@ -407,6 +407,14 @@ def test_probe_render_decode_excludes_uppercase_silence(tmp_path):
     assert signals[0].current == 2
 
 
+def test_probe_render_decode_excludes_mixedcase_silence(tmp_path):
+    _make_wavs(str(tmp_path), "ds", 2)
+    d = os.path.join(_out(str(tmp_path), "ds"), "wav-cache")
+    open(os.path.join(d, "Silence_250Ms.wav"), "w").close()
+    signals = probe_progress(str(tmp_path), "ds", "render")
+    assert signals[0].current == 2
+
+
 def test_probe_unknown_stage_returns_empty(tmp_path):
     assert probe_progress(str(tmp_path), "ds", "nonexistent") == []
 

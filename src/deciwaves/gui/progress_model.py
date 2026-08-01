@@ -56,15 +56,15 @@ def _csv_row_count(path: str) -> int:
 
 def _wav_count(dir_path: str) -> int:
     try:
-        return sum(1 for fn in os.listdir(dir_path) if fn.endswith((".wav", ".WAV")))
+        return sum(1 for fn in map(str.lower, os.listdir(dir_path)) if fn.endswith(".wav"))
     except OSError:
         return 0
 
 
 def _file_count(dir_path: str, ext: str) -> int:
     try:
-        suffixes = (ext.lower(), ext.upper())
-        return sum(1 for fn in os.listdir(dir_path) if fn.endswith(suffixes))
+        ext_lower = ext.lower()
+        return sum(1 for fn in map(str.lower, os.listdir(dir_path)) if fn.endswith(ext_lower))
     except OSError:
         return 0
 
@@ -119,12 +119,9 @@ def _decode_wav_count(workspace: str, game: str) -> int:
     except OSError:
         return 0
     return sum(
-        1 for fn in entries
-        if fn.endswith((".wav", ".WAV"))
-        and not (
-            fn.startswith(("silence_", "SILENCE_"))
-            and fn.endswith(("ms.wav", "MS.WAV"))
-        )
+        1 for fn in map(str.lower, entries)
+        if fn.endswith(".wav")
+        and not (fn.startswith("silence_") and fn.endswith("ms.wav"))
     )
 
 
