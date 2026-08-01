@@ -265,17 +265,24 @@ def main(argv=None):
 
 
 def load_hzd_manifest_join(manifest_path: str, clip_index_path: str
-                           ) -> tuple[dict[str, str], dict[int, tuple[int, int]]]:
-    """``(line_id -> clip_row, clip_row -> (offset, a_bytes))`` from the HZD
-    ``asr-manifest`` and ``clip-index`` CSVs. Shared helper imported by preview
-    and render instead of each re-implementing the manifest-to-clip-coords join.
+                           ) -> tuple[list[dict], dict[str, str], dict[int, tuple[int, int]]]:
+    """``(manifest_rows, line_id -> clip_row, clip_row -> (offset, a_bytes))`` from the
+    HZD ``asr-manifest`` and ``clip-index`` CSVs. Shared helper imported by preview,
+    dump and render instead of each re-implementing the manifest-to-clip-coords join.
 
-    Returns two empty dicts when either file is absent/unreadable (``read_csv_rows``'s
+    The already-parsed ``manifest_rows`` are surfaced so a caller (render's
+    ``build_spine``) does not re-read the manifest file -- the manifest is parsed
+    exactly once per invocation.
+
+    Returns empty rows/dicts when either file is absent/unreadable (``read_csv_rows``'s
     ``tolerant`` mode), mirroring ``preview_model``'s fail-soft contract so the caller
-    can raise its own domain-specific error."""
+    can raise its own domain-specific error. Clip coordinates are parsed to ints here;
+    a clip-index row that is not integer is dropped, so downstream consumers get
+    integer coords without re-validating."""
+    manifest_rows = read_csv_rows(manifest_path, tolerant=True)
     line_to_clip: dict[str, str] = {
         r.get("line_id", ""): r.get("clip_row", "")
-        for r in read_csv_rows(manifest_path, tolerant=True)
+        for r in manifest_rows
         if r.get("line_id")
     }
     clip_coords: dict[int, tuple[int, int]] = {}
@@ -284,7 +291,7 @@ def load_hzd_manifest_join(manifest_path: str, clip_index_path: str
             clip_coords[int(r["clip_row"])] = (int(r["offset"]), int(r["a_bytes"]))
         except (KeyError, TypeError, ValueError):
             continue
-    return line_to_clip, clip_coords
+    return manifest_rows, line_to_clip, clip_coords
 
 
 if __name__ == "__main__":

@@ -101,11 +101,19 @@ def apply_tool_env(cfg: dict | None = None) -> dict:
                 os.environ.setdefault(tool.env_var, str(p))
     return cfg
 
-# Flags whose value is a STAGE NAME, never a path (run.py's --until/--from,
-# issue #62): a cwd file/dir that happens to share a stage's name (`extract`,
-# `render`, `catalog`, ...) must not get absolutized into an argparse-choices
+# Flags whose value is a NAME, never a path. `--until`/`--from` take stage
+# names (run.py, issue #62); `--stem` is an output filename stem (`fw run`
+# injects `--stem fw_story_full` itself, issue #316 -- a same-named dir in the
+# invocation dir used to get the stem absolutized, and assemble_reels'
+# os.path.join then discarded the output dir, relocating every reel
+# near-silently); `--model`/`--quest`/`--language` are a whisperx model name, a
+# quest id, and a language code. A cwd file/dir that happens to share any of
+# these values (`extract`, `render`, `catalog`, `fw_story_full`, `large-v3`,
+# `mq04`, `en`, ...) must not get absolutized into an argparse-choices
 # rejection -- or worse, an exists-in-both-trees exit-2 refusal.
-_NON_PATH_VALUE_FLAGS = frozenset({"--until", "--from"})
+_NON_PATH_VALUE_FLAGS = frozenset({
+    "--until", "--from", "--stem", "--model", "--quest", "--language",
+})
 
 
 def absolutize_existing_paths(argv: list, workspace=None) -> list:

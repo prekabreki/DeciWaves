@@ -713,6 +713,28 @@ def test_assemble_reels_skips_episodes_with_no_decoded_segments(tmp_path):
     assert not (tmp_path / "reel_00.tracklist.csv").exists()
 
 
+def test_assemble_reels_refuses_absolute_stem(tmp_path):
+    """#316: an absolute stem would make os.path.join(out_dir, stem) DISCARD
+    out_dir and silently write every reel somewhere the caller never asked for
+    -- refuse loudly instead, whatever smuggled the absolute value in."""
+    segs = [_seg(0, "a", scene="s1", episode=0)]
+    durations = {"a": ("wav_a", 1.0)}
+    ep_secs = {0: 1.0}
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    calls = []
+
+    with pytest.raises(ValueError, match="stem"):
+        rs.assemble_reels(
+            segs, ep_secs, durations, out_dir=str(out_dir),
+            cache_dir=str(tmp_path / "cache"), stem=str(out_dir / "fw_story_full"),
+            columns=_hzd_style_columns(), budget=1000,
+            gap_key=lambda s: s.scene, concat_fn=_fake_concat(calls))
+
+    assert calls == []
+    assert not (out_dir / "fw_story_full_00.tracklist.csv").exists()
+
+
 def test_assemble_reels_forwards_concat_kwargs(tmp_path):
     """DS forwards `kbps=args.bitrate` through to `_ffmpeg_concat`; assemble_reels
     must pass caller-supplied concat_kwargs through unchanged."""
