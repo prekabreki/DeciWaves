@@ -236,6 +236,48 @@ def test_check_fw_package_configured_but_broken(tmp_path):
     assert not ok
 
 
+def test_check_ds2_package_not_configured():
+    ok, msg = doctor.check_ds2_package("")
+    assert ok
+    assert "not configured" in msg
+    assert doctor.check_ds2_package("").status is doctor.Availability.NOT_CONFIGURED
+
+
+def test_check_ds2_package_valid(tmp_path):
+    (tmp_path / "streaming_graph.core").write_bytes(b"x")
+    ok, msg = doctor.check_ds2_package(str(tmp_path))
+    assert ok and msg.startswith("[ok]")
+    assert doctor.check_ds2_package(str(tmp_path)).status is doctor.Availability.OK
+
+
+def test_check_ds2_package_configured_but_broken(tmp_path):
+    # configured, but streaming_graph.core isn't there -- this DOES fail (unlike
+    # unconfigured), and the fix hint names the corrected path shape.
+    ok, msg = doctor.check_ds2_package(str(tmp_path))
+    assert not ok
+    assert msg.startswith("[--]")
+    assert doctor.check_ds2_package(str(tmp_path)).status is doctor.Availability.BROKEN
+    assert "streaming_graph.core" in msg
+    assert "--ds2-package" in msg
+
+
+def test_check_config_file_not_configured_when_missing(tmp_path, monkeypatch):
+    monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(tmp_path / "cfg"))
+    check = doctor.check_config_file()
+    assert check.status is doctor.Availability.NOT_CONFIGURED
+    assert check.ok  # must stay exit-ok
+    assert "not configured" in check.detail
+
+
+def test_check_config_file_ok_when_present(tmp_path, monkeypatch):
+    monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(tmp_path / "cfg"))
+    config.save({})
+    check = doctor.check_config_file()
+    assert check.status is doctor.Availability.OK
+    assert check.ok
+    assert "not configured" not in check.detail
+
+
 def test_check_fw_gamescript_not_configured():
     # Optional even when FW itself is owned/configured -- must not fail the
     # exit code just because the user hasn't supplied a gamescript yet (#23).
@@ -433,7 +475,7 @@ def test_doctor_json_emits_structured_object_per_check(tmp_path, monkeypatch, ca
         assert not c["message"].startswith("[--]")
     # named checks cover tools, oodle, per-game installs, gamescript, asr, cuda
     for name in ("vgmstream-cli", "ffmpeg", "oodle", "ds_install", "hzd_package",
-                 "fw_package", "fw_gamescript", "asr_extra", "cuda", "config_file"):
+                 "fw_package", "ds2_package", "fw_gamescript", "asr_extra", "cuda", "config_file"):
         assert name in checks, f"missing check {name!r} in {sorted(checks)}"
     assert checks["ds_install"]["status"] == "ok"
     assert checks["ds_install"]["ok"] is True
@@ -457,6 +499,24 @@ def test_doctor_json_reports_not_configured_and_broken_status(tmp_path, monkeypa
     assert checks["vgmstream-cli"]["fix"]                    # a fix hint is present
     assert checks["hzd_package"]["status"] == "not_configured"
     assert checks["hzd_package"]["ok"] is True               # unowned never fails
+    assert checks["ds2_package"]["status"] == "not_configured"
+    assert checks["ds2_package"]["ok"] is True               # unowned never fails
+
+
+def test_doctor_json_ds2_configured_valid_reports_ok(tmp_path, monkeypatch, capsys):
+    import json
+    monkeypatch.setattr(doctor.shutil, "which", lambda name: str(tmp_path / name))
+    for var in ("DECIWAVES_VGMSTREAM", "DECIWAVES_VGAUDIO"):
+        monkeypatch.delenv(var, raising=False)
+    ds2 = tmp_path / "ds2"; ds2.mkdir()
+    (ds2 / "streaming_graph.core").write_bytes(b"x")
+    _write_config(tmp_path, monkeypatch, tools_dir=str(tmp_path), ds2_package=str(ds2))
+    rc = doctor.run_doctor(["--json"])
+    payload = json.loads(capsys.readouterr().out)
+    checks = {c["name"]: c for c in payload["checks"]}
+    assert rc == 0 and payload["ok"] is True
+    assert checks["ds2_package"]["status"] == "ok"
+    assert checks["ds2_package"]["ok"] is True
 
 
 def test_doctor_json_does_not_print_text_lines(tmp_path, monkeypatch, capsys):
