@@ -52,6 +52,12 @@ Or install from a clone -- for development, or to run the latest unreleased code
     cd DeciWaves
     pip install .
 
+From a clone on Windows you can skip the terminal entirely: **double-click
+`launch_gui.bat`** in the repo root. On its first run it creates a `.venv`, installs
+`deciwaves[gui]` into it, and opens the GUI; after that it just launches. It stays open on
+failure so you can read the error, and it detects the Microsoft Store Python stub (which is
+not a real interpreter) and tells you to install the python.org build instead.
+
 Then fetch the decode tools, point DeciWaves at your game, and check the result:
 
     deciwaves setup --ds-install "C:\...\DEATH STRANDING DIRECTORS CUT"
@@ -66,9 +72,61 @@ every time. It exits nonzero if any tool failed to download. `doctor` prints a p
 and returns success as long as every required tool is present; a game you don't own shows
 `[--] not configured` and never fails the check.
 
-## Quick start - pick your game
+## Quick start - the desktop app
 
-The fastest path is guided mode. Run `deciwaves` with no arguments:
+With the GUI extra installed, `deciwaves` opens the desktop app. Everything below can be
+done without ever opening a terminal.
+
+    deciwaves
+
+One window, a game/workspace picker along the top, and two tabs:
+
+**Pipeline** is where extraction happens. A **guide rail** walks you through
+Setup → Workspace → Scan → Bind → Curate → Export, keeping exactly one step live and the
+rest inert, so there is never a question about what to press next. Below it, a **stage
+strip** shows your game's chain as coloured chips (done / running / failed / not yet run),
+alongside Scan and Bind buttons, a coverage bar for HZD's structural-vs-transcription
+binding, an issues panel, per-phase progress during a render, and a collapsible log console.
+Setup and Doctor are screens here too -- the tool download and the preflight report, no CLI
+needed.
+
+**Library** is where you curate. It lists every line as a sortable, searchable table --
+filter by text, speaker, or duration; sort by any column. Each row has a checkbox, and
+**export operates on checked rows only**. Bulk helpers do the tedious part: *uncheck barks*
+(lines with no subtitle), *uncheck shorter than N seconds*, check all, check none. Press ▶
+on any row to hear it immediately -- preview decodes off the UI thread, so the table stays
+responsive.
+
+Then **Export**: *Export MP3* renders reels of exactly the lines you checked,
+*Dump WAV (selected)* decodes those lines to individual WAV files, and *Export catalog CSV*
+writes the line list out as a spreadsheet.
+
+### Custom reel order
+
+The automatic story order is usually what you want, but you can override it completely.
+In the Export panel:
+
+1. **Export order CSV…** writes the current line list out.
+2. Open it in a spreadsheet. **Drag rows to reorder, delete rows to drop lines.** Only the
+   `line_id` column matters -- ignore the rest. Save as **CSV UTF-8** (not Excel's plain
+   CSV, which mangles accented names).
+3. **Import order CSV…** reads it back. Every id is validated against the current line list;
+   unknown or duplicated ids are rejected with a message rather than silently dropped.
+4. **Export MP3** now renders in exactly that order.
+
+The import is stored as an override at `out/<game>/gui/imported-order.csv` -- the pipeline's
+own ordered artifact is never overwritten, so **Revert to auto order** restores the automatic
+order at any time. Two things worth knowing: while a custom order is active, *Export order
+CSV* gives you your current (possibly subsetted) order rather than the full list, so revert
+first if you want everything back; and re-running Scan or Bind after importing can leave the
+custom order stale, since it is a snapshot of the earlier line list -- revert and re-import
+to refresh it.
+
+## Quick start - the command line
+
+Everything the GUI does is also a CLI stage, and the CLI is the better fit for scripting or
+a headless box. If the GUI extra *isn't* installed, bare `deciwaves` starts guided mode
+instead of the app:
 
     deciwaves
 
@@ -128,6 +186,8 @@ in-game subtitle. The asr stage needs the `[asr]` extra and a GPU. subtitle-bind
 `types.json` (a Decima type map for FW) in the workspace root. Speaker labels and real story
 order additionally need your own copy of the FW gamescript, passed with `--gamescript` (or set
 once with `deciwaves setup --fw-gamescript <path>`, so you never have to pass the flag again).
+The `types.json` path can be persisted the same way, with `deciwaves setup --fw-types <path>`,
+so subtitle-bind stops needing `--types-json` by hand.
 Both are bring-your-own inputs that this repo does not and will not ship - see
 [docs/BYO.md](docs/BYO.md). Without a gamescript, `fw run` stops cleanly after subtitle-bind
 and tells you what it's waiting for.
@@ -164,6 +224,7 @@ decode. `deciwaves <game> run` uses the default automatically.
 | render | Render MP3 reels + tracklists | `--main-story`, `--speech-trim`, `--bitrate`, `--jobs` |
 | cutscenes | Resolve cutscene voice tracks | standalone; `run` uses a bundled track list |
 | trim | [GPU] Rebuild the speech-trim manifest | standalone |
+| dump | Decode selected line IDs to WAV | `--ids`, `--catalog`, `--out`; standalone (drives the GUI's Dump WAV) |
 
 `ds run` chains catalog -> order -> render. cutscenes and trim are not in that chain: `run`
 ships pre-resolved data for them and leaves them available to regenerate against your own
@@ -177,6 +238,7 @@ install by hand.
 | clip-index | Fingerprint audio clips | `--package`, `--jobs` |
 | wem-metadata | Extract wem metadata + coverage | `--package` |
 | bind | [GPU] Bind clips to lines | `--package`, `--transcripts`, `--transcripts-out`, `--sample-cap` (default 300, 0 = unlimited) |
+| dump | Decode selected clips to WAV | `--ids`, `--manifest`, `--clip-index`, `--package`, `--out`; standalone |
 | render | Render MP3 reels + tracklists | `--out-dir`, `--jobs` |
 
 ### Horizon Forbidden West (`deciwaves fw ...`)
@@ -191,6 +253,7 @@ install by hand.
 | weave | Woven story manifest | |
 | dlc | Burning Shores manifest | |
 | assemble | Concatenate manifests | |
+| dump | Copy selected WAVs to an output dir | `--ids`, `--manifest`, `--audio-dir`, `--out`; standalone |
 | render | Render MP3 reels + tracklists | `--manifest`, `--tiers` |
 
 `fw run` chains extract -> asr -> subtitle-bind, then continues match -> full-reel -> render
@@ -201,9 +264,9 @@ with `deciwaves setup`).
 
 `deciwaves setup` writes `config.json` to `%LOCALAPPDATA%\DeciWaves\config.json`. It records
 the tools directory, the install path for each game you configured (`ds_install`,
-`hzd_package`, `fw_package`, `oodle_dll`), and your optional FW gamescript path
-(`fw_gamescript`, set with `--fw-gamescript`). Set `DECIWAVES_CONFIG_DIR` to keep that file
-somewhere else.
+`hzd_package`, `fw_package`, `oodle_dll`), and your two optional FW bring-your-own paths
+(`fw_gamescript`, set with `--fw-gamescript`, and `fw_types`, set with `--fw-types`). Set
+`DECIWAVES_CONFIG_DIR` to keep that file somewhere else.
 
 Each run merges its flags over what's already saved -- an omitted flag keeps its previous
 value, so running `deciwaves setup --hzd-package ...` later doesn't blank out a `--ds-install`
@@ -227,9 +290,12 @@ stage finishes cleanly, and skips any stage whose marker already exists. To forc
 re-run, delete its marker and run again; the stages before it stay skipped, but re-running
 that stage also deletes every LATER stage's marker in the chain, so downstream stages re-run
 too instead of resuming from what's now stale data. A stage's output existing is deliberately
-not treated as done - only its marker is - so a crash mid-stage never looks finished. The HZD
-bind stage also checkpoints within itself: its `--transcripts-out` sidecar lets a restarted
-bind reuse the clips it already transcribed.
+not treated as done - only its marker is - so a crash mid-stage never looks finished. Each
+marker also records the arguments that produced it, so changing a stage's flags re-runs that
+stage automatically on the next `run` - you don't have to remember to delete the marker
+yourself, and a marker written under different flags can't be mistaken for the run you're
+asking for now. The HZD bind stage also checkpoints within itself: its `--transcripts-out`
+sidecar lets a restarted bind reuse the clips it already transcribed.
 
 Partial runs. `run --until <stage>` stops the chain after that stage (markers skip and
 invalidate as usual), and the GPU-extra check only applies to stages actually in the slice -
@@ -247,6 +313,9 @@ format each parser expects.
 
 Run `deciwaves doctor` first. It reports each decode tool, the Oodle DLL, every configured
 install, the ASR extra, and CUDA, and names the fix for anything missing.
+
+An unexpected failure is reported as a single line on stderr rather than a traceback. To see
+the full traceback, re-run with `--debug` or set `DECIWAVES_DEBUG=1`.
 
 Common failures:
 
