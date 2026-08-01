@@ -56,7 +56,7 @@ def _csv_row_count(path: str) -> int:
 
 def _wav_count(dir_path: str) -> int:
     try:
-        return sum(1 for fn in os.listdir(dir_path) if fn.lower().endswith(".wav"))
+        return sum(1 for fn in map(str.lower, os.listdir(dir_path)) if fn.endswith(".wav"))
     except OSError:
         return 0
 
@@ -64,7 +64,7 @@ def _wav_count(dir_path: str) -> int:
 def _file_count(dir_path: str, ext: str) -> int:
     try:
         ext_lower = ext.lower()
-        return sum(1 for fn in os.listdir(dir_path) if fn.lower().endswith(ext_lower))
+        return sum(1 for fn in map(str.lower, os.listdir(dir_path)) if fn.endswith(ext_lower))
     except OSError:
         return 0
 
@@ -119,20 +119,47 @@ def _decode_wav_count(workspace: str, game: str) -> int:
     except OSError:
         return 0
     return sum(
-        1 for fn in entries
-        if fn.lower().endswith(".wav")
-        and not (fn.lower().startswith("silence_") and fn.lower().endswith("ms.wav"))
+        1 for fn in map(str.lower, entries)
+        if fn.endswith(".wav")
+        and not (fn.startswith("silence_") and fn.endswith("ms.wav"))
     )
+
+
+_CSV_ROW_COUNT_CACHE: dict[str, tuple[int | None, int | None, int]] = {}
+
+
+def _cached_csv_row_count(path: str) -> int:
+    """Row count for *path*, read at most once per ``(st_mtime_ns, st_size)`` identity.
+
+    Issue #303: the render denominator CSV is written by the selection stage before the
+    render starts and is never appended to during it, yet ``_render_total`` re-read it in
+    full every 1.5 s poll. Cache on stat identity so an unchanged file is read once. The
+    staleness ceiling is the next poll: any change to the file's size or mtime forces a
+    re-read on the following poll, and a missed change (NTFS mtime ticks) can only serve
+    a stale *total*, never a stale *current* count — which is why this is safe where an
+    mtime-gated directory count is not.
+    """
+    try:
+        st = os.stat(path)
+        identity: tuple[int | None, int | None] = (st.st_mtime_ns, st.st_size)
+    except OSError:
+        identity = (None, None)
+    cached = _CSV_ROW_COUNT_CACHE.get(path)
+    if cached is not None and cached[:2] == identity:
+        return cached[2]
+    count = _csv_row_count(path)
+    _CSV_ROW_COUNT_CACHE[path] = (identity[0], identity[1], count)
+    return count
 
 
 def _render_total(workspace: str, game: str) -> int | None:
     sel_path = os.path.join(workspace, "out", game, "gui", "render-selection.csv")
-    count = _csv_row_count(sel_path)
+    count = _cached_csv_row_count(sel_path)
     if count > 0:
         return count
     source = pipeline_render_input(workspace, game)
     if source:
-        count = _csv_row_count(source)
+        count = _cached_csv_row_count(source)
         if count > 0:
             return count
     return None
