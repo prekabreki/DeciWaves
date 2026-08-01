@@ -27,6 +27,11 @@ FW_INSTALL_ROOT = Path(os.environ.get("DECIWAVES_FW_INSTALL", r"\\nonexistent"))
 FW_PACKAGE_DIR = FW_INSTALL_ROOT / "LocalCacheWinGame" / "package"
 FW_STREAMING_GRAPH = FW_PACKAGE_DIR / "streaming_graph.core"
 
+# Death Stranding 2 install — set DECIWAVES_DS2_INSTALL to enable DS2 integration tests.
+DS2_INSTALL_ROOT = Path(os.environ.get("DECIWAVES_DS2_INSTALL", r"\\nonexistent"))
+DS2_PACKAGE_DIR = DS2_INSTALL_ROOT / "LocalCacheWinGame" / "package"
+DS2_STREAMING_GRAPH = DS2_PACKAGE_DIR / "streaming_graph.core"
+
 # Horizon Zero Dawn Remastered package dir — integration tests skip when absent.
 # Override with DECIWAVES_HZD_PACKAGE, mirroring DECIWAVES_DS_INSTALL / DECIWAVES_FW_INSTALL
 # above (c626874). Previously copy-pasted across test_dsar_archive.py / test_fw_package.py /
@@ -102,6 +107,13 @@ def fw_streaming_graph_bytes():
     if not FW_STREAMING_GRAPH.is_file():
         pytest.skip("Forbidden West install not present")
     return FW_STREAMING_GRAPH.read_bytes()
+
+
+@pytest.fixture
+def ds2_streaming_graph_bytes():
+    if not DS2_STREAMING_GRAPH.is_file():
+        pytest.skip("Death Stranding 2 install not present")
+    return DS2_STREAMING_GRAPH.read_bytes()
 
 
 @pytest.fixture
