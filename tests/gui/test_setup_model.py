@@ -88,9 +88,9 @@ def test_fw_types_none_is_omitted():
 # --- parse_setup_summary (driven by the real _print_summary) ---------------
 
 def _real_summary(capsys, tool_rows, *, ds_install="", oodle_dll="", hzd_package="",
-                  fw_package="", ds2_package="", fw_gamescript="", fw_types=""):
+                  fw_package="", ds2_package="", fw_gamescript="", ds2_gamescript="", fw_types=""):
     cli_setup._print_summary(tool_rows, ds_install, oodle_dll, hzd_package,
-                             fw_package, ds2_package, fw_gamescript, fw_types)
+                             fw_package, ds2_package, fw_gamescript, ds2_gamescript, fw_types)
     return capsys.readouterr().out
 
 
