@@ -693,14 +693,56 @@ def _ds2_extract_argv(ctx: dict) -> list:
     return ["--package", ctx["package"]]
 
 
+def _ds2_match_argv(ctx: dict) -> list:
+    return ["--gamescript", ctx["gamescript"]]
+
+
+def _quoted_ds2_package(package: str) -> str:
+    return f'"{package}"' if package and " " in package else package
+
+
+def _ds2_byo_message(package: str) -> str:
+    return (
+        "ds2: no gamescript configured. extract/asr are done; speaker + "
+        "story-order matching needs your own copy of the Death Stranding 2 gamescript -- "
+        "BYO, this repo can't ship game text (see docs/BYO.md). Re-run with:\n"
+        f"    deciwaves ds2 run --package {_quoted_ds2_package(package)} --gamescript <path-to-gamescript>\n"
+        "to continue with match, or persist it once with "
+        "`deciwaves setup --ds2-gamescript <path-to-gamescript>` so future runs (and "
+        "guided mode) don't need the flag at all."
+    )
+
+
+def _ds2_slice_needs_gamescript_message(package: str, named_stage: str,
+                                         from_stage: str | None, until_stage: str | None) -> str:
+    slice_flags = ""
+    if from_stage:
+        slice_flags += f" --from {from_stage}"
+    if until_stage:
+        slice_flags += f" --until {until_stage}"
+    return (
+        f"ds2: {named_stage} needs a gamescript: speaker + story-order matching past "
+        f"asr needs your own copy of the Death Stranding 2 gamescript -- BYO, "
+        f"this repo can't ship game text (see docs/BYO.md). Re-run with:\n"
+        f"    deciwaves ds2 run --package {_quoted_ds2_package(package)}{slice_flags} "
+        f"--gamescript <path-to-gamescript>\n"
+        f"or persist it once with `deciwaves setup --ds2-gamescript <path-to-gamescript>`."
+    )
+
+
 def _run_ds2(cfg: dict, extra_argv: list) -> int:
-    chain = run_chain("ds2")
+    full_chain = run_chain("ds2")
     ap = argparse.ArgumentParser(
         prog="deciwaves ds2 run",
-        description="Run the DS2 pipeline end-to-end: extract -> asr.",
+        description="Run the DS2 pipeline end-to-end: extract -> asr, "
+                    "then (with a BYO gamescript) match.",
     )
     ap.add_argument("--package", help="DS2 package/install path (default: from `deciwaves setup`)")
-    _add_slice_flags(ap, chain)
+    ap.add_argument("--gamescript", help="path to your own Death Stranding 2 gamescript transcript "
+                                          "(BYO, optional -- required only to run "
+                                          "match; default: from "
+                                          "`deciwaves setup --ds2-gamescript`)")
+    _add_slice_flags(ap, full_chain)
     ns = _parse_or_exit(ap, extra_argv)
     if isinstance(ns, int):
         return ns
@@ -709,8 +751,43 @@ def _run_ds2(cfg: dict, extra_argv: list) -> int:
     if not package:
         return _missing_config("ds2", "DS2 package (ds2_package)", "--package")
 
-    ctx = {"package": package}
-    return _run_pipeline("ds2", chain, ctx, ns, full_chain=chain)
+    gamescript = ns.gamescript or cfg.get("ds2_gamescript", "")
+
+    ctx = {"package": package, "gamescript": gamescript}
+    names = [s.name for s in full_chain]
+    gate_idx = names.index("match")
+    last_idx, rc = _slice_bounds("ds2", full_chain, ns.from_stage, ns.until)
+    if rc:
+        return rc
+
+    if last_idx >= gate_idx:
+        named_post_gate = next((s for s in (ns.until, ns.from_stage)
+                                if s and names.index(s) >= gate_idx), None)
+        if not gamescript and named_post_gate is not None:
+            print(_ds2_slice_needs_gamescript_message(package, named_post_gate,
+                                                       ns.from_stage, ns.until))
+            return 1
+        if gamescript and not os.path.isfile(gamescript):
+            print(f"deciwaves ds2 run: gamescript not found: {gamescript} "
+                  f"(check --gamescript, or re-run `deciwaves setup --ds2-gamescript <path>`)")
+            return 1
+
+    if ns.from_stage:
+        _remove_marker("ds2", ns.from_stage)
+    chunk1 = full_chain[:min(last_idx + 1, gate_idx)]
+    chunk2 = full_chain[gate_idx:last_idx + 1]
+
+    rc = _run_chain("ds2", chunk1, ctx, full_chain=full_chain, allow_cpu=ns.allow_cpu)
+    if rc:
+        return rc
+    if not chunk2:
+        return 0
+    if not gamescript:
+        print(_ds2_byo_message(package))
+        return 0
+
+    return _run_chain("ds2", chunk2, ctx, full_chain=full_chain,
+                      allow_cpu=ns.allow_cpu)
 
 
 # ---------------------------------------------------------------------------
@@ -747,6 +824,7 @@ def run_chain(game: str) -> list[Stage]:
         "ds2": [
             Stage("extract", STAGES["ds2"]["extract"][0], _ds2_extract_argv),
             Stage("asr", STAGES["ds2"]["asr"][0], gpu=True),
+            Stage("match", STAGES["ds2"]["match"][0], _ds2_match_argv),
         ],
     }[game]
 
