@@ -59,7 +59,29 @@ What *is* free and exact: **`lssr_index` orders lines within a group**, and a gr
 conversation. So the achievable ordering today is `region → group → lssr_index`, with group
 sequence inside a region unknown.
 
-Untested leads for intra-region group order: the graph's `sub_group_start/count` DAG
-(a topological/load order), and the DS/FW approach of anchoring against a BYO
+## REFUTED: the sub-group graph carries no progression signal
+
+Probed 2026-08-01 and **falsified** — do not retry it. `Group.sub_group_start/count` index a flat
+`sub_groups` table (553,802 entries, sums exactly to the group counts), but it is a *resource
+dependency* graph, not a sequence:
+
+- It is **not even acyclic**: a Kahn topological sort orders only 58,072 of 79,317 groups,
+  leaving **21,245 in cycles**.
+- Correlation between topological rank and the content-validated region rank above is
+  **-0.028** — no signal at all (n = 4,418 lines).
+- Only **292 of the 744** dialogue groups have any parent, so 61% are unreachable from it anyway.
+- Parents are not scene/quest containers: the top shared parents mix regions freely
+  (e.g. one parent's dialogue children span `(root)` 10, `l200_aus` 3, `l100_mex` 1), and one
+  group is referenced by 7,009 parents — a shared bundle, not a story node.
+
+## The useful thing that probe DID establish
+
+All 8,776 lines live in just **744 groups** (~12 lines each), and a group is one conversation with
+exact internal order via `lssr_index`. So the open problem is not "order 8,776 lines" but
+**"order 744 conversations"**, already partitioned into content-validated regions. That is small
+enough for a transcript/synopsis-anchored pass (ASR the clips, match conversations to story beats)
+rather than requiring the object reader.
+
+The remaining known-good route is still the DS/FW one: anchor against a BYO
 gamescript/transcript (`games/ds/story_order.py` falls back to numeric scene order from names;
 DS2 has no names without the object reader).
