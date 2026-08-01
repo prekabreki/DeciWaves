@@ -49,6 +49,14 @@ assets sit between two runs of dialogue — never overlaps, so the weak form is 
 invariant and the strong form is a 98% statistical property. **Assert the no-overlap form;
 measure the exact-adjacency rate, don't assert it.**
 
+*Where the wrong version came from, so it is not "re-confirmed" the same way:* the earlier pass
+cited "confirmed on root (10,560) and `l200_aus` (33,544)". Those two numbers are **clip byte
+lengths**, not counts — 10,560 is exactly the length of the very first line the resolver yields
+(`g73870_0000`, file 40, offset 5,592,160). On a two-clip sample the two readings of "next
+locator" coincide, so both pass. The distinction only shows up across the full 8,776, where the
+in-block reading collapses to 5.7%. Any future oracle claim here needs the whole set, not a
+spot-check.
+
 Stronger and simpler checks that are exactly true, and are the ones a Phase 2 test should use:
 
 | check | measured |
