@@ -77,7 +77,10 @@ what HZD actually reads off the profile before assuming you need every field.
 The DS and HZD pipelines share this shape (FW's is described in its own section below):
 
 1. **Catalog** (`games/ds/catalog.py` for DS, `games/hzd/catalog.py` for HZD; the game-free
-   CSV-resume bookkeeping both share lives in `engine/catalog_io.py`) — walk the
+   CSV-resume bookkeeping both share lives in `engine/catalog_io.py`, whose `read_csv_rows`
+   is the shared BOM-safe CSV reader — it opens `utf-8-sig`, so a UTF-8 BOM such as
+   PowerShell 5.1's `Set-Content -Encoding utf8` writes can't fuse into the first header
+   key, issue #229) — walk the
    game's dialogue resources and emit one CSV row per voice line: a stable line ID, the
    source `.core` path, category/scene, speaker code and display name, the English
    subtitle, and a path to the encoded audio stream. This stage is resumable (it skips
@@ -103,12 +106,20 @@ The DS and HZD pipelines share this shape (FW's is described in its own section 
    inserting small silence gaps between lines and a longer one between scenes, and
    writes a tracklist CSV alongside each MP3 so the reel is navigable. The
    measure-durations → per-episode gap accounting → pack → concat → tracklist shape used
-   to be copy-pasted once per game; it's now two public helpers every game's `main()`
+   to be copy-pasted once per game; it's now three public helpers every game's `main()`
    calls instead: `accumulate_episode_seconds(segs, dur_of, ...)` does the
    decode/measure loop and per-episode gap bookkeeping given a game-specific `dur_of`
-   callable, and `assemble_reels(spine, ep_secs, durations, columns=..., stem=..., ...)`
+   callable; `assemble_reels(spine, ep_secs, durations, columns=..., stem=..., ...)`
    packs, concatenates, and writes the tracklist, with the tracklist's column shape
-   (`columns`, a `ReelColumns(header, row_of)`) supplied per game rather than hardcoded.
+   (`columns`, a `ReelColumns(header, row_of)`) supplied per game rather than hardcoded;
+   and `finish_render(...)` (#231) is the shared exit-code tail every render `main()`
+   returns, all three games (DS included) — the precise rc contract `deciwaves <game> run`
+   and the GUI stage strip trust (#64/#85). An empty spine is rc 1 with a loud
+   "upstream produced nothing" message when the input was header-only (empty *input*),
+   but rc 0 as a legitimate no-op when rows existed and a filter (`--main-story` /
+   `--spine-only` / `--tiers`) simply narrowed them all away (empty *selection*); a
+   non-empty spine with zero successful decodes is rc 1 (a decode-toolchain failure, not
+   a zero-clip "success"); and zero reel files written is rc 1 as a defensive backstop.
    Each game's own decode/measure function (DS's inline clip decode, HZD's
    `decode_spine_clips`, FW's bare `wave.open` duration read) is the only game-specific
    code left in that half of the pipeline.
