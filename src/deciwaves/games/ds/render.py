@@ -14,7 +14,8 @@ import os
 import re
 
 from deciwaves.engine.render import (
-    accumulate_episode_seconds, assemble_reels, budget_seconds, finish_render,
+    accumulate_episode_seconds, assemble_reels, assemble_single_file,
+    budget_seconds, finish_render, finish_single_file,
     ReelColumns, DEFAULT_BITRATE_KBPS, format_ts,
 )
 from deciwaves.engine.parallel import default_jobs
@@ -25,6 +26,34 @@ _CS_GROUP_RE = re.compile(r"sq_(cs\d+)_")
 def _cs_group_of(scene):
     m = _CS_GROUP_RE.match(scene)
     return m.group(1) if m else None
+
+
+def is_story(seg, non_story_cs_groups=frozenset(), group_of=_cs_group_of):
+    """True when `seg` is narrative ("story") audio: ``is_side == 0`` and, for
+    a cutscene track, not a non-story cutscene group.
+
+    Per-segment form of :func:`main_story_only` (which is exactly this applied
+    to a list) -- the story/filler predicate DS supplies to deliverable 1
+    (`--single-file`). The playlist tags cutscene + mission as the narrative
+    spine and everything else (prepper terminals, radio, allowlisted NPCs) as
+    side content.
+
+    `non_story_cs_groups` additionally culls cutscene tracks whose cutscene
+    group (e.g. 'cs71') is non-narrative -- DS Extra/Battlefield set-pieces,
+    item-preview announcements, private-room BB chatter (see
+    games.ds.episode_map). The cull is scoped to the cutscene category only.
+    Empty set (default) = spine unchanged.
+
+    `group_of(scene) -> group_id | None` resolves a scene string to its
+    cutscene group; defaults to this module's own `_CS_GROUP_RE` (identical to
+    `games.ds.episode_map.cs_group`)."""
+    if seg.is_side != 0:
+        return False
+    if seg.category == "cutscene" and non_story_cs_groups:
+        g = group_of(seg.scene)
+        if g is not None and g in non_story_cs_groups:
+            return False
+    return True
 
 
 def main_story_only(segs, non_story_cs_groups=frozenset(), group_of=_cs_group_of):
@@ -43,16 +72,7 @@ def main_story_only(segs, non_story_cs_groups=frozenset(), group_of=_cs_group_of
     `games.ds.episode_map.cs_group`) so a caller with its own group-resolution
     logic (e.g. DS's own `episode_map.cs_group`) can pass it in instead of this
     module keeping a second, independently-maintained copy of the same regex."""
-    out = []
-    for s in segs:
-        if s.is_side != 0:
-            continue
-        if s.category == "cutscene" and non_story_cs_groups:
-            g = group_of(s.scene)
-            if g is not None and g in non_story_cs_groups:
-                continue
-        out.append(s)
-    return out
+    return [s for s in segs if is_story(s, non_story_cs_groups, group_of)]
 
 
 def load_keepspans(path):
@@ -94,6 +114,11 @@ def main(argv=None):
     ap.add_argument("--main-story", action="store_true",
                     help="render only the narrative spine (cutscene + mission, "
                          "is_side==0); writes phase_d_main_NN instead of phase_d_NN")
+    ap.add_argument("--single-file", action="store_true",
+                    help="render ONE story-only MP3 (deliverable 1): drops "
+                         "filler, auto-picks the highest standard MP3 bitrate "
+                         "that fits --target-mb, and prints the chosen kbps + "
+                         "predicted size before encoding (ignores --bitrate)")
     ap.add_argument("--speech-trim", default="",
                     help="path to cutscene-keepspans.csv: trim cutscene tracks "
                          "to spoken regions; drop pure-grunt tracks. Empty = disabled")
@@ -138,7 +163,27 @@ def main(argv=None):
               f"(dropped {n_rows - len(kept)} side + non-story cutscene groups "
               f"{sorted(em.NON_STORY_CS_GROUPS)})")
         rows = kept
-    stem = file_stem(args.main_story)
+    if args.single_file:
+        # Deliverable 1 is story-only: drop filler BEFORE decode so the decode
+        # budget isn't spent on lines that can't ship. Zero story lines is a
+        # failure (rc 1), not a 0-byte no-op -- and drops a stale errors log
+        # since measure (its only writer) never runs on this branch.
+        kept = main_story_only(rows, non_story_cs_groups=em.NON_STORY_CS_GROUPS,
+                               group_of=em.cs_group)
+        print(f"single-file story filter: kept {len(kept)}/{n_rows} segments "
+              f"(dropped {n_rows - len(kept)} filler)")
+        if n_rows and not kept:
+            try:
+                os.remove(args.errors)
+            except OSError:
+                pass
+            print(f"render: ERROR - none of the {n_rows} rows in "
+                  f"{args.playlist} is story (is_side == 0). Deliverable 1 "
+                  f"renders the narrative spine only; no file written to "
+                  f"{args.out_dir}.")
+            return 1
+        rows = kept
+    stem = file_stem(args.main_story or args.single_file)
 
     if args.speech_trim and not os.path.isfile(args.speech_trim):
         print(f"render: --speech-trim path not found: {args.speech_trim} "
@@ -177,6 +222,38 @@ def main(argv=None):
         header=["timestamp", "episode", "category", "speaker", "subtitle", "line_id"],
         row_of=lambda s, t: [format_ts(t), s.episode, s.category, s.speaker, s.subtitle,
                              s.line_id])
+    if args.single_file:
+        return finish_single_file(
+            decode_segs, n_rows == 0, args.errors,
+            msg_empty_input=(
+                f"render: ERROR - {args.playlist} has no rows -- upstream "
+                f"produced no lines to render. Re-run `deciwaves ds order`; "
+                f"no file written to {args.out_dir}."
+            ),
+            msg_empty_selection=(
+                f"render: nothing to render: none of the {n_rows} rows in "
+                f"{args.playlist} survived the --single-file / --main-story / "
+                f"--speech-trim filters -- no file written to {args.out_dir}."
+            ),
+            msg_nothing_decoded=(
+                f"render: ERROR - no audio could be decoded out of "
+                f"{len(decode_segs)} segment(s) attempted. See {args.errors} for "
+                f"the per-clip failures. Try `deciwaves doctor` to check your "
+                f"decode tools, and see the README's Windows Store Python "
+                f"troubleshooting note if vgmstream-cli is dying with a "
+                f"DLL-not-found / exit-code error."
+            ),
+            msg_zero_story=(
+                f"render: ERROR - none of the {len(decode_segs)} segment(s) in "
+                f"{args.playlist} is story (is_side == 0). Deliverable 1 renders "
+                f"the narrative spine only; no file written to {args.out_dir}."
+            ),
+            durations=decoded,
+            out_dir=args.out_dir, cache_dir=args.cache, stem=stem, columns=columns,
+            gap_key=lambda s: s.scene,
+            story_predicate=(lambda s: is_story(
+                s, em.NON_STORY_CS_GROUPS, em.cs_group)),
+            _assemble=assemble_single_file, unit_label="segments")
     return finish_render(
         decode_segs, n_rows == 0, args.errors,
         msg_empty_input=(
