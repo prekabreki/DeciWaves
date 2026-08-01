@@ -69,9 +69,18 @@ Stronger and simpler checks that are exactly true, and are the ones a Phase 2 te
 
 Exactly **7 slot-0 locators do not start with `RIFF`** and must be tolerated, not treated as
 corruption — `(file_index, offset)` = (40, 141988345), (39, 116945984), (39, 135705080),
-(39, 146512470), (39, 229474561), (38, 33516875), (38, 33996916). A further **60 offsets are
-duplicated** (two LSSRs sharing one clip — reused lines), so a manifest keyed on
-`(file_index, offset)` would silently lose rows; key it on the line id.
+(39, 146512470), (39, 229474561), (38, 33516875), (38, 33996916). They are **not random
+corruption**: all 7 carry an identical 2-byte `f1 10` prefix with a valid Wwise header starting
+at `offset + 2` (`RIFF … WAVE fmt ` size 66, tag `0xFFFF`, mono, 48 kHz). They are still not
+trivially recoverable — reading from `offset + 2` parses `fmt ` correctly but the *next* chunk
+is misaligned by 2 bytes (`hash` lands at 84 where 86 is expected) and `vgmstream-cli` rejects
+the clip with "no 'data' tag found". So the 2-byte skew is real but not a simple constant shift.
+See [[ds2-nonriff-locators]].
+
+A further **44 offsets are duplicated** (LSSRs sharing one clip — reused lines); de-duplicating
+a manifest on `(file_index, offset)` would silently lose **53 rows** (some offsets are reused
+more than twice), so key it on the line id. Both figures measured 2026-08-01 on retail; an
+earlier note claiming "60 offsets" was wrong on both the count and the "shared by two" reading.
 
 Content confirmed by transcription of 10 slot-0 clips (faster-whisper medium, GPU): all
 English at p = 0.95–0.99, all recognisably DS2 — "Later, Sammy!", "There's a patch of BT
