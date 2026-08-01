@@ -58,3 +58,27 @@ for the exact-subtitle label. So a DS2 chain of
 Design proposal, not yet verified in code: `match_subtitles` expects manifest rows with both
 `subtitle` and `transcript`, so a DS2 variant must decide what to use as the display label when
 only a transcript exists.
+
+## Coverage gap: three story sections are stubs at the source
+
+Measured 2026-08-02 while (re)building the gamescript from its source pages. The EPISODE spine
+above is complete as a *spine*, but three of its 18 story sections carry almost no dialogue --
+the source publishes them as stubs, verified against the raw HTML so this is not a parser
+artifact:
+
+| Section | Spoken lines | Raw content |
+|---|---|---|
+| `EPISODE 2 - LOU` | 3 | 795 chars |
+| `EPISODE 5 - CONFLAGRATION` | 9 | 1,220 chars |
+| `EPILOGUE` | 2 | 761 chars |
+
+(`EPISODE 10 - ISOLATION` is thin but real at ~9.5 KB.) The other 14 story sections are
+substantial -- Ep 3: 269 lines, Ep 9: 254, Ep 7: 180.
+
+**Consequence for [[ds2-gamescript-binding]]'s consumer (#368):** clips belonging to those three
+episodes have nothing to match against, so they will fall through to whatever the unmatched path
+does. Do not read a low match rate there as a matcher bug -- it is missing input. Closing the gap
+needs a second transcript source, not a threshold change.
+
+Conformance of the file as a whole is high: 99.9% of its non-empty lines are recognised by
+`games.fw.gamescript.parse` (2,547 dialogue lines, 63 headers, 289 bracketed, only 3 dropped).
