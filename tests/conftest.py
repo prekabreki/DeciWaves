@@ -110,6 +110,13 @@ def fw_streaming_graph_bytes():
 
 
 @pytest.fixture
+def ds2_package_dir():
+    if not DS2_PACKAGE_DIR.is_dir():
+        pytest.skip("Death Stranding 2 install not present")
+    return DS2_PACKAGE_DIR
+
+
+@pytest.fixture
 def ds2_streaming_graph_bytes():
     if not DS2_STREAMING_GRAPH.is_file():
         pytest.skip("Death Stranding 2 install not present")
