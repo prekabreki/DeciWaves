@@ -190,27 +190,35 @@ guided interactive flow (see below).
   against whatever directory `--workspace` chdir'd into), so this `chdir` is what lets one
   flag redirect an entire run without touching every stage's individual path arguments.
   Because the `chdir` happens before a stage (or `run`) ever sees its own argv, any relative
-  path in a stage's own flags (e.g. `--gamescript`) is absolutized first, against the
+  path in a known path-taking flag (e.g. `--gamescript`) is absolutized first, against the
   directory the user actually ran `deciwaves` from — via `config.absolutize_existing_paths()`
   — otherwise a relative `--gamescript` would be silently looked up inside the workspace
-  instead of where the user meant (issue #32). This rewrite is **workspace-aware**, not purely
-  existence-based (issue #44): given no `--workspace` at all, or one that resolves to the same
-  directory as cwd, nothing is rewritten — nothing is about to move, so nothing needs pinning.
-  With a workspace that genuinely differs from cwd, each argv token that exists relative to cwd
-  is *also* checked against the workspace, because a stale leftover (e.g. an `out/...` tree a
-  previous in-place run left sitting under cwd) can just as easily already exist there too:
-  silently preferring cwd in that case would pin the run to the wrong tree with no error — the
-  confirmed failure shape this redesign closes. So: exists under cwd only → absolutize against
-  cwd (unchanged BYO-input convenience); exists under neither → left alone, still fails the
-  stage's own "not found" check the same way it always did (a typo, or a stage's own
-  not-yet-written output flag like `--out`/`--manifest`, correctly stays workspace-relative);
-  exists under both and they're the same file (e.g. a workspace/subdir arrangement that happens
-  to coincide) → unambiguous, absolutize; exists under both and they're *different* files →
-  refuse loudly, naming the token and both candidate absolute paths, exit code 2 (this CLI's
-  usual usage-error convention) and no stage runs, rather than silently guessing. Bare
-  `deciwaves --workspace X` (no subcommand) passes `X` through to guided mode as its
-  workspace-prompt default, for the same reason — it used to be dropped entirely, and the
-  prompt always defaulted to the process cwd regardless of `--workspace`.
+  instead of where the user meant (issue #32). The rewrite is **allowlist-based** (issue #307):
+  only flags enumerated in `config._PATH_VALUE_FLAGS` are rewritten; every other token (non-path
+  flags, stage names, stem strings, ...) passes through verbatim — no hand-maintained denylist,
+  lookahead state machine, or bare-token heuristic. A new path-taking stage flag must be added
+  to that constant (it is the single maintenance obligation). Both the two-token `--flag value`
+  and joined `--flag=value` spellings are handled. The one positional path argument in the CLI
+  (`fw assemble`'s `manifests nargs="+"`) is handled separately from the flag-based allowlist, via a
+  deliberately narrow branch keyed on ``(game, stage)`` — the function receives that pair from
+  `main.py` so it can distinguish `fw assemble` from every other stage. The rewrite is
+  **workspace-aware**, not purely existence-based (issue #44): given no `--workspace` at all,
+  or one that resolves to the same directory as cwd, nothing is rewritten — nothing is about to
+  move, so nothing needs pinning. With a workspace that genuinely differs from cwd, each value
+  that exists relative to cwd is *also* checked against the workspace, because a stale leftover
+  (e.g. an `out/...` tree a previous in-place run left sitting under cwd) can just as easily
+  already exist there too: silently preferring cwd in that case would pin the run to the wrong
+  tree with no error — the confirmed failure shape this redesign closes. So: exists under cwd
+  only → absolutize against cwd (unchanged BYO-input convenience); exists under neither → left
+  alone, still fails the stage's own "not found" check the same way it always did (a typo, or
+  a stage's own not-yet-written output flag like `--out`/`--manifest`, correctly stays
+  workspace-relative); exists under both and they're the same file (e.g. a workspace/subdir
+  arrangement that happens to coincide) → unambiguous, absolutize; exists under both and
+  they're *different* files → refuse loudly, naming the token and both candidate absolute
+  paths, exit code 2 (this CLI's usual usage-error convention) and no stage runs, rather than
+  silently guessing. Bare `deciwaves --workspace X` (no subcommand) passes `X` through to
+  guided mode as its workspace-prompt default, for the same reason — it used to be dropped
+  entirely, and the prompt always defaulted to the process cwd regardless of `--workspace`.
 - **Config env application.** `deciwaves/cli/config.py` persists a small JSON config
   (`tools_dir`, `ds_install`, `hzd_package`, `fw_package`, `oodle_dll`, `fw_gamescript`)
   under `%LOCALAPPDATA%/DeciWaves/config.json` (overridable via `DECIWAVES_CONFIG_DIR`). Every

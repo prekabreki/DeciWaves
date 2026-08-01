@@ -110,14 +110,13 @@ def main(argv=None) -> int:
         "BEFORE the game name, e.g. `deciwaves --workspace DIR ds run` -- placed "
         "after it (`deciwaves ds --workspace DIR run`), it is swallowed as that "
         "stage's own argument instead, not read as the global --workspace. A "
-        "relative path you pass to a stage's own flag (e.g. --gamescript) that "
-        "ALREADY EXISTS there is resolved against the directory you ran "
+        "relative path you pass to a known path-taking flag (e.g. --gamescript) "
+        "that ALREADY EXISTS there is resolved against the directory you ran "
         "`deciwaves` from, before the process chdirs into --workspace -- it does "
-        "not need to sit inside the workspace (a relative path that doesn't exist "
-        "yet, e.g. a stage's own output path, is left alone and stays "
+        "not need to sit inside the workspace (a path that doesn't exist yet, "
+        "e.g. a stage's own output flag, is left alone and stays "
         "workspace-relative, same as always). A path saved via `deciwaves setup` "
-        "(ds_install, fw_gamescript, ...) is always stored absolute, so it is "
-        "unaffected by --workspace either way."
+        "is always stored absolute, so it is unaffected by --workspace either way."
     ))
     sub = ap.add_subparsers(dest="cmd", required=False)
     for name in ("setup", "doctor", "gui"):
@@ -242,7 +241,7 @@ def _main_dispatch(args, rest, game_parsers) -> int:
     # converted to a return, same "usage errors return 2" contract as this
     # function's other SystemExit catches above -- no stage runs.
     try:
-        extra_argv = config.absolutize_existing_paths(extra_argv, workspace=args.workspace)
+        extra_argv = config.absolutize_existing_paths(extra_argv, workspace=args.workspace, game=args.cmd, stage=stage)
     except SystemExit as e:
         return e.code
     config.enter_workspace(args.workspace)
