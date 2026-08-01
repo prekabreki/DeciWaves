@@ -1,6 +1,7 @@
 # tests/test_pack_index.py
 import pytest
 
+from deciwaves.engine.pack.base import PackReader
 from deciwaves.engine.pack.bin_index import PackIndex
 from deciwaves.engine.pack.bin_archive import file_hash
 from conftest import DATA_DIR, OODLE_DLL
@@ -46,6 +47,18 @@ def _make_index(paths_and_bytes: dict[str, bytes]) -> PackIndex:
         arc._payloads[entry] = payload
         idx._by_hash[file_hash(path)] = (arc, entry)
     return idx
+
+
+def test_pack_index_satisfies_pack_reader():
+    """`GameProfile.pack_reader` is typed `PackReader` but the repo runs no type
+    checker, so the annotation alone is checked by nothing (issue #337). This is the
+    runtime conformance check for DS's reader, mirroring
+    `test_hzd_package.py::test_hzd_package_satisfies_pack_reader` -- drop any of
+    read/read_core/has/read_by_hash from PackIndex and this goes red.
+
+    Uses the hermetic fake index: `isinstance` against a @runtime_checkable Protocol
+    tests the class's methods, so no real install or Oodle DLL is needed."""
+    assert isinstance(_make_index({}), PackReader)
 
 
 def test_has_true_for_present_path():

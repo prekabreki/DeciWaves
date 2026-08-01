@@ -395,6 +395,34 @@ def test_hzd_render_main_missing_manifest_errors_cleanly(tmp_path, monkeypatch, 
     assert "Traceback" not in captured.err
 
 
+def test_hzd_render_main_missing_catalog_errors_cleanly(tmp_path, monkeypatch, capsys):
+    """catalog runs BEFORE bind, so a user who has run neither stage hits the
+    catalog read first -- it must fail the same way the missing-manifest arm does
+    (issue #338) rather than raw-tracebacking a FileNotFoundError out of
+    load_catalog_dict: rc 1, a one-line hint naming the file and the stage to run,
+    and NO traceback. Nothing is written; the read is the first thing render does."""
+    # catalog.csv, manifest.csv and clip-index.csv all deliberately absent
+    pkg = tmp_path / "pkg"
+    pkg.mkdir(exist_ok=True)
+    (pkg / "PackFileLocators.bin").write_bytes(b"x")
+    argv = ["--package", str(pkg),
+            "--manifest", str(tmp_path / "manifest.csv"),
+            "--catalog", str(tmp_path / "catalog.csv"),
+            "--clip-index", str(tmp_path / "clip-index.csv"),
+            "--out-dir", str(tmp_path / "audio"),
+            "--cache", str(tmp_path / "cache"),
+            "--errors", str(tmp_path / "render-errors.log")]
+
+    rc = render.main(argv)
+
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert str(tmp_path / "catalog.csv") in captured.out    # names the missing file
+    assert "deciwaves hzd catalog" in captured.out          # the stage to run
+    assert "Traceback" not in captured.out
+    assert "Traceback" not in captured.err
+
+
 def test_hzd_render_bitrate_affects_budget_and_concat_kwargs(tmp_path, monkeypatch):
     """HZD render --bitrate changes both the packing budget and the ffmpeg encode arg."""
     from deciwaves.engine.render import budget_seconds as bs

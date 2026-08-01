@@ -220,7 +220,16 @@ def main(argv=None):
         print(err)
         return 1
 
-    catalog = load_catalog_dict(a.catalog)
+    try:
+        catalog = load_catalog_dict(a.catalog)
+    except FileNotFoundError:
+        # Running render before catalog (issue #338). catalog runs BEFORE bind, so a
+        # user who has run neither stage hits this read first and would never reach the
+        # missing-manifest message below. FileNotFoundError only -- a permission failure
+        # mid-read must not be reported as "file missing" (same rule as #311).
+        print(f"render: ERROR - {a.catalog} does not exist -- run "
+              f"`deciwaves hzd catalog` to create it first.")
+        return 1
     manifest_rows, _, clip_coords = load_hzd_manifest_join(a.manifest, a.clip_index)
     if not manifest_rows and not os.path.isfile(a.manifest):
         # Running render before bind (issue #311): a missing asr-manifest is an
