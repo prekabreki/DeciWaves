@@ -36,9 +36,9 @@ def test_build_spine_orders_filters_and_assigns_episodes():
         {"clip_row": "14", "line_id": "SIDE",   "tier": "S"},   # side quest -> excluded
         {"clip_row": "15", "line_id": "MQ04_a", "tier": "3"},   # unbound dup -> excluded
     ]
-    clip_index = {10: {"offset": "100", "a_bytes": "50"},
-                  11: {"offset": "200", "a_bytes": "60"},
-                  12: {"offset": "300", "a_bytes": "70"}}
+    clip_index = {10: (100, 50),
+                  11: (200, 60),
+                  12: (300, 70)}
     spine = build_spine(manifest, catalog, clip_index)
 
     # only the 3 main-quest bound story lines, mq04 (line_index 0 then 1) then mq06
@@ -67,7 +67,7 @@ def test_build_spine_interleaves_side_quests_by_episode_map():
     }
     manifest = [{"clip_row": str(i), "line_id": lid, "tier": "S"}
                 for i, lid in enumerate(["MQ04_a", "MQ06_a", "SIDE_a", "DLC_a", "UNK_a"])]
-    clip_index = {i: {"offset": str(i * 10), "a_bytes": "50"} for i in range(5)}
+    clip_index = {i: (i * 10, 50) for i in range(5)}
     em = {"tnb01_theonethatgotaway": 4.5, "dlc1_tba03": 12.5}
 
     spine = build_spine(manifest, catalog, clip_index, episode_map=em)
@@ -89,7 +89,7 @@ def test_scenes_within_quest_ordered_by_line_sequence_not_alphabetical():
     }
     manifest = [{"clip_row": str(i), "line_id": lid, "tier": "S"}
                 for i, lid in enumerate(catalog)]
-    clip_index = {i: {"offset": str(i), "a_bytes": "1"} for i in range(len(catalog))}
+    clip_index = {i: (i, 1) for i in range(len(catalog))}
     spine = build_spine(manifest, catalog, clip_index)
     assert [s.scene.split("/")[-1] for s in spine] == [
         "mq010_cut_thewalk", "mq010_cut_thewalk", "mq010_cut_namingceremony"]

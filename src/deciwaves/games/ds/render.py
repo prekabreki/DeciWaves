@@ -9,6 +9,7 @@ Invoke as a module (package form):
 """
 from __future__ import annotations
 
+import csv
 import os
 import re
 
@@ -58,13 +59,12 @@ def load_keepspans(path):
     """Map stream_path -> (spans, dropped) from a cutscene-keepspans.csv.
     Missing file -> {} (feature simply inactive). `spans` parsed via
     games.ds.speech_trim.parse_spans; `dropped` is the '1'/'0' flag."""
-    import csv as _csv
     from deciwaves.games.ds.speech_trim import parse_spans
     if not os.path.isfile(path):
         return {}
     out = {}
     with open(path, newline="", encoding="utf-8") as f:
-        for r in _csv.DictReader(f):
+        for r in csv.DictReader(f):
             out[r["stream_path"]] = (parse_spans(r["keep_spans"]), r["dropped"] == "1")
     return out
 

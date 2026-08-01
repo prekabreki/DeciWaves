@@ -119,9 +119,11 @@ def write_render_selection(workspace: str, game: str, unchecked: set[str]) -> st
     original column, in order) and keeps only rows whose ``line_id`` is not in *unchecked*.
 
     Read with ``utf-8-sig`` (transparently strips a BOM a PowerShell-saved source may carry)
-    but written **BOM-FREE utf-8**: DS ``story_order.read_playlist`` and HZD ``render._load_csv``
-    open plain ``utf-8`` and are BOM-INTOLERANT -- a fused BOM becomes ``\\ufeff`` on the first
-    header and KeyErrors the whole read (the recurring #59/#84 bug class). Written atomically
+    but written **BOM-FREE utf-8**: DS ``story_order.read_playlist`` opens plain ``utf-8``
+    and is BOM-INTOLERANT -- a fused BOM becomes ``\ufeff`` on the first header and KeyErrors
+    the whole read (the recurring #59/#84 bug class). (HZD/FW read their render input through
+    the BOM-tolerant ``engine.catalog_io.read_csv_rows``, but the write stays BOM-free: other
+    plain-``utf-8`` readers remain -- see #304.) Written atomically
     (``engine.atomic_io``) so an interrupted write can't leave a truncated selection behind.
 
     Raises :class:`ExportError` if the render-input artifact doesn't exist yet (Export MP3 is
