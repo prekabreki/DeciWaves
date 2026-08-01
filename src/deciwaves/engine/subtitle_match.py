@@ -26,6 +26,10 @@ from rapidfuzz import fuzz, process
 
 from deciwaves.engine.text_normalize import normalize
 
+# A gamescript "line" is a speaker's whole turn — often several sentences — but
+# the game shows one subtitle card per sentence. Split on sentence boundaries so
+# the granularity matches the subtitle clips (≈doubles recall vs whole-paragraph
+# matching, while keeping token_sort's length-sensitive precision).
 _SENTENCE = re.compile(r'(?<=[.!?])\s+(?=["(\'[]*[A-Z0-9])')
 
 
@@ -40,11 +44,11 @@ class StoryBind:
     line_id: str
     wav: str
     speaker: str
-    subtitle: str
-    gamescript_index: int
+    subtitle: str            # EXACT in-game subtitle for FW, the ASR transcript for DS2
+    gamescript_index: int    # story position (script order)
     quest: str
     score: float
-    tier: str
+    tier: str                # "1" confident (>=strong), "2" likely (>=accept)
     transcript: str
 
 
@@ -58,6 +62,7 @@ def match_subtitles(manifest_rows, script_lines, strong=90.0, accept=80.0,
     with score >= ``accept`` (>= ``strong`` => tier "1"). ``min_words`` drops
     short lines on both sides (a 2-word bark would match too many script slots).
     """
+    # one matchable unit per script sentence; (index, ordinal) preserves order.
     s_rows = []
     for s in script_lines:
         for ordinal, sent in enumerate(split_sentences(s.text)):
@@ -65,17 +70,18 @@ def match_subtitles(manifest_rows, script_lines, strong=90.0, accept=80.0,
             if len(nrm.split()) >= min_words:
                 s_rows.append((s.index, ordinal, s.speaker, s.quest, nrm))
     c_rows = [(r["line_id"], r.get("wav", ""), r["subtitle"],
-                r.get("transcript", ""), normalize(r["subtitle"]))
-               for r in manifest_rows
-               if len(normalize(r["subtitle"]).split()) >= min_words]
+               r.get("transcript", ""), normalize(r["subtitle"]))
+              for r in manifest_rows
+              if len(normalize(r["subtitle"]).split()) >= min_words]
     if not s_rows or not c_rows:
         return []
 
     M = process.cdist([r[4] for r in s_rows], [r[4] for r in c_rows],
-                       scorer=fuzz.token_sort_ratio, workers=-1, dtype=np.uint8)
+                      scorer=fuzz.token_sort_ratio, workers=-1, dtype=np.uint8)
     best = M.argmax(axis=1)
     best_sc = M[np.arange(len(s_rows)), best]
 
+    # greedy: strongest (script sentence, clip) pair first; each clip used once.
     order = sorted(range(len(s_rows)), key=lambda i: int(best_sc[i]), reverse=True)
     used: set[int] = set()
     scored: list[tuple] = []
@@ -90,6 +96,7 @@ def match_subtitles(manifest_rows, script_lines, strong=90.0, accept=80.0,
         scored.append((s_idx, ordinal, StoryBind(
             cid, wav, speaker, subtitle, s_idx, quest,
             float(sc), "1" if sc >= strong else "2", transcript)))
+    # chronological: by script index, then sentence order within the turn.
     scored.sort(key=lambda t: (t[0], t[1]))
     return [b for _, _, b in scored]
 
