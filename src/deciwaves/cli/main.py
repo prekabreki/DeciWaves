@@ -39,6 +39,7 @@ STAGES = {
     },
     "ds2": {
         "extract": ("deciwaves.games.ds2.extract", "Extract dialogue clips to WAV"),
+        "asr":     ("deciwaves.games.ds2.asr_run", "[GPU] Transcribe clips"),
     },
 }
 
