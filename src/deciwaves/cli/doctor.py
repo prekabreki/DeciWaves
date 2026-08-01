@@ -243,6 +243,22 @@ def check_fw_gamescript(fw_gamescript: str) -> Check:
                  "or pass --gamescript explicitly to `deciwaves fw run`.")
 
 
+def check_ds2_gamescript(ds2_gamescript: str) -> Check:
+    """Mirrors check_fw_gamescript: not configured is a normal, fully-supported state
+    (the DS2 gamescript is BYO and optional); once configured and later missing, that's
+    the same "configured but broken" failure as the other checks."""
+    if not ds2_gamescript:
+        return Check("ds2_gamescript", Availability.NOT_CONFIGURED,
+                     "DS2 gamescript: not configured (optional, BYO -- only needed for "
+                     "speaker + story-order matching; see docs/BYO.md)")
+    if Path(ds2_gamescript).is_file():
+        return Check("ds2_gamescript", Availability.OK, f"DS2 gamescript: {ds2_gamescript}")
+    return Check("ds2_gamescript", Availability.BROKEN,
+                 f"DS2 gamescript: {ds2_gamescript!r} not found.",
+                 "run `deciwaves setup --ds2-gamescript <path>` with the correct path, "
+                 "or pass --gamescript explicitly to `deciwaves ds2 run`.")
+
+
 # --- optional GPU extras: informational, never fail the exit code --------
 
 def check_asr_extra() -> Check:
@@ -294,6 +310,7 @@ def _all_checks() -> list[Check]:
         check_fw_package(cfg.get("fw_package", "")),
         check_ds2_package(cfg.get("ds2_package", "")),
         check_fw_gamescript(cfg.get("fw_gamescript", "")),
+        check_ds2_gamescript(cfg.get("ds2_gamescript", "")),
         check_asr_extra(),
         check_cuda(),
         check_config_file(),
