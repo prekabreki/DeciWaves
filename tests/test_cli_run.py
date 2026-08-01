@@ -1534,3 +1534,136 @@ def test_hzd_from_bind_without_whisperx_gate_fires_after_marker_delete(tmp_path,
     assert calls == []
     assert not os.path.exists(_marker("hzd", "bind"))
     assert "pip install deciwaves[asr]" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# marker fingerprint (issue #306)
+# ---------------------------------------------------------------------------
+
+
+def test_ds_marker_written_with_fingerprint_not_empty(tmp_path, monkeypatch):
+    """After a stage completes, its marker contains a fingerprint (JSON argv),
+    not an empty file -- issue #306."""
+    monkeypatch.chdir(tmp_path)
+    mods = _mods("ds")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _ds_outputs(mods)))
+    monkeypatch.setattr(run_mod.data, "packaged", lambda rel: Path(f"/pkg/{rel}"))
+
+    rc = run_mod.run_game("ds", {"ds_install": "X"}, [])
+    assert rc == 0
+
+    import json
+    marker = _marker("ds", "catalog")
+    content = Path(marker).read_text(encoding="utf-8").strip()
+    assert content
+    assert json.loads(content) == calls[0][1]
+
+
+def test_ds_catalog_reruns_when_fingerprint_differs(tmp_path, monkeypatch):
+    """A marker with a different fingerprint triggers a re-run, and downstream
+    markers are invalidated via the existing cascade (issue #306)."""
+    monkeypatch.chdir(tmp_path)
+    mods = _mods("ds")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _ds_outputs(mods)))
+    monkeypatch.setattr(run_mod.data, "packaged", lambda rel: Path(f"/pkg/{rel}"))
+
+    cfg = {"ds_install": "X"}
+    rc = run_mod.run_game("ds", cfg, [])
+    assert rc == 0
+    assert [m for m, _ in calls] == [mods["catalog"], mods["order"], mods["render"]]
+    for stage in ("catalog", "order", "render"):
+        assert os.path.isfile(_marker("ds", stage))
+
+    calls.clear()
+    old_fp = run_mod._argv_fingerprint(["--data-dir", "OTHER", "--oodle", "OTHER",
+                                         "--file-list", "OTHER"])
+    Path(_marker("ds", "catalog")).write_text(old_fp, encoding="utf-8")
+
+    rc = run_mod.run_game("ds", cfg, [])
+    assert rc == 0
+
+    assert [m for m, _ in calls] == [mods["catalog"], mods["order"], mods["render"]]
+
+
+def test_hzd_bind_reruns_when_sample_cap_changes(tmp_path, monkeypatch):
+    """Changing --sample-cap after bind completed must re-run bind because the
+    marker fingerprint differs -- the deliverable test for issue #306."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    monkeypatch.setattr(run_mod, "cuda_available", lambda: True)
+    mods = _mods("hzd")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _hzd_outputs(mods)))
+
+    rc = run_mod.run_game("hzd", {"hzd_package": "PKG"}, ["--sample-cap", "300"])
+    assert rc == 0
+    bind_argv_1 = dict(calls)[mods["bind"]]
+    assert _after(bind_argv_1, "--sample-cap") == "300"
+    for stage in ("catalog", "clip-index", "wem-metadata", "bind", "render"):
+        assert os.path.isfile(_marker("hzd", stage))
+
+    calls.clear()
+
+    rc = run_mod.run_game("hzd", {"hzd_package": "PKG"}, ["--sample-cap", "0"])
+    assert rc == 0
+
+    called = [m for m, _ in calls]
+    assert mods["bind"] in called
+    assert mods["render"] in called
+
+    bind_argv_2 = dict(calls)[mods["bind"]]
+    assert _after(bind_argv_2, "--sample-cap") == "0"
+
+
+def test_ds_full_skip_markers_have_fingerprints_on_second_run(tmp_path, monkeypatch):
+    """After the first run writes fingerprint markers, the second run matches
+    every fingerprint and skips all stages (issue #306: no regression vs the
+    old Path.touch() skip-on-existence path)."""
+    monkeypatch.chdir(tmp_path)
+    mods = _mods("ds")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _ds_outputs(mods)))
+    monkeypatch.setattr(run_mod.data, "packaged", lambda rel: Path(f"/pkg/{rel}"))
+
+    cfg = {"ds_install": "X"}
+    rc = run_mod.run_game("ds", cfg, [])
+    assert rc == 0
+    calls.clear()
+
+    rc = run_mod.run_game("ds", cfg, [])
+    assert rc == 0
+    assert calls == []
+    for stage in ("catalog", "order", "render"):
+        assert os.path.isfile(_marker("ds", stage))
+
+
+def test_hzd_empty_markers_grandfathered_and_unchanged(tmp_path, monkeypatch):
+    """Legacy empty markers (pre-#306 Path.touch() style, 0 bytes) are
+    grandfathered: the run skips every stage without executing anything and
+    leaves the markers empty -- so an existing workspace is never force-re-run.
+
+    Behaviour: skip-and-leave-empty (the markers are not upgraded to fingerprint
+    format on a no-op run)."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("importlib.util.find_spec", lambda name: object())
+    monkeypatch.setattr(run_mod, "cuda_available", lambda: True)
+    mods = _mods("hzd")
+    calls = []
+    monkeypatch.setattr(run_mod, "_import_stage", _make_fake_import_stage(calls, _hzd_outputs(mods)))
+
+    stages = ["catalog", "clip-index", "wem-metadata", "bind", "render"]
+    for stage in stages:
+        marker = _marker("hzd", stage)
+        os.makedirs(os.path.dirname(marker), exist_ok=True)
+        Path(marker).touch()
+
+    rc = run_mod.run_game("hzd", {"hzd_package": "PKG"}, [])
+    assert rc == 0
+    assert calls == []
+
+    for stage in stages:
+        marker = _marker("hzd", stage)
+        assert os.path.isfile(marker)
+        assert os.path.getsize(marker) == 0

@@ -73,6 +73,7 @@ def test_setup_idle_re_enables_pipeline_controls(qtbot, tmp_path):
     assert w.pipeline.controls._bind_btn.isEnabled() is True
 
 
+@pytest.mark.allow_dialogs
 def test_pipeline_busy_disables_setup_buttons(qtbot, monkeypatch):
     w = MainWindow()
     qtbot.addWidget(w)
@@ -107,6 +108,7 @@ def test_busy_setup_blocks_pipeline_and_strip(qtbot):
     assert w.pipeline.strip.rerun_enabled() is False
 
 
+@pytest.mark.allow_dialogs
 def test_busy_pipeline_blocks_export(qtbot, monkeypatch):
     w = MainWindow()
     qtbot.addWidget(w)

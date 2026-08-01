@@ -116,9 +116,7 @@ and whenever it does leave buckets untranscribed, bind's own output states exact
 Those numbers also land on disk: `wem-metadata` and `bind` each merge a summary section
 (story-line coverage; cap used, buckets skipped, tier tally) into `out/hzd/coverage.json`,
 so a capped rip is distinguishable from a complete one without re-reading the run's stdout.
-Note: if `bind` already completed in a workspace, changing `--sample-cap` on a later `hzd run`
-has no effect until you delete `out/hzd/.done-bind` and re-run it -- the done-marker doesn't
-know its own flags changed. bind also checkpoints as it goes (see Resume, below), so an
+bind also checkpoints as it goes (see Resume, below), so an
 interrupted bind picks up where it stopped.
 
 ### Horizon Forbidden West
@@ -231,9 +229,7 @@ that stage also deletes every LATER stage's marker in the chain, so downstream s
 too instead of resuming from what's now stale data. A stage's output existing is deliberately
 not treated as done - only its marker is - so a crash mid-stage never looks finished. The HZD
 bind stage also checkpoints within itself: its `--transcripts-out` sidecar lets a restarted
-bind reuse the clips it already transcribed. A marker also doesn't know if the flags used to
-produce it have since changed - re-running `hzd run` with a different `--sample-cap` after
-`bind` already has a marker is a no-op until you delete `out/hzd/.done-bind` yourself.
+bind reuse the clips it already transcribed.
 
 Partial runs. `run --until <stage>` stops the chain after that stage (markers skip and
 invalidate as usual), and the GPU-extra check only applies to stages actually in the slice -

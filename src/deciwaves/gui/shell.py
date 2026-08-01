@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 
 from PySide6.QtCore import QSettings, QTimer
-from PySide6.QtWidgets import QMainWindow, QStackedWidget, QTabBar, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QMainWindow, QMessageBox, QStackedWidget, QTabBar, QVBoxLayout, QWidget
 
 from deciwaves.cli import config, doctor
 from deciwaves.gui.global_bar import GlobalBar
@@ -480,6 +480,22 @@ class MainWindow(QMainWindow):
     # --- session persistence ------------------------------------------------
 
     def closeEvent(self, event) -> None:
+        running = []
+        if self._controller.runner.is_running:
+            running.append("pipeline job")
+        if self._controller.dump.is_running:
+            running.append("WAV dump")
+        if running:
+            msg = " and ".join(running)
+            resp = QMessageBox.warning(
+                self, "Job running",
+                f"A {msg} is still running — closing now will cancel it. Close anyway?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if resp == QMessageBox.No:
+                event.ignore()
+                return
+            self._controller.runner.cancel()
+            self._controller.dump.cancel()
         self.library.flush_pending_selection()
         self._settings.setValue("window/geometry", self.saveGeometry())
         self._settings.setValue("window/state", self.saveState())
