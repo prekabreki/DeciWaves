@@ -88,8 +88,12 @@ change Phases 2–5:
 Decoder provisioning needs **no new work**: `vgmstream-cli` is already pinned in
 `cli.config.TOOLS`, installed by `deciwaves setup` into `tools_dir`, reported by
 `doctor`, and wired by `config.apply_tool_env`. DS2 being Wwise means it uses that
-existing tool rather than `VGAudioCli`. What is missing is the DS2 side: a
-`ds2_install` config key, `setup --ds2-install`, and a doctor DS2 line.
+existing tool rather than `VGAudioCli`. The DS2 side of that wiring is **done** (#355,
+merged): a `ds2_package` config key, `setup --ds2-package`, and a `check_ds2_package`
+doctor line. Note the naming: the flag/key is `--ds2-package` / `ds2_package` (the
+`...\LocalCacheWinGame\package` dir), mirroring FW's `--fw-package`, while the env var
+`DECIWAVES_DS2_INSTALL` is the *install root*, mirroring `DECIWAVES_FW_INSTALL`. An
+earlier draft of this spec said `ds2_install` / `--ds2-install`; that was never built.
 
 ## Architecture
 

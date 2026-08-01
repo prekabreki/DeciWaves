@@ -133,5 +133,10 @@ being Wwise means it needs **no new tooling** — it reuses that entry and speci
 configured machine look like it has no decoder (runtime-set env vars; the `.venv`
 `%LOCALAPPDATA%` virtualization) are in [[decoder-tool-resolution]].
 
-The real DS2 gap is the reverse direction: there is no `ds2_package` config key, no
-`setup --ds2-package`, and no doctor DS2 line — issue #355, per `docs/ds2-support-spec.md`.
+The reverse-direction gap (no `ds2_package` config key, no `setup --ds2-package`, no doctor
+DS2 line) was **closed by #355**, merged 2026-08-01. `ds2_package` is a persisted config key,
+`deciwaves setup --ds2-package` records it and warns if pointed at the install root, and
+`doctor.check_ds2_package` reports the usual three states keyed on `streaming_graph.core`.
+Verified against the retail install at merge time: unset → `NOT_CONFIGURED`, install root →
+`BROKEN` with a hint naming the corrected path, real package dir → `OK`, and `doctor`'s exit
+code is byte-identical to pre-#355 on a machine with no config file.
