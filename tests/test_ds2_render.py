@@ -241,3 +241,30 @@ def test_render_main_missing_manifest_errors_cleanly(tmp_path, capsys):
     assert "deciwaves ds2 match" in captured.out  # the stage to run
     assert "Traceback" not in captured.out
     assert "Traceback" not in captured.err
+
+
+# ---------------------------------------------------------------------------
+# msg_zero_story with tier R (issue #388)
+# ---------------------------------------------------------------------------
+
+def test_tier_R_only_single_file_zero_story_rc1_clear_message(tmp_path, monkeypatch, capsys):
+    """--tiers R --single-file over an all-unmatched manifest: returns rc 1,
+    names the real cause (region-ordered, gamescript-unmatched, tier R), and
+    writes no MP3."""
+    for lid in ("c0", "c1"):
+        _write_wav(tmp_path / "audio" / f"{lid}.wav")
+    manifest = tmp_path / "story-manifest.csv"
+    _write_manifest(manifest, [
+        _row("c0", 1, "Q1", tier="R", speaker="", subtitle="a"),
+        _row("c1", 2, "Q1", tier="R", speaker="", subtitle="b"),
+    ])
+    _stub_concat_silence(monkeypatch)
+
+    rc = render.main(_render_argv(tmp_path, manifest, tiers="R") + ["--single-file"])
+
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "ERROR" in out
+    assert "tier R" in out
+    assert "region-ordered" in out.lower() or "region" in out.lower()
+    assert not list((tmp_path / "reels").glob("*.mp3"))
