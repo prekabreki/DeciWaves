@@ -36,6 +36,33 @@ problem. This fast path covers a large majority of lines cheaply; the remainder 
 walk (and, for the ones with unsupported embedded types, are skipped fail-soft rather than
 aborting the run).
 
+### MEASURED 2026-08-02 (#399): "the remainder" is 35.8% of the game, and nothing walks it
+
+"A large majority" is 64.2%, and the remainder is not handled anywhere:
+
+| | count |
+| --- | --- |
+| `LocalizedSimpleSoundResource` objects in the type table | 95,392 |
+| reached by the fast path (1,498 arith-clean groups) | 61,217 (64.2%) |
+| **in 437 non-clean groups — never extracted** | **34,175 (35.8%)** |
+
+`games/fw/extract.py:152` is the only caller in FW's chain and it uses the fast path alone. The
+comment at `engine/pack/fw_fast_extract.py:18` claiming the rest "need the full `GroupReader` walk
+and are **handled elsewhere**" is **aspirational — do not believe it**. FW does use `GroupReader`,
+but only inside `subtitle_bind` and only over `scan_arith_clean_groups`: the same clean groups. That
+stage also fills WAV paths *from the clip-index*, so it can only annotate clips `extract` already
+produced. **No stage in the FW chain can add audio the fast path skipped.**
+
+This is the same defect [[ds2-audio-binding]] fixed for DS2 (#391), found by running DS2's
+measurement against FW. **The DS2 fix does not port verbatim**: DS2 has exactly 7 language cycles,
+one per region; FW shows **14 distinct 12-windows** across its clean groups, because a language is
+split across `package.01.00` / `01.01` parts so a slot's file index varies by group. FW needs its
+own alignment rule — measure the window population across *all* LSSR-bearing groups first, then
+decide between an enumerated template set and a structural predicate. Tracked as **#399**.
+
+Consequence for the deliverable: FW's rendered reels are missing roughly a third of the game's
+voice lines, independently of [[deciwaves-reels-predate-output-fixes]]'s ordering staleness.
+
 ## Codec and read model
 
 The resolved clip is a self-describing RIFF stream, ATRAC9-encoded (decoded via the same

@@ -61,11 +61,11 @@ Stronger and simpler checks that are exactly true, and are the ones a Phase 2 te
 
 | check | measured |
 | --- | --- |
-| slot-0 locators total | 8,776 |
+| slot-0 locators total | 16,953 (was 8,776 before #391 — see below) |
 | start with `RIFF` | 8,769 (99.92%) |
 | `fmt` tag `0xFFFF` (Wwise) | 8,769 / 8,769 |
 | channels == 1 (mono) | 8,769 / 8,769 |
-| distinct stream files holding dialogue | **7** |
+| distinct stream files holding dialogue | **9** (was 7 before #391) |
 
 Exactly **7 slot-0 locators do not start with `RIFF`** and must be tolerated, not treated as
 corruption — `(file_index, offset)` = (40, 141988345), (39, 116945984), (39, 135705080),
@@ -189,6 +189,12 @@ with the repo's own `arith_clean_lssr_count`, so these seven numbers are solid):
     l200_aus 4,671 | root 3,359 | l100_mex 659 | l700_bea 39
     l400_nr1 23 | l600_nr3 13 | l500_nr2 12 | l800_fra 0     (total 8,776)
 
+**SUPERSEDED by #391 (2026-08-02).** Those are the *arith-clean* blocks only, which is not the
+dialogue set — it is 51.9% of it. The current per-region English clip counts are:
+
+    root 10,772 | l200_aus 5,023 | l100_mex 674 | remain 288 | l700_bea 142
+    l400_nr1 23 | l500_nr2 17 | l600_nr3 13 | l800_fra 1     (total 16,953)
+
 Group-classification counts differ slightly between passes — 744 arith-clean + 47
 non-integer-ratio (second pass) vs 758 + 33 (first). The total 791 and the block total 8,776
 agree exactly, so the disagreement is in how borderline groups are bucketed, not in the
@@ -280,3 +286,53 @@ DS2 line) was **closed by #355**, merged 2026-08-01. `ds2_package` is a persiste
 Verified against the retail install at merge time: unset → `NOT_CONFIGURED`, install root →
 `BROKEN` with a hint naming the corrected path, real package dir → `OK`, and `doctor`'s exit
 code is byte-identical to pre-#355 on a machine with no config file.
+
+
+## The arith-clean gate was discarding half the dialogue (#391, 2026-08-02)
+
+The enumeration accepted a streaming group only if `locator_count == 12 * n_lssr` **exactly**, and
+rejected the group *whole* otherwise. DS2 packs dialogue into groups that also carry a few
+unrelated streaming locators, so:
+
+| | groups | LSSRs |
+| --- | --- | --- |
+| arith-clean (accepted) | 744 | 8,776 |
+| **non-clean (discarded entirely)** | **47** | **8,145** |
+| total | 791 | **16,921** — exactly the type-table LSSR count above |
+
+That 8,776 + 8,145 = 16,921 identity is the strongest check in this file: an object count measured
+from the type table, reproduced by summing two group buckets derived a completely different way.
+One group (576) was discarded over **one** stray locator among 2,173, costing 181 lines.
+
+**Relaxing the equality alone would have been silently wrong.** The extra locators sit at the
+FRONT of the slice (group 54150 opens with five before its 4,070 blocks; `remain`'s group 41920
+with eight) and sometimes mid-group (576 and 3690 carry a single insertion), so keeping
+`locator_start + 12*k` would have bound nearly every clip in those groups to the wrong line — with
+all the counts still looking right.
+
+The fix locates dialogue by **content**: scan for windows matching a region's 12-file language
+cycle (`games/ds2/lines.py::language_cycles`). Slot 0 of a cycle is that region's English stream
+and appears nowhere else in it, so a matching window's phase is unambiguous.
+
+Two guards, both mutation-tested, both load-bearing:
+
+- **A group must declare >=1 LSSR.** 244 asset groups spell a cycle in their locators while holding
+  no dialogue at all (486 false-positive windows).
+- **A region one package short of 12 contributes no cycle**, rather than a window with a hole that
+  would resolve "English" to another language's stream.
+
+`line_id`s are unchanged: on all 744 clean groups the scan lands on exactly `locator_start + 12*k`,
+verified across the whole retail graph and then confirmed empirically — the re-run reported
+`skipped=8769`, so every previously-extracted clip resumed rather than re-deriving.
+
+Post-fix retail run: `resolved=16953 ok=8085 skipped=8769 failed=99` -> **16,854 WAVs**. The 99
+failures are all the same `f1 10` non-RIFF signature as the original 7 (see
+[[ds2-nonriff-locators]]) — same class, more of it, 0.6%. Not a new failure mode.
+
+**`l800_fra` is genuinely near-empty**, not under-read: its English stream is 26,628 bytes and the
+graph holds one dialogue locator for it. `remain` (288 clips) was the real omission — neither
+region owns a clean group, so neither could have its cycle *learned*; cycles are therefore derived
+structurally from file naming, cross-checked against the empirical cycle of all seven regions that
+do have one. Both derivations agree exactly.
+
+See [[fw-streaming-graph]] — FW has the same defect, unfixed (issue #399).

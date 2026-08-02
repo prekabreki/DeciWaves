@@ -75,7 +75,7 @@ with fields misassigned.
     roots 50,513/50,513 | files 241 | packfiles 241/241 | objloc 45,345 | trailing uuids 444
 
 `Files[]` distribution: 47 root-level (the base package — **English is here; DS2 ships no `en`
-subdir**, unlike FW), 18 `remain/`, and seven language dirs (`l100_mex` 36, `l200_aus` 44,
+subdir**, unlike FW), 18 `remain/`, and seven **region** dirs (`l100_mex` 36, `l200_aus` 44,
 `l400_nr1` 19, `l500_nr2` 19, `l600_nr3` 21, `l700_bea` 20, `l800_fra` 17).
 
 ## The caveat that matters for everything downstream
@@ -91,3 +91,20 @@ either. It is a name-resolution convenience, not a prerequisite.
 
 See [[fw-streaming-graph]] for the base layout this diffs against, and
 `docs/ds2-support-spec.md` for the epic this unblocks.
+
+## Correction 2026-08-02 (#391): the `l###_*` dirs are REGIONS, not languages
+
+An earlier version of this file called them "language dirs". They are numbered **story regions** —
+`l100_mex` (Mexico), `l200_aus` (Australia), `l700_bea` (the Beach), `remain`. The **language** axis
+is orthogonal and lives in the *filename*: each region ships the same twelve packages
+
+    package.{01,02,03,04,05,07,10,11,16,17,18,21}.00.core.stream
+
+one per dubbed language, and **`01.00` is English** in every region. So an LSSR's 12-locator block
+walks its region's twelve package files in that fixed NN order, which is exactly what makes the
+block's phase recoverable by content (see [[ds2-audio-binding]]). Measured: this NN order is
+byte-identical across all seven regions that own an arithmetically clean group, which is what
+licensed applying it to the two that do not (`remain`, `l800_fra`).
+
+On an English install only the `01.00` file of each region exists on disk — that, not the directory
+name, is why slot 0 is the installed clip.
