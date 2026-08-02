@@ -166,6 +166,23 @@ def cutscene_scenes_from_catalog(catalog_path):
     return list(seen)
 
 
+def resolve_file_list(value):
+    """Resolve --file-list: `None` (flag omitted) -> the PACKAGED ds/data-file-list.txt.
+
+    Matches games/ds/catalog.py's resolution. The old default here was
+    "out/data-file-list.txt" -- a workspace path NO stage in the pipeline writes -- so
+    `deciwaves ds cutscenes` died with a bare [Errno 2] on a file the repo actually
+    ships (issue #410).
+
+    Deliberately an `is None` test, not a falsy test, so an explicit path always wins.
+    Raises FileNotFoundError if the packaged resource can't be resolved.
+    """
+    if value is not None:
+        return value
+    from deciwaves import data
+    return str(data.packaged("ds/data-file-list.txt"))
+
+
 def main(argv=None):
     import argparse
 
@@ -173,9 +190,17 @@ def main(argv=None):
     ap.add_argument("--data-dir", required=True)
     ap.add_argument("--oodle", required=True)
     ap.add_argument("--catalog", default="out/catalog.csv")
-    ap.add_argument("--file-list", default="out/data-file-list.txt")
+    ap.add_argument("--file-list", default=None,
+                    help="DS virtual-path listing; default = packaged "
+                         "ds/data-file-list.txt (same resolution as `ds catalog`)")
     ap.add_argument("--out", default="out/cutscene_tracks.csv")
     args = ap.parse_args(argv)
+
+    try:
+        args.file_list = resolve_file_list(args.file_list)
+    except FileNotFoundError as exc:
+        print(f"cutscenes: ERROR - {exc}; pass --file-list <path> explicitly.")
+        return 1
 
     from deciwaves.engine.pack.bin_index import PackIndex
 

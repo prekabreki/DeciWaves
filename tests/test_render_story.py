@@ -809,3 +809,124 @@ def test_assemble_reels_default_concat_and_silence_produce_real_mp3(tmp_path):
     assert n_files == 1
     out_mp3 = out_dir / "reel_00.mp3"
     assert out_mp3.is_file() and out_mp3.stat().st_size > 0
+
+
+# --- #408 --speech-trim default / #406 --curated / #411 decode-failure thresholds ---
+
+def test_speech_trim_omitted_uses_packaged_keepspans(tmp_path, monkeypatch, capsys):
+    """Omitting --speech-trim resolves the PACKAGED ds/cutscene-keepspans.csv.
+
+    DS cutscenes are whole-scene tracks, so rendering them untrimmed adds ~51 min of
+    non-speech gameplay audio -- and nothing used to warn (#408)."""
+    monkeypatch.chdir(tmp_path)
+    playlist = tmp_path / "playlist.csv"
+    write_playlist([_seg(0, "a"), _seg(0, "b")], str(playlist))
+
+    ds_render.main(_render_argv(tmp_path, playlist, tmp_path / "err.log"))
+
+    out = capsys.readouterr().out
+    assert "tracks in map (packaged default)" in out
+
+
+def test_speech_trim_empty_string_disables_trimming(tmp_path, monkeypatch, capsys):
+    """`--speech-trim ''` must DISABLE trimming, not fall through to the packaged
+    default. "" is falsy, so `args.speech_trim or packaged()` would silently swallow
+    this case and still look correct -- the exact trap #408 flags."""
+    monkeypatch.chdir(tmp_path)
+    playlist = tmp_path / "playlist.csv"
+    write_playlist([_seg(0, "a")], str(playlist))
+
+    ds_render.main(_render_argv(tmp_path, playlist, tmp_path / "err.log",
+                                extra=["--speech-trim", ""]))
+
+    out = capsys.readouterr().out
+    assert "tracks in map" not in out
+
+
+def test_speech_trim_explicit_path_wins_over_packaged(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    ks = tmp_path / "mine.csv"
+    ks.write_text("stream_path,line_id,speech_ratio,keep_spans,dropped\n"
+                  "x.core.stream,L1,1.0,0.0:1.0,0\n", encoding="utf-8")
+    playlist = tmp_path / "playlist.csv"
+    write_playlist([_seg(0, "a")], str(playlist))
+
+    ds_render.main(_render_argv(tmp_path, playlist, tmp_path / "err.log",
+                                extra=["--speech-trim", str(ks)]))
+
+    out = capsys.readouterr().out
+    assert "1 tracks in map (explicit)" in out
+
+
+def test_speech_trim_missing_explicit_path_is_rc1(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    playlist = tmp_path / "playlist.csv"
+    write_playlist([_seg(0, "a")], str(playlist))
+
+    rc = ds_render.main(_render_argv(tmp_path, playlist, tmp_path / "err.log",
+                                     extra=["--speech-trim", str(tmp_path / "nope.csv")]))
+
+    assert rc == 1
+    assert "--speech-trim path not found" in capsys.readouterr().out
+
+
+def test_curated_keeps_rows_main_story_would_drop(tmp_path, monkeypatch, capsys):
+    """--curated renders the playlist verbatim: an is_side==1 row and a non-story
+    cutscene-group row both survive to the decode stage (#406)."""
+    monkeypatch.chdir(tmp_path)
+    playlist = tmp_path / "playlist.csv"
+    write_playlist([_seg(1, "side_a"),
+                    _seg(0, "extra", scene="sq_cs71_s00100")], str(playlist))
+
+    ds_render.main(_render_argv(tmp_path, playlist, tmp_path / "err.log",
+                                extra=["--single-file", "--curated"]))
+
+    out = capsys.readouterr().out
+    assert "curated: rendering all 2 playlist rows verbatim" in out
+    assert "decoded 0 clips, 2 failed" in out       # both were ATTEMPTED, not filtered
+
+
+def test_without_curated_the_same_rows_are_dropped(tmp_path, monkeypatch, capsys):
+    """Guard on the test above: without --curated those rows are still filtered out,
+    so the flag is doing the work rather than the assertion passing vacuously."""
+    monkeypatch.chdir(tmp_path)
+    playlist = tmp_path / "playlist.csv"
+    write_playlist([_seg(1, "side_a"),
+                    _seg(0, "extra", scene="sq_cs71_s00100")], str(playlist))
+
+    rc = ds_render.main(_render_argv(tmp_path, playlist, tmp_path / "err.log",
+                                     extra=["--single-file"]))
+
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "curated:" not in out
+    assert "decoded" not in out                      # never reached the decode stage
+
+
+def test_decode_failure_rc_escalates_only_past_the_hard_threshold(capsys):
+    assert ds_render.decode_failure_rc(0, 100, 0, "e.log") == 0      # clean
+    assert ds_render.decode_failure_rc(0, 80, 20, "e.log") == 0      # 20% -> warn only
+    assert ds_render.decode_failure_rc(0, 1846, 3593, "e.log") == 1  # 66% -> rc 1
+    assert "66%" in capsys.readouterr().out
+    assert ds_render.decode_failure_rc(1, 100, 0, "e.log") == 1      # never masks an rc 1
+    assert ds_render.decode_failure_rc(0, 0, 0, "e.log") == 0        # no clips attempted
+
+
+def test_decode_failure_thresholds_ignore_small_samples(capsys):
+    """A fraction is meaningless at small N -- 1 of 2 clips failing is noise, and
+    `partial success returns 0` is long-standing DS behaviour. Only samples of at
+    least DECODE_MIN_ATTEMPTED clips can escalate or warn."""
+    assert ds_render.decode_failure_rc(0, 1, 1, "e.log") == 0        # 50% of 2 -> ignored
+    ds_render.warn_decode_failures(1, 1, "e.log")
+    assert capsys.readouterr().out == ""
+    n = ds_render.DECODE_MIN_ATTEMPTED
+    assert ds_render.decode_failure_rc(0, 0, n, "e.log") == 1        # 100% of N -> rc 1
+
+
+def test_warn_decode_failures_quiet_below_threshold(capsys):
+    ds_render.warn_decode_failures(100, 0, "e.log")
+    ds_render.warn_decode_failures(95, 5, "e.log")                   # 5% -> quiet
+    assert capsys.readouterr().out == ""
+    ds_render.warn_decode_failures(80, 20, "e.log")                  # 20% -> warn
+    out = capsys.readouterr().out
+    assert "WARNING" in out and "20%" in out

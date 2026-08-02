@@ -2,6 +2,7 @@
 
 Mechanism documented in .memories/ds-cutscene-audio.md.
 """
+import os
 import csv
 
 from deciwaves.games.ds import cutscene_audio as ca
@@ -227,3 +228,20 @@ def test_resolve_proven_cutscene_scene_against_install(require_install):
     res = ca.resolve_scene("sq_cs04_s01650", read_core, path_exists)
     assert res.status == "resolved"
     assert PROVEN_STREAM in res.voice_tracks
+
+
+def test_file_list_defaults_to_packaged_listing():
+    """`deciwaves ds cutscenes` used to die with a bare [Errno 2] on
+    out/data-file-list.txt -- a workspace path NO stage writes -- while the repo ships
+    the listing and `ds catalog` resolves it from the package (#410)."""
+    from deciwaves import data
+    packaged = str(data.packaged("ds/data-file-list.txt"))
+    assert ca.resolve_file_list(None) == packaged
+    assert os.path.isfile(packaged)
+
+
+def test_file_list_explicit_path_wins_including_empty_string():
+    """An `is None` test, not a falsy one: an explicit value -- even "" -- must not be
+    replaced by the packaged default."""
+    assert ca.resolve_file_list("/tmp/mine.txt") == "/tmp/mine.txt"
+    assert ca.resolve_file_list("") == ""
