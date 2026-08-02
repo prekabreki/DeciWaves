@@ -162,3 +162,38 @@ per-section rate.
 
 Conformance of the file as a whole is high: 99.9% of its non-empty lines are recognised by
 `games.fw.gamescript.parse` (2,547 dialogue lines, 63 headers, 289 bracketed, only 3 dropped).
+
+## Re-run after #391 (2026-08-02, evening) — supersedes the 43.0% figure above
+
+#391 fixed an extract under-reach; the corpus roughly doubled and the chain was re-run end to end.
+
+| stage | result |
+| --- | --- |
+| `extract` | `resolved=16953 ok=8085 skipped=8769 failed=99` -> **16,854 WAVs** |
+| `asr` | `ok=8085 err=0` -> 16,854 transcripts, **2,431 empty** (14.4%, "no active speech") |
+| `match` | `bound=4167 tier1=3655 tier2=512 quests=60` (was 3,768 / 3,305 / 463 / 59) |
+
+**Deliverable 1 re-rendered: 4,167 lines, 5:14:45, 264 MB @ 112 kbps** (was 3,768 / 4:44:27).
+
+**Doubling the corpus bought +10.6% story lines, not +90%.** That is the number to remember: clip
+count is not the binding constraint. Where the gain landed:
+
+| section | before | after |
+| --- | --- | --- |
+| EPISODE 15 - ON THE BEACH | 7 | 38 |
+| HEARTMAN'S LAB - THE HYDROLOGIST | 15 | 62 |
+| THE GOVERNMENT'S BASE - OLD OZ | 1 | 19 |
+| EPISODE 11 - QUAKE | 7 | 12 |
+| PROLOGUE | 4 | 7 |
+| **EPISODE 13 - DIE HARD** | 1 | **1** |
+| **ALL RAINY'S QUIZ** | 0 | **0** |
+
+ON THE BEACH was the clean confirmation (`l700_bea` went 37 -> 140 clips). But the **largest
+absolute gains were in already-healthy sections** (EPISODE 3 +94, EPISODE 7 +53), i.e. most
+recovered audio was ordinary dialogue in well-covered scenes, not the missing scenes.
+
+DIE HARD (51 script lines) and ALL RAINY'S QUIZ (18) did not move at all, so **the missing-audio
+hypothesis is exhausted for them** — extraction now reaches ~100% of the game's 16,921 LSSRs. Open
+as #400. Do not re-diagnose these as an extract problem.
+
+Baseline kept for diffing at `Documents\deciwaves\out\ds2\story-manifest.prev-391.csv` (3,768 rows).
