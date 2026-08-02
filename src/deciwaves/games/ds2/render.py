@@ -8,10 +8,12 @@ the game-agnostic assembly kit (accumulate_episode_seconds, assemble_reels)
 from `engine.render` and the spine builder (build_spine) from
 `engine.render_spine`.
 
-Unlike FW, there is no `full-reel` stage: DS2 has no exact subtitles (the object
-reader is blocked, #370), so its renderable set is exactly its gamescript-bound
-lines -- the manifest ships only story lines, and there is no tier-S (subtitle-
-only, no gamescript match) to drop.
+Tier `R` (region-ordered, gamescript-unmatched) rows ship in the full reel
+(``--tiers 1,2,R``) but are filler for deliverable 1 (``--single-file``,
+``--tiers 1,2``) -- they carry an empty ``speaker``, so ``is_story`` rejects
+them. Unlike FW there is no tier `S` (exact-subtitle, no gamescript match):
+DS2's object reader is blocked (#370), so the renderable set is exactly its
+gamescript-bound lines plus the region-ordered fallback.
 
     PYTHONPATH=src python -m deciwaves.games.ds2.render
 """
@@ -136,8 +138,9 @@ def main(argv=None):
             ),
             msg_zero_story=(
                 f"render: ERROR - none of the {len(spine)} spine lines is story "
-                f"(all are gamescript-unbound subtitle-only lines). Deliverable 1 "
-                f"needs gamescript-bound lines -- run `deciwaves ds2 match` with a "
+                f"(all are region-ordered, gamescript-unmatched lines -- tier R). "
+                f"Deliverable 1 needs gamescript-bound lines -- use a broader "
+                f"--tiers (e.g. --tiers 1,2) or run `deciwaves ds2 match` with a "
                 f"BYO gamescript first; no file written to {a.out_dir}."
             ),
             durations=durations,

@@ -64,11 +64,79 @@ from deciwaves.engine.pack.fw_streaming_graph import StreamingGraph
 from deciwaves.engine.tool_paths import resolve
 from deciwaves.games.ds2.lines import iter_ds2_lines
 
-MANIFEST_COLS = ["line_id", "group_id", "lssr_index", "file_index", "offset", "clip_bytes", "wav"]
+MANIFEST_COLS = ["line_id", "group_id", "lssr_index", "file_index", "offset",
+                 "clip_bytes", "wav", "region"]
+
+
+def _derive_region(path: str) -> str:
+    """First path component of *path* after stripping the ``cache:package/``
+    device prefix, or ``"root"`` when the path has no directory.
+
+    DS2's numbered region directories (``l100_mex``, ``l200_aus``, ...) are a
+    validated story-progression signal (see
+    ``.memories/ds2-story-order-signals.md``). Root-level files mix system,
+    ambient, and story, so they get the fallback label ``"root"``.
+    """
+    from deciwaves.engine.pack.fw_fast_extract import strip_cache_prefix
+    stripped = strip_cache_prefix(path)
+    if "/" not in stripped:
+        return "root"
+    return stripped.split("/", 1)[0]
 
 
 class DecodeError(Exception):
     pass
+
+
+def backfill_region(package_dir: str, out_dir: str = "out/ds2") -> int:
+    """One-shot: add a ``region`` column to an existing ``clip-index.csv``
+    without re-decoding any audio.
+
+    ``region`` is derivable from data already in each row: ``file_index`` ->
+    ``graph.files[file_index]`` -> :func:`_derive_region`.  The graph is loaded
+    from *package_dir* but the stream store is never opened and no audio I/O
+    happens.
+
+    Idempotent: re-running on an already-backfilled CSV is a no-op. The rewrite
+    is atomic (via `engine.atomic_io.atomic_write`) -- a crash partway through
+    cannot corrupt the manifest.
+
+    Returns the number of rows backfilled, or 0 when nothing to do.
+    """
+    import csv as _csv
+
+    from deciwaves.engine.atomic_io import atomic_write
+    from deciwaves.engine.catalog_io import read_csv_rows
+
+    manifest_path = os.path.join(out_dir, "clip-index.csv")
+    if not os.path.isfile(manifest_path):
+        print("backfill: no clip-index.csv exists yet -- nothing to do")
+        return 0
+
+    rows = read_csv_rows(manifest_path)
+    if not rows:
+        print("backfill: clip-index.csv has no data rows -- nothing to do")
+        return 0
+
+    if "region" in rows[0]:
+        print("backfill: clip-index.csv already has a 'region' column -- nothing to do "
+              f"({len(rows)} rows)")
+        return 0
+
+    graph = StreamingGraph.from_file(os.path.join(package_dir, "streaming_graph.core"))
+    for row in rows:
+        fi = int(row["file_index"])
+        row["region"] = _derive_region(graph.files[fi])
+
+    def _write(tmp_path):
+        with open(tmp_path, "w", newline="", encoding="utf-8") as f:
+            w = _csv.DictWriter(f, fieldnames=MANIFEST_COLS)
+            w.writeheader()
+            w.writerows(rows)
+
+    atomic_write(manifest_path, _write)
+    print(f"backfill: added 'region' to {len(rows)} rows in {manifest_path}")
+    return len(rows)
 
 
 def decode_clip(clip_bytes: bytes, wav_path: str, vgmstream: str = None) -> None:
@@ -186,12 +254,25 @@ def extract(package_dir: str, out_dir: str = "out/ds2", *,
                 "lssr_index": ln.lssr_index, "file_index": ln.locator.file_index,
                 "offset": ln.locator.offset, "clip_bytes": len(clip),
                 "wav": wav_rel,
+                "region": _derive_region(graph.files[ln.locator.file_index]),
             }
             return ln, row, None
         except Exception as exc:  # fail-soft: reported by the main thread below
             return ln, None, f"{type(exc).__name__}: {exc}"
 
     new_manifest = not os.path.isfile(manifest_path) or os.path.getsize(manifest_path) == 0
+    # Guard against a stale manifest from before #388 added the 'region'
+    # column: appending 8-field rows under a 7-field header silently corrupts
+    # the CSV and surfaces one stage later in story_match as a missing column.
+    if not new_manifest:
+        with open(manifest_path, "r", encoding="utf-8-sig") as _f:
+            _header = _f.readline().rstrip("\r\n")
+        if _header and "region" not in _header:
+            print(f"extract: ERROR - existing {manifest_path} lacks the 'region' "
+                  f"column (it was created before #388). Run the one-shot region "
+                  f"backfill: `python -m deciwaves.games.ds2.extract --backfill "
+                  f"--package <package_dir>` and re-run extract.")
+            return ExtractStats()
     # errors_path is opened "w" (rewritten from scratch), NOT "a": failed lines are
     # retried on every resume, so appending across runs would grow one duplicate
     # entry per resume for a persistently-failing line. Truncating means the log
@@ -231,7 +312,14 @@ def main(argv=None) -> int:
                     help="number of clips to read+decode concurrently (each spawns "
                          f"one vgmstream-cli). Default min(8, cpu_count)={default_jobs()}; "
                          "--jobs 1 forces the old serial extract")
+    ap.add_argument("--backfill", action="store_true",
+                    help="one-shot: add a 'region' column to an existing clip-index.csv "
+                         "from the streaming graph (no audio decode). Idempotent -- "
+                         "re-running on an already-backfilled CSV is a no-op.")
     a = ap.parse_args(argv)
+    if a.backfill:
+        backfill_region(a.package, a.out_dir)
+        return 0
     stats = extract(a.package, a.out_dir, limit=a.limit, decode=not a.no_decode,
                     jobs=a.jobs)
     msg = (f"resolved={stats.resolved} ok={stats.ok} skipped={stats.skipped} "

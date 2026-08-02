@@ -36,7 +36,9 @@ _FakeLine = namedtuple("_FakeLine", "line_id group_id lssr_index locator")
 
 
 class _FakeGraph:
-    files = ["l200_aus/package.39.00.core.stream"]
+    # Enough entries for _FakeLoc.file_index to index into (usually 15).
+    # Include the cache:package/ prefix so _derive_region strips it for real.
+    files = ["cache:package/l200_aus/package.39.00.core.stream"] * 20
 
 
 def _fake_lines(n):
@@ -238,3 +240,162 @@ def test_decode_clip_resolves_vgmstream_at_spawn_time_not_import_time(tmp_path, 
     assert seen == [r"C:\fake\vgmstream-cli.exe"], (
         "decode_clip's default vgmstream path must re-resolve DECIWAVES_VGMSTREAM at "
         "call time, not freeze it at import/def time")
+
+
+# ---------------------------------------------------------------------------
+# region column (issue #388)
+# ---------------------------------------------------------------------------
+
+def test_extract_writes_region_column_from_graph_files(tmp_path, monkeypatch):
+    lines = _fake_lines(3)
+    vg = tmp_path / "vg.exe"; vg.write_bytes(b"x")
+    _install_ds2_stubs(monkeypatch, lines)
+
+    stats = fx.extract("pkg", str(tmp_path / "ds2"), decode=True, vgmstream=str(vg), jobs=1)
+    assert stats.ok == 3
+    rows = _read_rows(str(tmp_path / "ds2"))
+    assert all("region" in r for r in rows)
+    assert rows[0]["region"] == "l200_aus"
+
+
+def test_derive_region_root_when_no_directory():
+    assert fx._derive_region("cache:package/package.01.00.core.stream") == "root"
+
+
+def test_derive_region_extracts_first_path_component():
+    assert fx._derive_region("cache:package/l700_bea/something.core.stream") == "l700_bea"
+
+
+def test_derive_region_strips_cache_prefix_first():
+    assert fx._derive_region("cache:package/l100_mex/deep/path.stream") == "l100_mex"
+
+
+# ---------------------------------------------------------------------------
+# backfill (issue #388 amendment)
+# ---------------------------------------------------------------------------
+
+def _write_manifest_csv(path, rows, fieldnames):
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=fieldnames)
+        w.writeheader()
+        w.writerows(rows)
+
+
+def _make_backfill_graph():
+    """Stub graph with two file entries at known indices: index 0 has a
+    regional directory, index 1 is root-level (no directory)."""
+    class G:
+        files = ["cache:package/l200_aus/package.39.00.core.stream",
+                 "cache:package/package.01.00.core.stream"]
+    return G
+
+
+def test_backfill_adds_region_column_to_existing_manifest(tmp_path, monkeypatch):
+    out_dir = str(tmp_path / "ds2")
+    os.makedirs(out_dir)
+    manifest_path = os.path.join(out_dir, "clip-index.csv")
+    old_cols = ["line_id", "group_id", "lssr_index", "file_index",
+                "offset", "clip_bytes", "wav"]
+    _write_manifest_csv(manifest_path, [
+        {"line_id": "g1_0000", "group_id": "1", "lssr_index": "0",
+         "file_index": "0", "offset": "100", "clip_bytes": "32",
+         "wav": "audio/g1_0000.wav"},
+        {"line_id": "g2_0000", "group_id": "2", "lssr_index": "0",
+         "file_index": "1", "offset": "200", "clip_bytes": "48",
+         "wav": "audio/g2_0000.wav"},
+    ], old_cols)
+
+    monkeypatch.setattr(fx.StreamingGraph, "from_file",
+                        staticmethod(lambda path: _make_backfill_graph()))
+
+    n = fx.backfill_region("pkg", out_dir)
+    assert n == 2
+
+    from deciwaves.engine.catalog_io import read_csv_rows
+    rows = read_csv_rows(manifest_path)
+    assert len(rows) == 2
+    assert all("region" in r for r in rows)
+    assert rows[0]["region"] == "l200_aus"
+    assert rows[1]["region"] == "root"
+    assert "line_id" in rows[0]  # old columns preserved
+
+
+def test_backfill_is_idempotent(tmp_path, monkeypatch):
+    out_dir = str(tmp_path / "ds2")
+    os.makedirs(out_dir)
+    manifest_path = os.path.join(out_dir, "clip-index.csv")
+    new_cols = fx.MANIFEST_COLS
+    _write_manifest_csv(manifest_path, [
+        {"line_id": "g1_0000", "group_id": "1", "lssr_index": "0",
+         "file_index": "0", "offset": "100", "clip_bytes": "32",
+         "wav": "audio/g1_0000.wav", "region": "l200_aus"},
+    ], new_cols)
+
+    monkeypatch.setattr(fx.StreamingGraph, "from_file",
+                        staticmethod(lambda path: _make_backfill_graph()))
+
+    n = fx.backfill_region("pkg", out_dir)
+    assert n == 0  # no-op
+
+    from deciwaves.engine.catalog_io import read_csv_rows
+    rows = read_csv_rows(manifest_path)
+    assert len(rows) == 1
+    assert rows[0]["region"] == "l200_aus"  # unchanged
+
+
+def test_backfill_no_csv_nothing_to_do(tmp_path, monkeypatch, capsys):
+    out_dir = str(tmp_path / "ds2")
+    os.makedirs(out_dir)
+
+    monkeypatch.setattr(fx.StreamingGraph, "from_file",
+                        staticmethod(lambda path: _make_backfill_graph()))
+
+    n = fx.backfill_region("pkg", out_dir)
+    assert n == 0
+    assert "nothing to do" in capsys.readouterr().out
+
+
+def test_backfill_empty_csv_nothing_to_do(tmp_path, monkeypatch):
+    out_dir = str(tmp_path / "ds2")
+    os.makedirs(out_dir)
+    manifest_path = os.path.join(out_dir, "clip-index.csv")
+    old_cols = ["line_id", "group_id", "lssr_index", "file_index",
+                "offset", "clip_bytes", "wav"]
+    _write_manifest_csv(manifest_path, [], old_cols)
+
+    monkeypatch.setattr(fx.StreamingGraph, "from_file",
+                        staticmethod(lambda path: _make_backfill_graph()))
+
+    n = fx.backfill_region("pkg", out_dir)
+    assert n == 0
+
+
+# ---------------------------------------------------------------------------
+# stale-header guard (issue #388 amendment)
+# ---------------------------------------------------------------------------
+
+def test_extract_refuses_stale_header_without_region(tmp_path, monkeypatch, capsys):
+    out_dir = str(tmp_path / "ds2")
+    os.makedirs(out_dir)
+    manifest_path = os.path.join(out_dir, "clip-index.csv")
+    old_cols = ["line_id", "group_id", "lssr_index", "file_index",
+                "offset", "clip_bytes", "wav"]
+    _write_manifest_csv(manifest_path, [
+        {"line_id": "g1_0000", "group_id": "1", "lssr_index": "0",
+         "file_index": "0", "offset": "100", "clip_bytes": "32",
+         "wav": "audio/g1_0000.wav"},
+    ], old_cols)
+    # Also need a processed sidecar so prune_incomplete_rows doesn't
+    # "reconstruct" — we just want a stale-header detection.
+    with open(os.path.join(out_dir, "clip-index-processed.txt"), "w") as pf:
+        pf.write("g1_0000\n")
+
+    lines = _fake_lines(2)
+    vg = tmp_path / "vg.exe"; vg.write_bytes(b"x")
+    _install_ds2_stubs(monkeypatch, lines)
+
+    stats = fx.extract("pkg", out_dir, decode=True, vgmstream=str(vg), jobs=1)
+    assert stats.ok == 0
+    captured = capsys.readouterr()
+    assert "region" in captured.out
+    assert "--backfill" in captured.out
