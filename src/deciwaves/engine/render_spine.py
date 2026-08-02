@@ -18,11 +18,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-# The default tier list a gamescript-bound manifest ships with. ``BOUND_TIERS``
-# is its parsed set; ``games/fw/render.py`` keeps its own ``DEFAULT_TIERS`` as
-# the CLI's ``--tiers`` default and must stay in lockstep with this string.
-DEFAULT_TIERS = "1,2,S"
-BOUND_TIERS = {t.strip() for t in DEFAULT_TIERS.split(",") if t.strip()}
+# The tiers a gamescript-bound manifest ships by default. NOT tied to any game's
+# ``--tiers`` CLI default: FW passes ``bound_tiers`` explicitly (its own
+# ``DEFAULT_TIERS`` is "1,2,S"), and DS2 defaults to "1,2" -- it has no tier S.
+BOUND_TIERS = {"1", "2", "S"}
 
 
 @dataclass
