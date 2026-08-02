@@ -14,7 +14,6 @@ from __future__ import annotations
 import argparse
 import os
 import wave
-from dataclasses import dataclass
 
 import subprocess
 
@@ -24,6 +23,7 @@ from deciwaves.engine.render import (
     assemble_single_file, budget_seconds, finish_render, finish_single_file,
     format_ts, ReelColumns,
 )
+from deciwaves.engine.render_spine import BOUND_TIERS, RenderItem, build_spine, REQUIRED_COLS  # noqa: F401
 
 # Default --manifest: the full-reel stage (story_full.py)'s own default --out.
 # Keep these in lockstep -- see test_render_default_manifest_matches_full_reel_stage_output.
@@ -32,7 +32,6 @@ DEFAULT_MANIFEST = "out/fw/full-reel-manifest.csv"
 # "S" (subtitle-only, no gamescript match) -- that's most of the full reel's
 # lines; dropping it silently would defeat the point of the full-reel deliverable.
 DEFAULT_TIERS = "1,2,S"
-BOUND_TIERS = {t.strip() for t in DEFAULT_TIERS.split(",") if t.strip()}
 MONO_FMT = (1, SR, 2)        # FW fast-path clips are all mono / 48 kHz / s16
 
 
@@ -84,51 +83,12 @@ def _concat_uniform(wav_list, out_mp3, list_path, norm_dir, kbps=DEFAULT_BITRATE
         raise RuntimeError(f"ffmpeg concat failed: {proc.stderr[-500:]}")
 
 
-@dataclass
-class RenderItem:
-    gamescript_index: int
-    episode: int            # dense rank of the quest (the packing unit)
-    quest: str
-    speaker: str
-    subtitle: str
-    line_id: str
-    wav: str                # path relative to the audio root
-
-
 def is_story(item):
     """Story/filler split for FW (deliverable 1): a line is 'story' when it is
     bound to the gamescript -- non-empty `speaker`. The full-reel manifest's
     tier-S rows are exact-subtitle-only lines with no gamescript match (empty
     speaker); they are filler for the story-only single-file deliverable."""
     return bool((item.speaker or "").strip())
-
-
-def build_spine(manifest_rows, bound_tiers=BOUND_TIERS) -> list[RenderItem]:
-    """Ordered playlist of bound lines, sorted by gamescript index.
-
-    Each distinct quest becomes a dense episode index (the packing unit), assigned
-    in gamescript order. Lines whose tier is not in ``bound_tiers`` are dropped.
-    """
-    rows = [r for r in manifest_rows if r["tier"].strip() in bound_tiers]
-    rows.sort(key=lambda r: int(r["gamescript_index"]))
-    ep_of: dict[str, int] = {}
-    spine = []
-    for r in rows:
-        ep_of.setdefault(r["quest"], len(ep_of))
-        spine.append(RenderItem(
-            gamescript_index=int(r["gamescript_index"]),
-            episode=ep_of[r["quest"]], quest=r["quest"],
-            speaker=r["speaker"], subtitle=r["subtitle"],
-            line_id=r["line_id"], wav=r["wav"]))
-    return spine
-
-
-# Columns build_spine reads. A manifest missing any of them -- a garbled
-# header, or the wrong CSV entirely -- would otherwise crash build_spine with a
-# raw `KeyError`; validate up front for a clean, actionable error (issue #84,
-# mirroring the #7/#23 message convention).
-REQUIRED_COLS = ("line_id", "gamescript_index", "quest", "tier",
-                 "speaker", "subtitle", "wav")
 
 
 def main(argv=None):
