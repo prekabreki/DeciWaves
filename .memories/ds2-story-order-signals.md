@@ -7,6 +7,13 @@ Measured 2026-08-01, after story order was made a non-negotiable goal for DS2. R
 Phase 3 (subtitle/speaker binding) is blocked on a DS2 object-reader variant
 ([[ds2-types-json]]) -- this ordering signal is **independent of that blocker**.
 
+> **Status 2026-08-02: measured but NOT wired into any shipped stage.** `games/ds2/story_match.py`
+> writes `build_rows(binds)` -- bound rows only -- so the ~52% of clips that do not match the
+> gamescript are dropped from `story-manifest.csv` entirely and get no position at all. That is
+> correct for the story-only MP3 (deliverable 1) and **blocks the everything-in-narrative-order reel
+> set** (deliverable 2). Wiring this signal in as a fallback tier is **#388**; until that lands,
+> nothing in `src/` reads a region. See [[ds2-gamescript-binding]] for the half that did ship.
+
 ## The signal: numbered region directories
 
 DS2's package splits stream files across directories whose names are numbered region codes. Every

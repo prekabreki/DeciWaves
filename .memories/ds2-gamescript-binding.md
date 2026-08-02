@@ -64,6 +64,19 @@ The chain shipped as `extract -> asr -> match` (no `full-reel`: that stage ships
 its bound lines). `match_subtitles`/`build_rows`/`split_sentences` now live in
 `engine/subtitle_match.py`, promoted out of `games/fw/` behind a re-export shim.
 
+**Chain completed 2026-08-02 (#384, shipped):** `extract -> asr -> match -> render`. `render` sits
+behind the same BYO-gamescript gate as `match` and defaults to `--tiers 1,2` (DS2 has no tier `S`).
+`deciwaves ds2 run` produces the reel *set*; the single story-only MP3 needs an explicit
+`deciwaves ds2 render --single-file`.
+
+**The number in this file is still a PREDICTION.** The ~48% came from a 90-clip exploratory harness,
+never from the shipped `match` -- and as of 2026-08-02 no `out/ds2/` exists on the dev box, so the
+whole chain has produced nothing against the retail install. Reproducing it is **#386**; treat the
+bind rate here as a hypothesis until that run replaces these figures with measured ones.
+
+Because `build_rows` emits bound rows only, the unmatched remainder is **dropped from the manifest**,
+not ordered -- see [[ds2-story-order-signals]] and **#388**.
+
 ## Coverage gap: three story sections are stubs at the source
 
 Measured 2026-08-02 while (re)building the gamescript from its source pages. The EPISODE spine
