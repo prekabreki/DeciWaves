@@ -24,7 +24,7 @@ Per-game chains (see task-9 brief):
     hzd: catalog -> clip-index -> wem-metadata -> bind[GPU] -> render
     fw:  extract -> asr[GPU] -> subtitle-bind -- (BYO gamescript gate) --
          match -> full-reel -> render
-    ds2: extract -> asr[GPU]
+    ds2: extract -> asr[GPU] -- (BYO gamescript gate) -- match -> render
 """
 from __future__ import annotations
 
@@ -707,7 +707,7 @@ def _ds2_byo_message(package: str) -> str:
         "story-order matching needs your own copy of the Death Stranding 2 gamescript -- "
         "BYO, this repo can't ship game text (see docs/BYO.md). Re-run with:\n"
         f"    deciwaves ds2 run --package {_quoted_ds2_package(package)} --gamescript <path-to-gamescript>\n"
-        "to continue with match, or persist it once with "
+        "to continue with match -> render, or persist it once with "
         "`deciwaves setup --ds2-gamescript <path-to-gamescript>` so future runs (and "
         "guided mode) don't need the flag at all."
     )
@@ -735,7 +735,7 @@ def _run_ds2(cfg: dict, extra_argv: list) -> int:
     ap = argparse.ArgumentParser(
         prog="deciwaves ds2 run",
         description="Run the DS2 pipeline end-to-end: extract -> asr, "
-                    "then (with a BYO gamescript) match.",
+                    "then (with a BYO gamescript) match -> render.",
     )
     ap.add_argument("--package", help="DS2 package/install path (default: from `deciwaves setup`)")
     ap.add_argument("--gamescript", help="path to your own Death Stranding 2 gamescript transcript "
@@ -825,6 +825,7 @@ def run_chain(game: str) -> list[Stage]:
             Stage("extract", STAGES["ds2"]["extract"][0], _ds2_extract_argv),
             Stage("asr", STAGES["ds2"]["asr"][0], gpu=True),
             Stage("match", STAGES["ds2"]["match"][0], _ds2_match_argv),
+            Stage("render", STAGES["ds2"]["render"][0]),
         ],
     }[game]
 

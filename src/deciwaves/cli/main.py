@@ -41,6 +41,7 @@ STAGES = {
         "extract": ("deciwaves.games.ds2.extract", "Extract dialogue clips to WAV"),
         "asr":     ("deciwaves.games.ds2.asr_run", "[GPU] Transcribe clips"),
         "match":   ("deciwaves.games.ds2.story_match", "Speaker + story order (needs BYO gamescript)"),
+        "render":  ("deciwaves.games.ds2.render", "Render MP3 reels + tracklists"),
     },
 }
 
