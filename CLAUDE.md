@@ -5,13 +5,18 @@ Guidance for Claude Code (and other agents) working in this repository.
 ## What this repo is
 
 DeciWaves extracts speaker- and subtitle-tagged in-game voice audio from **your own,
-legitimately owned PC copies** of three Decima-engine games, and assembles it into
+legitimately owned PC copies** of four Decima-engine games, and assembles it into
 story-ordered MP3 reels:
 
 - **ds** — Death Stranding (Director's Cut), parsed via a bundled, patched `pydecima`.
 - **hzd** — Horizon Zero Dawn Remastered, parsed by a self-contained byte reader (no
   `pydecima` — a newer engine generation, different resource/archive formats entirely).
 - **fw** — Horizon Forbidden West, resolved via its `streaming_graph.core` positional index.
+- **ds2** — Death Stranding 2, an FW-generation title (despite the name): same
+  `StreamingGraphResource` type hash as FW, with a bounded graph-layout delta. Its chain is
+  `extract → asr → match` (render pending, #384) — it has **no exact subtitles**, because the
+  DS2 object reader is unsolved (#370), so speaker and story order come from fuzzy-matching a
+  BYO gamescript against ASR transcripts instead of against exact subtitles.
 
 **Definition of done (per game):** a manifest CSV where each row is a voice line with a
 stable ID, internal name, speaker (where derivable), category/scene, language, and a path to
@@ -20,11 +25,15 @@ a playable WAV — rendered into ≤290 MB story-ordered MP3 reels.
 **Architecture:** `src/deciwaves/engine/` is the (largely) game-agnostic core — archive/pack
 readers, the `GameProfile` config seam, and the shared tail of the catalog → selection →
 story_order → render pipeline (`selection`, `render`, and the game-free CSV-resume helpers in
-`catalog_io.py`); `src/deciwaves/games/{ds,hzd,fw}/` hold the per-game specializations,
-including each game's own `catalog` and (for DS) `story_order`. The three
+`catalog_io.py`); `src/deciwaves/games/{ds,hzd,fw,ds2}/` hold the per-game specializations,
+including each game's own `catalog` and (for DS) `story_order`. The four
 games share an engine, but each required a genuinely distinct extraction/binding solution —
 **true cross-game agnosticism is a non-goal**; the shared seam earns its keep only for what is
-genuinely common across all three. See [`docs/architecture.md`](docs/architecture.md) for the
+genuinely common across the games. The engine seam has grown by promotion, not by up-front
+design: `engine/gamescript.py`, `engine/subtitle_match.py` and `engine/asr_run.py` were each
+moved verbatim out of `games/fw/` behind a re-export shim once a second game needed them — that
+is the sanctioned way to share, since the repo keeps **zero cross-game imports**. See
+[`docs/architecture.md`](docs/architecture.md) for the
 full contributor-facing walkthrough (package layout, the `GameProfile` seam, the pipeline, and
 a one-pager per game).
 
@@ -51,6 +60,9 @@ variables rather than editing test code:
 
 - `DECIWAVES_DS_INSTALL` — path to a DS:DC install (enables DS integration tests).
 - `DECIWAVES_FW_INSTALL` — path to a Forbidden West install (enables FW integration tests).
+- `DECIWAVES_DS2_INSTALL` — path to a Death Stranding 2 install (enables DS2 integration tests;
+  `tests/conftest.py` derives `LocalCacheWinGame/package` from it). Without it the DS2 real-file
+  tests **skip silently**, so set it when reviewing anything touching the pack/graph layer.
 - `DECIWAVES_VGMSTREAM` / `DECIWAVES_VGAUDIO` — path to the Wwise `.wem` / ATRAC9 decoder
   executable (falls back to `PATH` lookup; several tests skip without one).
 - `DECIWAVES_DS_TRANSCRIPT` — path to a local DS narrative transcript, for the (optional)
@@ -82,6 +94,17 @@ installing, or invoke a stage module directly as `python -m deciwaves.<module>`.
    order. See [`.memories/hzd-pack-format.md`](.memories/hzd-pack-format.md),
    [`.memories/hzd-structural-binding.md`](.memories/hzd-structural-binding.md), and
    [`.memories/fw-streaming-graph.md`](.memories/fw-streaming-graph.md).
+4. **DS2 reuses FW's index but has no readable subtitles, so its story signal is ASR + a BYO
+   gamescript.** Its `streaming_graph.core` carries FW's *exact* `StreamingGraphResource` type hash
+   with a bounded layout delta (one extra group field, a trailing UUID array), but its **object**
+   serialization differs enough that the FW group reader fails on all 1,378 DS2 dialogue groups —
+   so exact subtitles are blocked (#370). Speaker and story order instead come from fuzzy-matching
+   a gamescript against per-clip ASR transcripts, which also yields the story/filler split (bound =
+   story). Matching is per **sentence**, not per turn: the game splits one scripted turn across
+   several clips, and matching whole turns collapses the bind rate from ~48% to ~1%. See
+   [`.memories/ds2-streaming-graph.md`](.memories/ds2-streaming-graph.md),
+   [`.memories/ds2-types-json.md`](.memories/ds2-types-json.md), and
+   [`.memories/ds2-gamescript-binding.md`](.memories/ds2-gamescript-binding.md).
 
 ## Constraints & gotchas
 

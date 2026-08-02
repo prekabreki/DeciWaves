@@ -55,9 +55,14 @@ reader -- but `match_subtitles` binds the *gamescript* to clips, and ASR transcr
 for the exact-subtitle label. So a DS2 chain of
 `extract -> asr -> match(gamescript) -> full-reel -> render` skips the blocked stage entirely.
 
-Design proposal, not yet verified in code: `match_subtitles` expects manifest rows with both
-`subtitle` and `transcript`, so a DS2 variant must decide what to use as the display label when
-only a transcript exists.
+**RESOLVED 2026-08-02 (#368, shipped).** The open question was what `match_subtitles` should use as
+the display label, since it expects rows with both `subtitle` and `transcript` and DS2 has no exact
+subtitle. The answer: `games/ds2/story_match.py` sets **`subtitle` to the transcript text** — the
+same string lands in both fields — so the matcher runs unmodified and the label is the ASR text.
+The chain shipped as `extract -> asr -> match` (no `full-reel`: that stage ships every
+*exact-subtitled* line and so depends on the blocked object reader; DS2's renderable set is exactly
+its bound lines). `match_subtitles`/`build_rows`/`split_sentences` now live in
+`engine/subtitle_match.py`, promoted out of `games/fw/` behind a re-export shim.
 
 ## Coverage gap: three story sections are stubs at the source
 
@@ -75,7 +80,7 @@ artifact:
 (`EPISODE 10 - ISOLATION` is thin but real at ~9.5 KB.) The other 14 story sections are
 substantial -- Ep 3: 269 lines, Ep 9: 254, Ep 7: 180.
 
-**Consequence for [[ds2-gamescript-binding]]'s consumer (#368):** clips belonging to those three
+**Consequence for the shipped matcher (#368):** clips belonging to those three
 episodes have nothing to match against, so they will fall through to whatever the unmatched path
 does. Do not read a low match rate there as a matcher bug -- it is missing input. Closing the gap
 needs a second transcript source, not a threshold change.
