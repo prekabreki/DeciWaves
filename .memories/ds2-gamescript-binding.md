@@ -1,5 +1,5 @@
 ---
-description: A BYO DS2 fan gamescript binds roughly half of DS2's clips to a speaker and a story position via ASR + sentence-level fuzzy match -- which unblocks story order and speakers WITHOUT the blocked object reader, provided matching is done per sentence rather than per speaker turn
+description: A BYO DS2 fan gamescript binds 40.7% of DS2's clips (MEASURED 2026-08-02, #386 -- not the ~48% first predicted) to a speaker and a story position via ASR + sentence-level fuzzy match, unblocking story order and speakers WITHOUT the blocked object reader, provided matching is per sentence not per speaker turn; the shortfall is missing audio in ~7 sections, not a matcher defect
 type: reference
 ---
 
@@ -17,6 +17,19 @@ BYO, never enters the repo -- see `docs/BYO.md`). Resolves the story-order quest
 - 289 bracketed narration lines (not dialogue; excluded from matching).
 - The file is clean UTF-8: it contains **zero** U+FFFD. Apparent mojibake when grepping it on
   Windows is the cp1252 console rendering en-dashes -- see [[windows-python-defaults-to-cp1252]].
+
+## The granularity mismatch runs BOTH ways
+
+1. **One scripted turn -> several clips.** The finding below; why sentence-level matching exists.
+2. **One clip -> several scripted sentences.** Confirmed by ear during the #386 spot-check
+   (2026-08-02): clips routinely carry more speech than the single sentence they bound to.
+
+(2) has a rate consequence: `match_subtitles` enforces "each clip used once", so when one clip voices
+several script sentences, only one of them can ever bind — the rest have their audio *inside an
+already-consumed clip* and are structurally unbindable. Not missing audio, not a scoring failure.
+This plausibly explains much of the gap between the ~5,270 script sentences that can reach >=80 and
+the 3,572 that actually bound. **Attribution stays correct** — 10/10 verified by ear, speaker and
+content both right.
 
 ## The finding that makes it work: match per SENTENCE, not per turn
 
@@ -69,10 +82,53 @@ behind the same BYO-gamescript gate as `match` and defaults to `--tiers 1,2` (DS
 `deciwaves ds2 run` produces the reel *set*; the single story-only MP3 needs an explicit
 `deciwaves ds2 render --single-file`.
 
-**The number in this file is still a PREDICTION.** The ~48% came from a 90-clip exploratory harness,
-never from the shipped `match` -- and as of 2026-08-02 no `out/ds2/` exists on the dev box, so the
-whole chain has produced nothing against the retail install. Reproducing it is **#386**; treat the
-bind rate here as a hypothesis until that run replaces these figures with measured ones.
+## MEASURED 2026-08-02 (#386): the real rate is 40.7%, not ~48%
+
+The whole chain ran against the retail install for the first time. **Use these numbers, not the
+~48% prediction above** (which came from a 90-clip exploratory harness, never from the shipped
+`match`):
+
+| Stage | Result |
+|---|---|
+| `extract` | `resolved=8776 ok=8757 skipped=12 failed=7` -> 8,769 rows, 3.1 GB WAV (reproduces #360 exactly) |
+| `asr` | `ok=8749 err=0` -> 8,769 transcripts, 5 empty, median speech_ratio 0.996 |
+| `match` | `joined=8769 script_lines=2547 bound=3572 tier1=3100 tier2=472 quests=59` |
+
+**3,572 / 8,769 = 40.7% bound.** Bind *quality* matched the prediction exactly: **65.9% score
+exactly 100.0**, median 100.0, 63 plausible speakers. Story order is clean — `gamescript_index`
+monotonic non-decreasing, 59 quest transitions for 59 quests (each section one contiguous block).
+
+### The 7-point shortfall is MISSING AUDIO, not a matcher defect
+
+It is concentrated in ~7 sections that have ample script text but bind ~nothing: `EPISODE 11 -
+QUAKE` (109 lines -> 7 clips), `EPISODE 15 - ON THE BEACH` (64 -> 7), `EPISODE 16 - TOMORROW`
+(57 -> 3), `EPISODE 13 - DIE HARD` (51 -> 1), `PROLOGUE` (40 -> 4), `THE GOVERNMENT'S BASE - OLD OZ`
+(26 -> 1), `ALL RAINY'S QUIZ` (18 -> 0). Together: 384 script lines, 23 clips. At the healthy
+~1.5 clips/line they would add ~575 — essentially the entire gap to 48%.
+
+Scoring every script sentence against **all** 8,276 eligible clips with the matcher's own scorer
+settles it:
+
+| | sentences | median best score vs ALL clips | reach >=80 |
+|---|---|---|---|
+| failing sections | 758 | **62** | 11% |
+| healthy sections | 10,184 | **81** | 51% |
+
+A median *ceiling* of 62 means no clip in the set voices that text. Ruled out: pre-rendered video
+(the install has zero `.bk2`/`.bik`/`.usm`/`.mp4`), and greedy starvation (median clips reachable at
+>=80 is **1** in both groups, so a denied sentence rarely had an alternative).
+
+**Lead on where it went:** `streaming_graph.core` indexes 241 files; dialogue resolves to the
+per-region `package.01.00.core.stream` voice files and only **7 of 9** yield clips — root 3,358,
+`l200_aus` 4,667, `l100_mex` 659, `l700_bea` **37**, `l400_nr1` 23, `l600_nr3` 13, `l500_nr2` 12,
+while **`remain` and `l800_fra` yield 0**. `l700_bea` is the Beach, where several unbound endgame
+episodes are set, and it gives 37 clips out of a 1.8 GB region. Suggests the dialogue-group
+enumeration under-reaches, rather than the content being absent from the install.
+
+**Also found:** `engine/subtitle_match.match_subtitles`' docstring promises "its best *free* clip",
+but the code takes `M.argmax(axis=1)` before the greedy pass and skips the sentence entirely when
+that one clip is used — no second-best fallback. Low impact here (see the median-1 figure), so it is
+a docs/robustness bug, not the cause.
 
 Because `build_rows` emits bound rows only, the unmatched remainder is **dropped from the manifest**,
 not ordered -- see [[ds2-story-order-signals]] and **#388**.
@@ -97,6 +153,12 @@ substantial -- Ep 3: 269 lines, Ep 9: 254, Ep 7: 180.
 episodes have nothing to match against, so they will fall through to whatever the unmatched path
 does. Do not read a low match rate there as a matcher bug -- it is missing input. Closing the gap
 needs a second transcript source, not a threshold change.
+
+**These three stubs are NOT the main coverage gap.** The #386 run (above) found ~7 *other* sections
+that fail for the opposite reason -- ample script text, no matching **audio** (Ep 11/13/15/16,
+PROLOGUE, OLD OZ, RAINY'S QUIZ). Two distinct failure modes, and the second costs far more clips:
+the stubs are missing *text*, those are missing *audio*. Do not conflate them when reading a
+per-section rate.
 
 Conformance of the file as a whole is high: 99.9% of its non-empty lines are recognised by
 `games.fw.gamescript.parse` (2,547 dialogue lines, 63 headers, 289 bracketed, only 3 dropped).

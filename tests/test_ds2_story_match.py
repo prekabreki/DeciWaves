@@ -169,3 +169,38 @@ def test_inner_join_middle_gap_binds_correct_text(tmp_path):
             assert r["subtitle"] == "the storm is getting closer"
     speakers = {r["speaker"] for r in rows}
     assert speakers == {"Sam"}
+
+
+def test_ds2_stage_splits_on_ellipsis(tmp_path):
+    """The DS2 stage must opt into `…` as a sentence terminator (issue #393).
+
+    Guards the CALLER wiring, not the engine: with the engine default the second
+    utterance stays glued to the first and its clip is stranded, so a passing
+    engine-level test says nothing about whether this stage passes the flag.
+    """
+    clip_index = tmp_path / "clip-index.csv"
+    transcripts = tmp_path / "transcripts.csv"
+    gamescript = tmp_path / "gamescript.md"
+    out = tmp_path / "story-manifest.csv"
+
+    _write_csv(clip_index, [
+        {"line_id": "c001", "wav": "audio/c001.wav"},
+        {"line_id": "c002", "wav": "audio/c002.wav"},
+    ], ["line_id", "wav"])
+    _write_csv(transcripts, [
+        {"line_id": "c001", "transcript": "no one else has taken on the order as of yet"},
+        {"line_id": "c002", "transcript": "I hope you'll at least consider it"},
+    ], ["line_id", "transcript"])
+    gamescript.write_text(
+        "Son: No one else has taken on the order as of yet… "
+        "I hope you'll at least consider it.\n", encoding="utf-8")
+
+    rc = story_match.main(["--clip-index", str(clip_index),
+                           "--transcripts", str(transcripts),
+                           "--gamescript", str(gamescript),
+                           "--out", str(out)])
+    assert rc == 0
+    bound = {r["line_id"] for r in _read_csv(out)}
+    assert bound == {"c001", "c002"}, (
+        "both utterances should bind once `…` splits the script turn; "
+        f"got {bound}")

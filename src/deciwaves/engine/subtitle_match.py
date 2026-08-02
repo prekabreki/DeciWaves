@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 
 import numpy as np
 from rapidfuzz import fuzz, process
@@ -30,12 +31,37 @@ from deciwaves.engine.text_normalize import normalize
 # the game shows one subtitle card per sentence. Split on sentence boundaries so
 # the granularity matches the subtitle clips (≈doubles recall vs whole-paragraph
 # matching, while keeping token_sort's length-sensitive precision).
-_SENTENCE = re.compile(r'(?<=[.!?])\s+(?=["(\'[]*[A-Z0-9])')
+#
+# Which characters END a sentence is per-gamescript, not universal, so it is a
+# parameter rather than a constant (issue #393). The default is ASCII-only and
+# is the historical behaviour: FW's binding is measured against it, so changing
+# the default would silently move FW's exact-subtitle matching.
+DEFAULT_TERMINATORS = ".!?"
+
+# DS2's gamescript uses U+2026 HORIZONTAL ELLIPSIS as a real sentence boundary
+# throughout ("...as of yet… I hope you'll at least consider it."). With the
+# ASCII-only set those stay glued into one match unit, which both depresses the
+# score (the unit carries text the clip never voices) and strands the following
+# clip with nothing to bind to. Measured on the #386 retail run: +196 binds
+# (3,572 -> 3,768) and 48 existing binds scoring higher. Three-dot "..." already
+# worked, because "." is in the default set; only the single codepoint was missed.
+ELLIPSIS_TERMINATORS = ".!?…"
 
 
-def split_sentences(text: str) -> list[str]:
-    """Split a script turn into sentences (kept in order). Always >=1 unit."""
-    parts = [p.strip() for p in _SENTENCE.split(text) if p.strip()]
+@lru_cache(maxsize=8)
+def _sentence_re(terminators: str) -> re.Pattern:
+    """Compiled splitter for a terminator set. Cached: `match_subtitles` calls
+    `split_sentences` once per script line, and recompiling per call is waste."""
+    return re.compile(rf'(?<=[{re.escape(terminators)}])\s+(?=["(\'[]*[A-Z0-9])')
+
+
+def split_sentences(text: str, terminators: str = DEFAULT_TERMINATORS) -> list[str]:
+    """Split a script turn into sentences (kept in order). Always >=1 unit.
+
+    ``terminators`` is the set of characters that end a sentence; it defaults to
+    ASCII ``.!?``. Pass `ELLIPSIS_TERMINATORS` for a gamescript that uses `…`.
+    """
+    parts = [p.strip() for p in _sentence_re(terminators).split(text) if p.strip()]
     return parts or [text.strip()]
 
 
@@ -53,19 +79,22 @@ class StoryBind:
 
 
 def match_subtitles(manifest_rows, script_lines, strong=90.0, accept=80.0,
-                    min_words=4):
+                    min_words=4, terminators=DEFAULT_TERMINATORS):
     """Bind gamescript lines to subtitle-clips (script->clip, token_sort, dedup).
 
     ``manifest_rows``: dicts with ``line_id``, ``wav``, ``subtitle``,
     ``transcript``. Returns `StoryBind`s for bound lines only, in script order.
-    A clip binds at most one script line; a script line takes its best free clip
-    with score >= ``accept`` (>= ``strong`` => tier "1"). ``min_words`` drops
-    short lines on both sides (a 2-word bark would match too many script slots).
+    A clip binds at most one script line; a script line takes its single best
+    clip if that clip is still free, and yields nothing if it is already taken
+    (there is no second-best fallback -- see #392). Score >= ``accept`` binds,
+    >= ``strong`` => tier "1". ``min_words`` drops short lines on both sides (a
+    2-word bark would match too many script slots). ``terminators`` selects the
+    sentence-splitting character set (see `split_sentences`).
     """
     # one matchable unit per script sentence; (index, ordinal) preserves order.
     s_rows = []
     for s in script_lines:
-        for ordinal, sent in enumerate(split_sentences(s.text)):
+        for ordinal, sent in enumerate(split_sentences(s.text, terminators)):
             nrm = normalize(sent)
             if len(nrm.split()) >= min_words:
                 s_rows.append((s.index, ordinal, s.speaker, s.quest, nrm))
