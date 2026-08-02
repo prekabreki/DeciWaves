@@ -22,6 +22,50 @@ from deciwaves.engine.parallel import default_jobs
 
 _CS_GROUP_RE = re.compile(r"sq_(cs\d+)_")
 
+# Decode-failure thresholds (issue #411). Per-clip decoding is deliberately fail-soft
+# so a few bad streams can't abort a multi-hour render -- but without a threshold the
+# run reports success at ANY failure rate. A real render once failed 3,593 of 5,439
+# clips (66%), printed a plausible duration and size, and exited 0.
+DECODE_WARN_FRACTION = 0.10
+DECODE_FAIL_FRACTION = 0.50
+# A fraction alone is meaningless at small N: 1 failure out of 2 clips is noise,
+# 3,593 out of 5,439 is a broken run. Below this many attempted clips the per-clip
+# summary line is the only signal, and partial success stays rc 0 as it always has.
+DECODE_MIN_ATTEMPTED = 20
+
+
+def _failure_fraction(n_decoded, n_failed):
+    """(attempted, fraction) or (attempted, None) when the sample is too small to judge."""
+    attempted = n_decoded + n_failed
+    if not n_failed or attempted < DECODE_MIN_ATTEMPTED:
+        return attempted, None
+    return attempted, n_failed / attempted
+
+
+def decode_failure_rc(rc, n_decoded, n_failed, errors_path):
+    """Escalate `rc` to 1 when decode failures exceed DECODE_FAIL_FRACTION.
+
+    The denominator is clips *attempted* (decoded + failed), NOT playlist rows --
+    segments dropped upstream by the selection or speech-trim filters were never
+    attempted and are not failures.
+    """
+    attempted, frac = _failure_fraction(n_decoded, n_failed)
+    if frac is None:
+        return rc
+    if frac >= DECODE_FAIL_FRACTION:
+        print(f"render: ERROR - {n_failed}/{attempted} clips ({frac:.0%}) failed to "
+              f"decode. This is not a successful render; see {errors_path}.")
+        return rc or 1
+    return rc
+
+
+def warn_decode_failures(n_decoded, n_failed, errors_path):
+    """Print a marked warning when failures exceed DECODE_WARN_FRACTION."""
+    attempted, frac = _failure_fraction(n_decoded, n_failed)
+    if frac is not None and frac >= DECODE_WARN_FRACTION:
+        print(f"render: WARNING - {n_failed}/{attempted} clips ({frac:.0%}) failed "
+              f"to decode; the output is missing that audio. See {errors_path}.")
+
 
 def _cs_group_of(scene):
     m = _CS_GROUP_RE.match(scene)
@@ -119,9 +163,15 @@ def main(argv=None):
                          "filler, auto-picks the highest standard MP3 bitrate "
                          "that fits --target-mb, and prints the chosen kbps + "
                          "predicted size before encoding (ignores --bitrate)")
-    ap.add_argument("--speech-trim", default="",
+    ap.add_argument("--speech-trim", default=None,
                     help="path to cutscene-keepspans.csv: trim cutscene tracks "
-                         "to spoken regions; drop pure-grunt tracks. Empty = disabled")
+                         "to spoken regions; drop pure-grunt tracks. Omit = use the "
+                         "packaged ds/cutscene-keepspans.csv; pass '' to disable")
+    ap.add_argument("--curated", action="store_true",
+                    help="the playlist IS the selection: render its rows verbatim, "
+                         "skipping the is_side / non-story-cutscene filters. For "
+                         "externally curated playlists whose row order and membership "
+                         "are authoritative (silence trimming still applies)")
     ap.add_argument("--bitrate", type=int, default=DEFAULT_BITRATE_KBPS,
                     help="MP3 CBR bitrate in kbps (drives both encode and the "
                          "byte-budget packing math). Lower = fewer files; speech is "
@@ -156,14 +206,20 @@ def main(argv=None):
               f"`deciwaves ds order` to create it first.")
         return 1
     n_rows = len(rows)
-    if args.main_story:
+    if args.curated:
+        # The curated playlist IS the selection -- an external pass already decided
+        # membership and order, so re-applying is_side / non-story-cutscene culls here
+        # would silently discard deliberately-kept material (issue #406).
+        print(f"curated: rendering all {n_rows} playlist rows verbatim "
+              f"(selection filters skipped)")
+    if args.main_story and not args.curated:
         kept = main_story_only(rows, non_story_cs_groups=em.NON_STORY_CS_GROUPS,
                                group_of=em.cs_group)
         print(f"main-story filter: kept {len(kept)}/{n_rows} segments "
               f"(dropped {n_rows - len(kept)} side + non-story cutscene groups "
               f"{sorted(em.NON_STORY_CS_GROUPS)})")
         rows = kept
-    if args.single_file:
+    if args.single_file and not args.curated:
         # Deliverable 1 is story-only: drop filler BEFORE decode so the decode
         # budget isn't spent on lines that can't ship. Zero story lines is a
         # failure (rc 1), not a 0-byte no-op -- and drops a stale errors log
@@ -185,15 +241,31 @@ def main(argv=None):
         rows = kept
     stem = file_stem(args.main_story or args.single_file)
 
-    if args.speech_trim and not os.path.isfile(args.speech_trim):
-        print(f"render: --speech-trim path not found: {args.speech_trim} "
-              f"(pass a real cutscene-keepspans.csv, or omit --speech-trim to "
+    # `None` (flag omitted) -> the packaged keepspans; `""` -> explicitly disabled.
+    # This MUST stay an `is None` test: "" is falsy, so `args.speech_trim or packaged()`
+    # would swallow the explicit-disable case and look correct (issue #408). Omitting the
+    # trim on DS costs ~51 minutes of pure dead air, because DS cutscenes are whole-scene
+    # tracks that play their non-speech gameplay audio in full.
+    speech_trim, trim_source = args.speech_trim, "explicit"
+    if speech_trim is None:
+        from deciwaves import data
+        try:
+            speech_trim, trim_source = str(data.packaged("ds/cutscene-keepspans.csv")), "packaged default"
+        except FileNotFoundError:
+            speech_trim = ""
+            print("render: WARNING - ds/cutscene-keepspans.csv isn't bundled in this "
+                  "build, so cutscenes will render UNTRIMMED, including their "
+                  "non-speech gameplay audio. Pass --speech-trim <path> to fix.")
+    if speech_trim and not os.path.isfile(speech_trim):
+        print(f"render: --speech-trim path not found: {speech_trim} "
+              f"(pass a real cutscene-keepspans.csv, or pass --speech-trim '' to "
               f"disable trimming)")
         return 1
-    keepspans = load_keepspans(args.speech_trim) if args.speech_trim else {}
+    keepspans = load_keepspans(speech_trim) if speech_trim else {}
     if keepspans:
         n_drop = sum(1 for s in rows if keepspans.get(s.stream_path, (None, False))[1])
-        print(f"speech-trim: {len(keepspans)} tracks in map; {n_drop} segments will be dropped")
+        print(f"speech-trim: {len(keepspans)} tracks in map ({trim_source}); "
+              f"{n_drop} segments will be dropped")
 
     decode_segs = [s for s in rows
                    if not (keepspans.get(s.stream_path) and keepspans[s.stream_path][1])]
@@ -217,13 +289,14 @@ def main(argv=None):
             decode_segs, _decode, gap_key=lambda s: s.scene, err_key=lambda s: s.stream_path,
             errors_path=args.errors, catch=audio_clip.ClipError, jobs=args.jobs)
         print(f"render: decoded {len(decoded)} clips, {n_failed} failed (see {args.errors})")
+        warn_decode_failures(len(decoded), n_failed, args.errors)
 
     columns = ReelColumns(
         header=["timestamp", "episode", "category", "speaker", "subtitle", "line_id"],
         row_of=lambda s, t: [format_ts(t), s.episode, s.category, s.speaker, s.subtitle,
                              s.line_id])
     if args.single_file:
-        return finish_single_file(
+        rc = finish_single_file(
             decode_segs, n_rows == 0, args.errors,
             msg_empty_input=(
                 f"render: ERROR - {args.playlist} has no rows -- upstream "
@@ -251,10 +324,14 @@ def main(argv=None):
             durations=decoded,
             out_dir=args.out_dir, cache_dir=args.cache, stem=stem, columns=columns,
             gap_key=lambda s: s.scene,
-            story_predicate=(lambda s: is_story(
-                s, em.NON_STORY_CS_GROUPS, em.cs_group)),
+            # --curated: the playlist is authoritative, so every row is "story" here.
+            # finish_single_file applies this predicate a SECOND time, after the
+            # pre-decode filter above -- both must be neutralised (issue #406).
+            story_predicate=((lambda s: True) if args.curated else (lambda s: is_story(
+                s, em.NON_STORY_CS_GROUPS, em.cs_group))),
             _assemble=assemble_single_file, unit_label="segments")
-    return finish_render(
+        return decode_failure_rc(rc, len(decoded), n_failed, args.errors)
+    rc = finish_render(
         decode_segs, n_rows == 0, args.errors,
         msg_empty_input=(
             f"render: ERROR - {args.playlist} has no rows -- upstream "
@@ -284,6 +361,7 @@ def main(argv=None):
         gap_key=lambda s: s.scene,
         _assemble=assemble_reels, concat_kwargs={"kbps": args.bitrate},
         unit_label="segments")
+    return decode_failure_rc(rc, len(decoded), n_failed, args.errors)
 
 
 if __name__ == "__main__":
