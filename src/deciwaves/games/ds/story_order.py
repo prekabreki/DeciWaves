@@ -61,6 +61,48 @@ def _section_for(category):
 
 _UNPARSEABLE_CS_KEY = 1e6  # sentinel: sorts after every real anchor/hint/cs-number
 
+# An unanchored cutscene scene sits this far behind its predecessor: enough to keep the
+# sequence strictly increasing, too little for any real anchor to sort into the gap.
+_CS_GLUE = 1e-6
+
+
+def _cutscene_scene_pos(scenes, anchors, base):
+    """Positions for one cutscene group's scenes, keyed by scene name.
+
+    Within a group the game's own s-number is the sequence, not the text anchor: a scene
+    with little distinctive dialogue (a non-verbal crash, a one-line title card) matches
+    the transcript weakly or not at all and drifts (#413). So the group's anchored
+    positions are kept -- they are what spreads a group across the gameplay between its
+    scenes, and that interleaving is load-bearing -- but they are re-dealt to the scenes
+    in s-number order rather than each scene keeping the one it matched.
+
+    A scene with no anchor of its own glues to its predecessor instead of claiming a
+    synthetic slot at `base + s_number * 1e-3`. That synthetic slot was a fake precision:
+    it opened a gap up to several units wide inside a group, and any mission or terminal
+    scene whose own anchor landed in it sorted into the middle of a continuous cinematic.
+    """
+    # scene_number falls back to (0,) for a name with no digits, so an unparseable scene
+    # sorts first rather than arbitrarily; the name is an explicit tiebreak, so the order
+    # is independent of set-iteration order and hash seed.
+    ordered = sorted(scenes, key=lambda sc: (float(em.scene_number(sc)[-1]), sc))
+    anchored = sorted(a for a in (anchors.get(sc) for sc in ordered) if a is not None)
+    # a group whose leading scenes are all unanchored starts at its first real anchor,
+    # not at the group median -- the median can sit far ahead of where the group opens
+    seed = anchored[0] if anchored else base
+    vals = iter(anchored)
+
+    out, prev = {}, None
+    for sc in ordered:
+        if anchors.get(sc) is not None:
+            v = next(vals)
+        else:
+            v = seed if prev is None else prev
+        if prev is not None and v <= prev:
+            v = prev + _CS_GLUE
+        out[sc] = v
+        prev = v
+    return out
+
 
 def order_cutscene_groups(group_anchors):
     """Cutscene groups ordered by transcript anchor; else CS_ORDER_HINT; else the numeric
@@ -135,14 +177,24 @@ def build_playlist(catalog_rows, cutscene_rows, anchor_index):
 
     segs = []
 
-    # 3. cutscene segments from track rows
-    for r in cutscene_rows:
-        if r.get("status") != "resolved" or not r.get("voice_track_stream"):
-            continue
+    # 3. cutscene segments from track rows.
+    # Positions are assigned per GROUP (see _cutscene_scene_pos) rather than per scene,
+    # so a group's scenes come out in s-number order and stay flush against each other
+    # where the anchor cannot tell them apart.
+    resolved = [r for r in cutscene_rows
+                if r.get("status") == "resolved" and r.get("voice_track_stream")]
+    cs_scenes = defaultdict(set)
+    for r in resolved:
+        cs_scenes[em.cs_group(r["scene"]) or "cs00"].add(r["scene"])
+    cs_pos = {}
+    for g, scs in cs_scenes.items():
+        cs_pos.update(_cutscene_scene_pos(
+            scs, {sc: scene_anchor.get(("cutscene", sc)) for sc in scs}, group_pos(g)))
+
+    for r in resolved:
         sc = r["scene"]
         g = em.cs_group(sc) or "cs00"
-        a = scene_anchor.get(("cutscene", sc))
-        pos = a if a is not None else group_pos(g) + em.scene_number(sc)[-1] * 1e-3
+        pos = cs_pos[sc]
         segs.append(Segment(
             episode=ep_index.get(g, 0), is_side=0, pos=float(pos),
             section=SECTION["cutscene"], scene=sc, line_index=0,
