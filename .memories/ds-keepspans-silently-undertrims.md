@@ -26,29 +26,47 @@ under-estimate of delivery). Three things must be right or it false-positives:
   83.2 s / 20.7 s). Per-track comparison flags healthy scenes as broken;
 - healthy scenes score `speech_ratio` **0.76–0.89**.
 
-## The six DS1 scenes, and the two distinct causes
+## RESOLVED 2026-08-05: the oracle over-counts; only TWO scenes were really broken
 
-ASR under-detection (low ratio — regenerating keepspans should recover these):
+The words-vs-duration check flags two different things and only one is a defect. To tell
+them apart, render the scene with `--speech-trim ''` and measure the UNTRIMMED track.
+Doing that overturned the first reading of these numbers.
 
-| scene | ratio | kept | needs |
+**Not a defect -- the source track is simply shorter than its subtitle text.** Six
+scenes. `sq_cs00_s00100` (the rope/stick opening narration) is a **25.8 s track, and
+keepspans already keeps 24.7 s of it -- 96%.** It was never trimmed short. Its
+`speech_ratio` of 0.132 looks alarming because that field is speech/total, but the kept
+SPAN is essentially the whole track. Same story for `sq_cs03_s01300` (31.6 s track),
+`sq_cs08_s00100` (163.3 s), `sq_cs06_s00350` (185.9 s), `sq_cs08_s01300` (296.4 s),
+`sq_cs07_s00700` (82.0 s). The catalog holds more subtitle lines than a track's audio
+contains -- alternate takes and variants -- so the word count over-estimates.
+
+**So: a low `speech_ratio` is NOT evidence of truncation. Compare kept span against
+TRACK LENGTH, never against word count.**
+
+**A real defect -- `dropped=1` with `speech_ratio 0.0` on a track that does carry
+dialogue.** ASR found no speech at all, so the row never renders:
+
+| scene | track | audible | what it is |
 |---|---|---|---|
-| `sq_cs00_s00100` | 0.132 | 24.7 s | ~40 s — **the rope/stick opening narration** |
-| `sq_cs03_s01300` | 0.212 | 21.5 s | ~237 s |
+| `sq_cs10_s00700` | 27.1 s, peak -21 dBFS | 1.04 s | Sam's "Lou." / "Louise." -- **the game's final beat** |
+| `sq_cs03_s01000` | 10.0 s, peak -26.6 dBFS | 3.3 s | Cliff's "BB. BB." |
 
-Source shorter than its subtitles (healthy ratio, so trim is NOT the cause — the track
-does not contain the audio; do **not** "fix" by padding spans, that fabricates audio):
+`sq_cs10_s00700` had **never rendered in any reel** -- checked v4, v5b and v6. Two quiet
+words in a long near-silent track are exactly what an ASR gate discards.
 
-| scene | ratio | kept | short by |
-|---|---|---|---|
-| `sq_cs08_s00100` | 0.840 | 141.7 s | −251 s |
-| `sq_cs06_s00350` | 0.886 | 169.9 s | −170 s |
-| `sq_cs08_s01300` | 0.761 | 285.1 s | −35 s |
-| `sq_cs07_s00700` | 0.774 | 74.3 s | −11 s |
+## The repair, and its limits
 
-`sq_cs03_s01300` is ambiguous: its full untrimmed track is only ~101 s (21.5 / 0.212)
-against ~237 s of subtitles, so even disabling trim does not rescue it — it may belong in
-the second group. A live alternative hypothesis for group two is that the catalog holds
-alternate takes, inflating the word count.
+An **RMS level gate** (-50 dBFS over 20 ms windows, 0.35 s padding, 0.5 s merge) finds
+these, because it measures level rather than recognising words.
+`scripts/ds1_patch_keepspans.py` in the workspace writes a patched copy to pass via
+`--speech-trim`; the packaged data is left alone.
+
+Use it **only** on `dropped=1` rows, and guard it. Applied to the six shorter-track
+scenes it made every single one WORSE (`sq_cs07_s00700` 74.3 s -> 39.8 s) and shattered
+them into 16-51 spans, which would sound chopped. The gate cannot distinguish speech from
+any other sound and will cut mid-word at every brief dip -- ASR's ability to reject
+non-speech is exactly what earns it its place on the other 162 rows.
 
 Related: [[ds-speech-trim-is-load-bearing]], [[ds-cutscene-audio]],
 [[ds-speech-spans-multiple-lines]].
