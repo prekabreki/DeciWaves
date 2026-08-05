@@ -142,6 +142,65 @@ def test_cutscene_scenes_ordered_by_anchor_not_csnumber():
     assert [s.episode for s in segs if s.scene == "sq_cs53_s0"][0] == 1  # rank 1 of 3
 
 
+def test_cutscene_scenes_ordered_by_snumber_within_group():
+    # #413: within a group the s-number is the game's own sequence. A low-text scene
+    # (a non-verbal crash, a one-line title card) matches the transcript weakly or not
+    # at all, so its individual anchor must not override that sequence.
+    idx = {"the first prologue scene line": 90, "the third prologue scene line": 10}
+    crows = [_crow("sq_cs00_s00100", "a.stream"), _crow("sq_cs00_s00200", "b.stream"),
+             _crow("sq_cs00_s00300", "c.stream")]
+    catalog = [
+        _row(category="cutscene", scene="sq_cs00_s00100",
+             subtitle_en="The first prologue scene line"),
+        _row(category="cutscene", scene="sq_cs00_s00300",
+             subtitle_en="The third prologue scene line"),
+    ]
+    segs, _ = so.build_playlist(catalog, crows, idx)
+    order = [s.scene for s in segs if s.category == "cutscene"]
+    # anchors alone would give s00300 (10) before s00100 (90), and would strand the
+    # unanchored s00200 at a synthetic slot of its own
+    assert order == ["sq_cs00_s00100", "sq_cs00_s00200", "sq_cs00_s00300"]
+
+
+def test_unanchored_cutscene_scene_admits_no_wedge():
+    # The prologue defect: an unanchored cutscene scene used to claim a synthetic
+    # position `group_pos + s_number * 1e-3`, opening a gap wide enough for a mission
+    # block to sort into the middle of a continuous cinematic. A scene with no anchor
+    # of its own must sit flush against its predecessor instead.
+    idx = {"the opening prologue narration line": 48,
+           "central wasnt just home to bridges hq": 48,
+           "it was also the seat of the movement": 49}
+    crows = [_crow("sq_cs00_s00100", "a.stream"), _crow("sq_cs00_s01000", "b.stream"),
+             _crow("sq_cs00_s02000", "c.stream")]
+    catalog = [
+        _row(category="cutscene", scene="sq_cs00_s00100",
+             subtitle_en="The opening prologue narration line"),
+        # anchors at median(48, 49) = 48.5 -- inside the old synthetic band [48.0, 50.0]
+        _row(category="mission", scene="lines_m00020", line_index="0",
+             subtitle_en="Central wasnt just home to Bridges HQ"),
+        _row(category="mission", scene="lines_m00020", line_index="1",
+             subtitle_en="It was also the seat of the movement"),
+    ]
+    segs, _ = so.build_playlist(catalog, crows, idx)
+    cats = [s.category for s in segs]
+    first_cs, last_cs = cats.index("cutscene"), len(cats) - 1 - cats[::-1].index("cutscene")
+    assert cats[first_cs:last_cs + 1] == ["cutscene"] * 3, (
+        f"non-cutscene wedged into the cutscene run: {[(s.category, s.scene) for s in segs]}")
+
+
+def test_cutscene_scene_pos_is_deterministic_for_unparseable_names():
+    # #413 constraint: a scene name with no s-number must keep a deterministic position,
+    # not fall to set-iteration order.
+    scenes = {"sq_cs00_odd", "sq_cs00_s00100", "sq_cs00_other"}
+    anchors = {"sq_cs00_s00100": 5.0}
+    a = so._cutscene_scene_pos(scenes, anchors, 5.0)
+    b = so._cutscene_scene_pos(set(reversed(list(scenes))), anchors, 5.0)
+    assert a == b
+    order = sorted(a, key=lambda s: a[s])
+    assert order == ["sq_cs00_odd", "sq_cs00_other", "sq_cs00_s00100"]
+    assert len(set(a.values())) == 3, "positions must stay distinct and strictly increasing"
+
+
 def test_side_sections_follow_spine_within_episode():
     crows = [_crow("sq_cs00_s00100", "cs.stream")]
     rows = [_row(category="mission", scene="lines_m00010", subtitle_en="A mission spine line."),
