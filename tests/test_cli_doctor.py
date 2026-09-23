@@ -537,3 +537,40 @@ def test_doctor_text_output_unchanged_without_json_flag(tmp_path, monkeypatch, c
     assert rc == 0
     assert "[ok]" in out
     assert out.startswith("[ok]") or out.startswith("[--]")
+
+
+# --- check_workspace (issue #394) ------------------------------------------
+
+def test_check_workspace_reports_cwd_fallback_as_not_configured(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    c = doctor.check_workspace(None, {})
+    assert c.status is doctor.Availability.NOT_CONFIGURED and c.ok
+    assert str(tmp_path) in c.detail and "(cwd" in c.detail
+
+
+def test_check_workspace_reports_configured_source(tmp_path):
+    c = doctor.check_workspace(None, {"workspace": str(tmp_path / "ws")})
+    assert c.status is doctor.Availability.OK
+    assert c.detail == f"workspace: {tmp_path / 'ws'} (config)"
+
+
+def test_check_workspace_explicit_beats_configured(tmp_path):
+    c = doctor.check_workspace(str(tmp_path / "cli"), {"workspace": str(tmp_path / "ws")})
+    assert c.detail == f"workspace: {tmp_path / 'cli'} (--workspace)"
+
+
+def test_check_workspace_that_is_a_file_is_broken(tmp_path):
+    (tmp_path / "ws").write_text("not a dir", encoding="utf-8")
+    c = doctor.check_workspace(None, {"workspace": str(tmp_path / "ws")})
+    assert c.status is doctor.Availability.BROKEN and not c.ok
+    assert "setup --workspace" in c.fix
+
+
+def test_doctor_cli_reports_configured_workspace(tmp_path, monkeypatch, capsys):
+    """`deciwaves doctor` (through main) prints the effective workspace and its source."""
+    from deciwaves.cli import main as cli
+    config.save({"workspace": str(tmp_path / "ws")})
+    cli.main(["doctor"])
+    assert f"[ok] workspace: {tmp_path / 'ws'} (config)" in capsys.readouterr().out
+    cli.main(["--workspace", str(tmp_path / "other"), "doctor"])
+    assert f"[ok] workspace: {tmp_path / 'other'} (--workspace)" in capsys.readouterr().out

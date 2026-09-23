@@ -358,3 +358,56 @@ def test_raising_stage_does_not_swallow_systemexit(monkeypatch, tmp_path):
     with pytest.raises(SystemExit) as exc:
         cli.main(["--workspace", str(tmp_path), "ds", "catalog"])
     assert exc.value.code == 0
+
+
+# --- configured workspace (issue #394) --------------------------------------
+
+def _record_stage(monkeypatch):
+    seen = {}
+
+    def _stage(argv):
+        seen["cwd"], seen["argv"] = os.getcwd(), argv
+        return 0
+
+    monkeypatch.setattr(cli, "_import_stage", lambda mod: _stage)
+    return seen
+
+
+def test_configured_workspace_used_when_no_workspace_flag(monkeypatch, tmp_path):
+    """`deciwaves setup --workspace DIR` then a stage run from elsewhere must write
+    under DIR, not under the invocation dir (the repo checkout, in the bug)."""
+    invocation, ws = tmp_path / "checkout", tmp_path / "ws"
+    invocation.mkdir()
+    monkeypatch.chdir(invocation)
+    assert cli.main(["setup", "--workspace", str(ws), "--skip-downloads",
+                     "--tools-dir", str(tmp_path / "tools")]) in (0, 1)
+    seen = _record_stage(monkeypatch)
+
+    assert cli.main(["ds2", "match"]) == 0
+    assert seen["cwd"] == str(ws)
+
+
+def test_explicit_workspace_beats_configured(monkeypatch, tmp_path):
+    from deciwaves.cli import config
+    config.save({"workspace": str(tmp_path / "configured")})
+    seen = _record_stage(monkeypatch)
+
+    assert cli.main(["--workspace", str(tmp_path / "explicit"), "ds2", "match"]) == 0
+    assert seen["cwd"] == str(tmp_path / "explicit")
+
+
+def test_configured_workspace_keeps_relative_path_flag_on_invocation_dir(monkeypatch, tmp_path, capsys):
+    """The #32/#44 sharp edge: a configured workspace moves "relative" exactly like
+    an explicit one, so a relative --gamescript that exists where the user ran
+    `deciwaves` must be pinned there before the chdir, not looked up in the workspace."""
+    from deciwaves.cli import config
+    invocation, ws = tmp_path / "here", tmp_path / "ws"
+    invocation.mkdir()
+    (invocation / "script.md").write_text("x", encoding="utf-8")
+    config.save({"workspace": str(ws)})
+    monkeypatch.chdir(invocation)
+    seen = _record_stage(monkeypatch)
+
+    assert cli.main(["ds2", "match", "--gamescript", "script.md"]) == 0
+    assert seen["cwd"] == str(ws)
+    assert seen["argv"] == ["--gamescript", str(invocation / "script.md")]

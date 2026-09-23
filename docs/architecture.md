@@ -180,8 +180,10 @@ guided interactive flow (see below).
   that stage's own module, not the CLI layer. Each stage's curated `help_text` is rendered
   as its game subparser's epilog, so `deciwaves ds --help` (etc.) shows the one-line
   description for every stage, not just the bare stage-name list (issue #32).
-- **Workspace.** `--workspace` (default `.`; must come *before* the game name — placed
-  after it, it's swallowed as that stage's own argument instead) is resolved to an absolute
+- **Workspace.** `--workspace` (must come *before* the game name — placed after it, it's
+  swallowed as that stage's own argument instead; omitted, `config.resolve_workspace()` falls
+  back to the `workspace` saved by `deciwaves setup --workspace`, then to `.`, issue #394 —
+  and `absolutize_existing_paths()` below is given that same resolved value) is resolved to an absolute
   path, created if it doesn't exist, and the process `chdir`s into it before a stage runs —
   one shared `config.enter_workspace()` helper, used by both `main.py`'s stage dispatch and
   guided mode's end-of-flow dispatch (issue #32; previously duplicated in both places).

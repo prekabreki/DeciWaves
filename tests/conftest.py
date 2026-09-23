@@ -62,6 +62,16 @@ def _isolate_cwd(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
 
+@pytest.fixture(autouse=True)
+def _isolate_config(tmp_path, monkeypatch):
+    """Every test reads/writes its own empty config dir, never the developer's real
+    %LOCALAPPDATA%\\DeciWaves\\config.json (issue #394). A saved ``workspace`` there
+    would otherwise make every `main()` call that omits --workspace chdir into the
+    real workspace and write test output into it. Tests that set
+    DECIWAVES_CONFIG_DIR themselves still override this."""
+    monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(tmp_path / "_isolated_config"))
+
+
 # Core fixtures live under out/ (gitignored, derived from the install). Skip
 # rather than error when absent -- regenerate on the install machine with
 # `./.venv/Scripts/python.exe tools/regenerate-fixtures.py`.

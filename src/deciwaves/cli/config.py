@@ -8,7 +8,7 @@ from typing import NamedTuple, Optional
 from deciwaves.engine.atomic_io import atomic_write
 from deciwaves.engine.coverage import read_json_object
 
-KEYS = ("tools_dir", "ds_install", "hzd_package", "fw_package", "ds2_package", "oodle_dll", "fw_gamescript", "fw_types", "ds2_gamescript")
+KEYS = ("tools_dir", "ds_install", "hzd_package", "fw_package", "ds2_package", "oodle_dll", "fw_gamescript", "fw_types", "ds2_gamescript", "workspace")
 
 # --- decode tool metadata -------------------------------------------------
 # Single source of truth for the three decode tools `deciwaves setup` fetches.
@@ -279,6 +279,33 @@ def _refuse_ambiguous_path(token: str, cwd_candidate: str, workspace_candidate: 
 
 def _print_resolution_notice(original: str, resolved: str) -> None:
     print(f"resolved {original} -> {resolved} (invocation dir)")
+
+class Workspace(NamedTuple):
+    path: str    # the workspace as given (explicit/configured) or "." -- not yet resolved
+    source: str  # "--workspace" | "config" | "cwd": where *path* came from, for doctor
+
+
+def resolve_workspace(explicit, cfg: dict) -> Workspace:
+    """The workspace a CLI run writes under, and where it came from (issue #394).
+
+    Resolution order: an explicit ``--workspace`` > the ``workspace`` saved by
+    ``deciwaves setup --workspace`` > the current directory. The last keeps the
+    pre-#394 behaviour for anyone who never configured one. *explicit* is
+    ``None`` when ``--workspace`` was not passed at all -- an explicit value
+    always wins, even one naming the cwd.
+
+    The returned path is what both `absolutize_existing_paths` and
+    `enter_workspace` must be given, so a configured workspace moves
+    "relative" out from under a stage's path flags exactly like an explicit
+    one does -- a relative ``--gamescript`` that exists under the invocation
+    dir still resolves there, not inside the configured workspace.
+    """
+    if explicit is not None:
+        return Workspace(explicit, "--workspace")
+    if cfg.get("workspace"):
+        return Workspace(cfg["workspace"], "config")
+    return Workspace(".", "cwd")
+
 
 def enter_workspace(workspace) -> Path:
     """Resolve *workspace* to an absolute path, create it, and chdir into it.
