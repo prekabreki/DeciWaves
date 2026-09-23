@@ -86,3 +86,34 @@ def test_read_by_hash_missing_raises_keyerror():
 def test_read_and_read_by_hash_agree():
     idx = _make_index({"a/b.core": b"payload-bytes"})
     assert idx.read("a/b.core") == idx.read_by_hash(file_hash("a/b.core"))
+
+
+# ---------------------------------------------------------------------------
+# Empty-data-dir construction (issue #414): a data_dir with no .bin archives must
+# fail fast and name the directory, instead of silently building an empty index
+# that later blames every individual stream.
+# ---------------------------------------------------------------------------
+
+def test_empty_data_dir_raises_naming_the_dir(tmp_path):
+    empty_dir = tmp_path / "install_root"
+    empty_dir.mkdir()
+    with pytest.raises(FileNotFoundError, match=str(empty_dir)):
+        PackIndex(str(empty_dir), "unused")
+
+
+def test_data_dir_with_unrelated_files_still_raises(tmp_path):
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "readme.txt").write_text("not an archive")
+    with pytest.raises(FileNotFoundError):
+        PackIndex(str(data_dir), "unused")
+
+
+def test_data_dir_with_one_bin_does_not_raise_on_empty_check(tmp_path):
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "archive.bin").write_bytes(b"not a real archive, just needs to exist")
+    # A real (unparseable) .bin still fails, but on archive parsing, not the empty-dir guard.
+    with pytest.raises(Exception) as exc_info:
+        PackIndex(str(data_dir), "unused")
+    assert "no .bin archives found" not in str(exc_info.value)

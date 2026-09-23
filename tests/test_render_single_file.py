@@ -6,6 +6,7 @@ import pytest
 
 from deciwaves.engine import render as rs
 from deciwaves.games.ds.story_order import Segment
+from conftest import write_empty_bin_archive
 
 
 # --- helpers (mirroring the existing render-test style; these files are new,
@@ -259,6 +260,7 @@ def test_fw_is_story_requires_gamescript_bound_speaker():
 def _ds_render_argv(tmp_path, playlist, extra=()):
     data_dir = tmp_path / "data"
     data_dir.mkdir(exist_ok=True)
+    write_empty_bin_archive(data_dir)
     return [
         "--data-dir", str(data_dir),
         "--oodle", str(tmp_path / "fake_oodle.dll"),
