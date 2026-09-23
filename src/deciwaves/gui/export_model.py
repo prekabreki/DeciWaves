@@ -26,6 +26,7 @@ from dataclasses import dataclass
 
 from deciwaves.cli.config import resolve_ds_install
 from deciwaves.engine.atomic_io import atomic_write
+from deciwaves.engine.catalog_io import classify_ids, format_id_sample
 from deciwaves.gui.artifact_paths import out_dir, pipeline_render_input
 from deciwaves.gui.cli_command import build_cli_command
 
@@ -322,26 +323,15 @@ def import_order(workspace: str, game: str, src_csv: str) -> ImportResult:
             "no lines to import (the file has no line_id values)."])
 
     errors: list[str] = []
-    seen: dict[str, int] = {}
-    unknown: list[tuple[str, int]] = []
-    dupes: list[tuple[str, int]] = []
-    for lid, n in ordered:
-        if lid in seen:
-            dupes.append((lid, n))
-        else:
-            seen[lid] = n
-            if lid not in by_id:
-                unknown.append((lid, n))
+    unknown, dupes = classify_ids(ordered, by_id)
 
     if unknown:
-        sample = ", ".join(f"{lid} (row {n})" for lid, n in unknown[:5])
-        msg = f"{len(unknown)} line_id(s) not in {game}'s current lines: {sample}"
-        if len(unknown) == len(seen):  # every distinct id is unknown
+        msg = f"{len(unknown)} line_id(s) not in {game}'s current lines: {format_id_sample(unknown)}"
+        if len(unknown) == len({lid for lid, _ in ordered}):  # every distinct id is unknown
             msg += " -- none match; are you on the right game, and did you Scan first?"
         errors.append(msg)
     if dupes:
-        sample = ", ".join(f"{lid} (row {n})" for lid, n in dupes[:5])
-        errors.append(f"{len(dupes)} duplicate line_id(s) (a line can't play twice): {sample}")
+        errors.append(f"{len(dupes)} duplicate line_id(s) (a line can't play twice): {format_id_sample(dupes)}")
     if errors:
         return ImportResult(False, None, 0, errors)
 

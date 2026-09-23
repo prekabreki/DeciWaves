@@ -68,6 +68,34 @@ def read_csv_rows(path, *, required=None, tolerant=False):
         raise
 
 
+def classify_ids(ordered, known):
+    """Split an ordered ``[(id, row_number), ...]`` list into its ``(unknown, dupes)``
+    problems, each a list of ``(id, row_number)`` in file order.
+
+    ``unknown``: the first occurrence of every id absent from *known*. ``dupes``: every
+    occurrence after the first of an id seen earlier (whether known or not). Comparison is
+    exact -- callers strip whitespace before calling. The one shared home for the two
+    checks that gate a user- or agent-edited manifest against its source: the GUI's
+    order import (``gui.export_model.import_order``) and ``deciwaves verify-manifest``.
+    """
+    seen = set()
+    unknown, dupes = [], []
+    for lid, n in ordered:
+        if lid in seen:
+            dupes.append((lid, n))
+        else:
+            seen.add(lid)
+            if lid not in known:
+                unknown.append((lid, n))
+    return unknown, dupes
+
+
+def format_id_sample(items, limit=5):
+    """``"id (row n), ..."`` for the first *limit* ``(id, row_number)`` pairs -- the example
+    list both manifest gates print after a problem count."""
+    return ", ".join(f"{lid} (row {n})" for lid, n in items[:limit])
+
+
 def read_line_ids(path):
     """One ``line_id`` per line from a plain-text id list, blanks skipped.
 

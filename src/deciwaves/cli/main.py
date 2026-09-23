@@ -126,7 +126,7 @@ def main(argv=None) -> int:
         "is always stored absolute, so it is unaffected by --workspace either way."
     ))
     sub = ap.add_subparsers(dest="cmd", required=False)
-    for name in ("setup", "doctor", "gui"):
+    for name in ("setup", "doctor", "gui", "verify-manifest"):
         sub.add_parser(name, add_help=False)
     game_parsers = {}
     for game, stages in STAGES.items():
@@ -215,6 +215,8 @@ def _main_dispatch(args, rest, game_parsers) -> int:
         from deciwaves.cli.setup import run_setup; return _dispatch(run_setup, rest)
     if args.cmd == "doctor":
         from deciwaves.cli.doctor import run_doctor; return _dispatch(run_doctor, rest, args.workspace)
+    if args.cmd == "verify-manifest":
+        from deciwaves.cli.verify_manifest import run_verify_manifest; return _dispatch(run_verify_manifest, rest)
     if args.cmd == "gui":
         # gui.launch() owns the availability check and INSTALL_HINT (issue #308) --
         # the subcommand just delegates, so the hint is printed from exactly one place.
