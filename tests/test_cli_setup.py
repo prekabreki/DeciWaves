@@ -828,3 +828,25 @@ def test_download_and_unpack_mid_extract_failure_cleans_up(tmp_path, monkeypatch
     assert not manifest.exists()
     assert not list(dest.glob("*.tmp"))
     assert (dest / "vgmstream-cli.exe").read_bytes() == b"exe-bytes"
+
+
+def test_setup_saves_workspace_absolute_and_clears_with_empty(tmp_path, monkeypatch, capsys):
+    """Issue #394: `setup --workspace` persists an ABSOLUTE path (a relative one has
+    no fixed meaning once a later run starts elsewhere), an omitted flag keeps it,
+    and `--workspace ""` clears it -- the same convention as every other path key."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DECIWAVES_CONFIG_DIR", str(tmp_path / "cfg"))
+    tools = ["--tools-dir", str(tmp_path / "tools"), "--skip-downloads"]
+
+    assert s.run_setup(["--workspace", "rel-ws", *tools]) in (0, 1)
+    saved = json.loads((tmp_path / "cfg" / "config.json").read_text(encoding="utf-8"))
+    assert saved["workspace"] == str(tmp_path / "rel-ws")
+    assert "workspace  ok" in capsys.readouterr().out
+
+    s.run_setup(tools)
+    saved = json.loads((tmp_path / "cfg" / "config.json").read_text(encoding="utf-8"))
+    assert saved["workspace"] == str(tmp_path / "rel-ws")
+
+    s.run_setup(["--workspace", "", *tools])
+    saved = json.loads((tmp_path / "cfg" / "config.json").read_text(encoding="utf-8"))
+    assert saved["workspace"] == ""

@@ -111,8 +111,9 @@ def main(argv=None) -> int:
         "BEFORE the game name, like --workspace -- after it, the token is "
         "swallowed as that stage's own argument instead."
     ))
-    ap.add_argument("--workspace", default=".", help=(
-        "directory outputs are written under (default: current dir). Must come "
+    ap.add_argument("--workspace", default=None, help=(
+        "directory outputs are written under (default: the workspace saved by "
+        "`deciwaves setup --workspace DIR`, else the current dir). Must come "
         "BEFORE the game name, e.g. `deciwaves --workspace DIR ds run` -- placed "
         "after it (`deciwaves ds --workspace DIR run`), it is swallowed as that "
         "stage's own argument instead, not read as the global --workspace. A "
@@ -189,6 +190,9 @@ def _main_dispatch(args, rest, game_parsers) -> int:
     cfg = _apply_config_env()  # sets DECIWAVES_VGMSTREAM/DECIWAVES_VGAUDIO (and
     # PATH) from saved config; engine.tool_paths.resolve() reads them when the
     # decoder subprocess is actually spawned, not at stage-module import time.
+    # --workspace > saved `workspace` > cwd (issue #394). Resolved once, here, so
+    # guided mode, the path-flag absolutizing and the chdir all see the same one.
+    workspace = config.resolve_workspace(args.workspace, cfg).path
     if args.cmd is None:
         # Bare `deciwaves`: the GUI is the primary interface (issue #67), so launch it
         # when the [gui] extra is importable; otherwise fall back to today's guided
@@ -206,11 +210,11 @@ def _main_dispatch(args, rest, game_parsers) -> int:
         from deciwaves.cli.guided import run_guided
         from deciwaves import gui
         print(f"(tip: install the desktop GUI -- {gui.INSTALL_HINT})")
-        return run_guided(cfg, workspace=str(Path(args.workspace).resolve()))
+        return run_guided(cfg, workspace=str(Path(workspace).resolve()))
     if args.cmd == "setup":
         from deciwaves.cli.setup import run_setup; return _dispatch(run_setup, rest)
     if args.cmd == "doctor":
-        from deciwaves.cli.doctor import run_doctor; return _dispatch(run_doctor, rest)
+        from deciwaves.cli.doctor import run_doctor; return _dispatch(run_doctor, rest, args.workspace)
     if args.cmd == "gui":
         # gui.launch() owns the availability check and INSTALL_HINT (issue #308) --
         # the subcommand just delegates, so the hint is printed from exactly one place.
@@ -239,18 +243,19 @@ def _main_dispatch(args, rest, game_parsers) -> int:
     # Absolutize any relative path in the stage's own argv (e.g. --gamescript)
     # BEFORE chdir'ing into --workspace -- otherwise a relative flag value is
     # silently looked up inside the workspace instead of relative to wherever
-    # the user actually ran `deciwaves` from (issue #32). Passing args.workspace
-    # through lets absolutize_existing_paths tell "no workspace given" (or a
-    # workspace that's just cwd again) apart from a genuinely different one --
-    # only the latter can leave a token ambiguous between the two (issue #44).
+    # the user actually ran `deciwaves` from (issue #32). Passing the resolved
+    # workspace through (explicit or configured, issue #394) lets
+    # absolutize_existing_paths tell a workspace that's just cwd again apart
+    # from a genuinely different one -- only the latter can leave a token
+    # ambiguous between the two (issue #44).
     # A resulting SystemExit(2) (ambiguous between cwd and --workspace) is
     # converted to a return, same "usage errors return 2" contract as this
     # function's other SystemExit catches above -- no stage runs.
     try:
-        extra_argv = config.absolutize_existing_paths(extra_argv, workspace=args.workspace, game=args.cmd, stage=stage)
+        extra_argv = config.absolutize_existing_paths(extra_argv, workspace=workspace, game=args.cmd, stage=stage)
     except SystemExit as e:
         return e.code
-    config.enter_workspace(args.workspace)
+    config.enter_workspace(workspace)
     if stage == "run":
         from deciwaves.cli.run import run_game; return _dispatch(run_game, args.cmd, cfg, extra_argv)
     mod, _help = STAGES[args.cmd][stage]

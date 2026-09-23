@@ -292,6 +292,27 @@ def check_cuda() -> Check:
                      f"CUDA: torch import failed ({reason}) (informational)")
 
 
+def check_workspace(explicit: str | None, cfg: dict) -> Check:
+    """Report the workspace a stage run would write under and where it came from
+    (``--workspace`` / ``config`` / ``cwd``), resolved by the same
+    ``config.resolve_workspace`` that ``cli.main`` dispatches with (issue #394).
+    Falling back to the current directory is ``NOT_CONFIGURED`` (today's default,
+    never a failure); only a workspace that exists as a non-directory is BROKEN,
+    since ``enter_workspace`` creates a missing one but cannot chdir into a file."""
+    ws = config.resolve_workspace(explicit, cfg)
+    resolved = Path(ws.path).resolve()
+    if resolved.exists() and not resolved.is_dir():
+        fix = ("pass a directory to --workspace." if ws.source == "--workspace" else
+               "run `deciwaves setup --workspace <dir>` (or `--workspace \"\"` to clear it).")
+        return Check("workspace", Availability.BROKEN,
+                     f"workspace: {resolved} ({ws.source}) exists but is not a directory.", fix)
+    if ws.source == "cwd":
+        return Check("workspace", Availability.NOT_CONFIGURED,
+                     f"workspace: {resolved} (cwd -- not configured; set one with "
+                     f"`deciwaves setup --workspace <dir>`)")
+    return Check("workspace", Availability.OK, f"workspace: {resolved} ({ws.source})")
+
+
 def check_config_file() -> Check:
     if not config.path().is_file():
         return Check("config_file", Availability.NOT_CONFIGURED,
@@ -299,7 +320,7 @@ def check_config_file() -> Check:
     return Check("config_file", Availability.OK, f"config file: {config.path()}")
 
 
-def _all_checks() -> list[Check]:
+def _all_checks(workspace: str | None = None) -> list[Check]:
     cfg = config.load()
     tools_dir = cfg.get("tools_dir", "")
     return [
@@ -311,13 +332,16 @@ def _all_checks() -> list[Check]:
         check_ds2_package(cfg.get("ds2_package", "")),
         check_fw_gamescript(cfg.get("fw_gamescript", "")),
         check_ds2_gamescript(cfg.get("ds2_gamescript", "")),
+        check_workspace(workspace, cfg),
         check_asr_extra(),
         check_cuda(),
         check_config_file(),
     ]
 
 
-def run_doctor(argv=None) -> int:
+def run_doctor(argv=None, workspace: str | None = None) -> int:
+    """*workspace* is the global ``--workspace`` value (``None`` when not passed),
+    so ``deciwaves --workspace DIR doctor`` reports the workspace that run would use."""
     ap = argparse.ArgumentParser(prog="deciwaves doctor",
                                  description="Preflight: tools, installs, and optional extras.")
     ap.add_argument("--json", action="store_true",
@@ -325,7 +349,7 @@ def run_doctor(argv=None) -> int:
                          "the text report; exit code is unchanged")
     a = ap.parse_args(argv or [])
 
-    checks = _all_checks()
+    checks = _all_checks(workspace)
     ok = all(c.ok for c in checks)
 
     if a.json:

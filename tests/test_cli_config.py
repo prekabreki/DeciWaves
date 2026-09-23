@@ -484,3 +484,26 @@ def test_ds2_package_survives_save_load_round_trip(tmp_path, monkeypatch):
 
     config.save({"ds2_package": ds2_package})
     assert config.load()["ds2_package"] == ds2_package
+
+
+# --- resolve_workspace (issue #394): --workspace > saved workspace > cwd ------
+
+def test_resolve_workspace_explicit_beats_configured():
+    ws = config.resolve_workspace("explicit-dir", {"workspace": "/saved/ws"})
+    assert ws == config.Workspace("explicit-dir", "--workspace")
+
+
+def test_resolve_workspace_uses_configured_when_no_explicit():
+    ws = config.resolve_workspace(None, {"workspace": "/saved/ws"})
+    assert ws == config.Workspace("/saved/ws", "config")
+
+
+def test_resolve_workspace_falls_back_to_cwd():
+    assert config.resolve_workspace(None, {}) == config.Workspace(".", "cwd")
+    # a cleared (``""``) saved workspace is "not configured", not "the empty path"
+    assert config.resolve_workspace(None, {"workspace": ""}) == config.Workspace(".", "cwd")
+
+
+def test_save_persists_workspace_key(tmp_path):
+    config.save({"workspace": str(tmp_path / "ws")})
+    assert config.load()["workspace"] == str(tmp_path / "ws")

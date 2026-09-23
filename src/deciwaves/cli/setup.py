@@ -283,7 +283,7 @@ def _fetch_tools(tools_dir: Path, skip_downloads: bool, force: bool = False):
     return rows, any_failed
 
 
-def _print_summary(tool_rows, ds_install, oodle_dll, hzd_package, fw_package, ds2_package, fw_gamescript, ds2_gamescript, fw_types):
+def _print_summary(tool_rows, ds_install, oodle_dll, hzd_package, fw_package, ds2_package, fw_gamescript, ds2_gamescript, fw_types, workspace):
     print("\nDeciWaves setup summary:")
     print(f"  {'tool':<10} {'status':<32} path")
     for label, status, p in tool_rows:
@@ -296,6 +296,7 @@ def _print_summary(tool_rows, ds_install, oodle_dll, hzd_package, fw_package, ds
     print(f"  {'fw_script':<10} {'ok' if fw_gamescript else '--':<32} {fw_gamescript or '(not set -- optional, BYO)'}")
     print(f"  {'ds2_script':<10} {'ok' if ds2_gamescript else '--':<32} {ds2_gamescript or '(not set -- optional, BYO)'}")
     print(f"  {'fw_types':<10} {'ok' if fw_types else '--':<32} {fw_types or '(not set -- optional, BYO)'}")
+    print(f"  {'workspace':<10} {'ok' if workspace else '--':<32} {workspace or '(not set -- outputs go under the current dir)'}")
 
 
 def run_setup(argv) -> int:
@@ -323,6 +324,10 @@ def run_setup(argv) -> int:
                     "(Decima RTTI type map, BYO, optional -- see docs/BYO.md); persisted so `fw run`'s "
                     "subtitle-bind stage uses it instead of the workspace-root types.json default; "
                     'pass "" to clear')
+    ap.add_argument("--workspace", default=None, help="directory CLI stages write their outputs "
+                    "under when no global --workspace is passed (default: the current dir), so a run "
+                    "from a source checkout no longer recreates out/ inside it; the GUI keeps its own "
+                    'workspace setting; pass "" to clear')
     ap.add_argument("--tools-dir", default=None, help="where to fetch vgmstream/VGAudio/ffmpeg (default: %%LOCALAPPDATA%%\\DeciWaves\\tools)")
     ap.add_argument("--skip-downloads", action="store_true", help="don't fetch tools, just re-check what's already there and rewrite config")
     ap.add_argument("--force", action="store_true", help="re-download a tool even if its exe is already present in --tools-dir (default: skip it)")
@@ -350,6 +355,7 @@ def run_setup(argv) -> int:
     fw_gamescript = _merged(args.fw_gamescript, saved.get("fw_gamescript", ""))
     ds2_gamescript = _merged(args.ds2_gamescript, saved.get("ds2_gamescript", ""))
     fw_types = _merged(args.fw_types, saved.get("fw_types", ""))
+    workspace = _merged(args.workspace, saved.get("workspace", ""))
     tools_dir = (
         Path(args.tools_dir).resolve() if args.tools_dir
         else Path(saved["tools_dir"]).resolve() if saved.get("tools_dir")
@@ -382,7 +388,7 @@ def run_setup(argv) -> int:
               "Tools are set up regardless -- rerun `deciwaves setup` with a game path once you "
               "have one, or check status anytime with `deciwaves doctor`.")
 
-    _print_summary(tool_rows, ds_install, oodle_dll, hzd_package, fw_package, ds2_package, fw_gamescript, ds2_gamescript, fw_types)
+    _print_summary(tool_rows, ds_install, oodle_dll, hzd_package, fw_package, ds2_package, fw_gamescript, ds2_gamescript, fw_types, workspace)
 
     config.save({
         "tools_dir": str(tools_dir),
@@ -394,6 +400,7 @@ def run_setup(argv) -> int:
         "fw_gamescript": fw_gamescript,
         "ds2_gamescript": ds2_gamescript,
         "fw_types": fw_types,
+        "workspace": workspace,
     })
     print(f"\nWrote {config.path()}")
     return 1 if tools_failed else 0
