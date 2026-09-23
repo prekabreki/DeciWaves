@@ -10,7 +10,13 @@ class PackIndex:
     def __init__(self, data_dir: str, oodle_dll: str):
         self.oodle_dll = oodle_dll
         self._by_hash: dict[int, tuple[BinArchive, object]] = {}
-        for path in sorted(glob.glob(os.path.join(data_dir, "*.bin"))):
+        archive_paths = sorted(glob.glob(os.path.join(data_dir, "*.bin")))
+        if not archive_paths:
+            raise FileNotFoundError(
+                f"no .bin archives found in '{data_dir}' -- for Death Stranding this should be "
+                "<install>/data, not the install root"
+            )
+        for path in archive_paths:
             arc = BinArchive(path)
             arc.open_index()
             for entry in arc.file_table:

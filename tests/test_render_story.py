@@ -8,7 +8,7 @@ from deciwaves.engine import audio_clip as ac
 from deciwaves.engine import render as rs
 from deciwaves.games.ds import render as ds_render
 from deciwaves.games.ds.story_order import Segment, write_playlist
-from conftest import needs_ffmpeg  # noqa: F401
+from conftest import needs_ffmpeg, write_empty_bin_archive  # noqa: F401
 
 
 def _seg(is_side, line_id, scene="sq_cs00_s00100", category="cutscene", episode=0):
@@ -267,6 +267,7 @@ def _playlist_segs(n_good=0, n_bad=0):
 def _render_argv(tmp_path, playlist, errors, extra=()):
     data_dir = tmp_path / "data"
     data_dir.mkdir(exist_ok=True)
+    write_empty_bin_archive(data_dir)
     return [
         "--data-dir", str(data_dir),
         "--oodle", str(tmp_path / "fake_oodle.dll"),
@@ -279,9 +280,9 @@ def _render_argv(tmp_path, playlist, errors, extra=()):
 
 
 def test_render_main_zero_decode_returns_1_and_prints_actionable_error(tmp_path, monkeypatch, capsys):
-    """Every segment fails to decode (idx has no archives -> clip_wav raises
-    ClipError for each). main() must return 1, never write a done-marker via the
-    chain runner, and its message must name the errors file, `deciwaves doctor`,
+    """Every segment fails to decode (idx has an archive but no matching stream
+    -> clip_wav raises ClipError for each). main() must return 1, never write a
+    done-marker via the chain runner, and its message must name the errors file, `deciwaves doctor`,
     and the README's Windows Store Python troubleshooting note."""
     monkeypatch.chdir(tmp_path)
     playlist = tmp_path / "playlist.csv"

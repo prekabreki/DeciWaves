@@ -1,5 +1,6 @@
 import os
 import shutil
+import struct
 from pathlib import Path
 import pytest
 
@@ -40,6 +41,19 @@ DS2_STREAMING_GRAPH = DS2_PACKAGE_DIR / "streaming_graph.core"
 HZD_PACKAGE = Path(os.environ.get(
     "DECIWAVES_HZD_PACKAGE",
     r"C:\Program Files (x86)\Steam\steamapps\common\Horizon - Zero Dawn Remastered\LocalCacheDX12\package"))
+
+
+def write_empty_bin_archive(dest_dir) -> Path:
+    """Write a minimal, structurally valid, unencrypted .bin archive with zero file-table
+    entries into *dest_dir* and return its path. `PackIndex` (issue #414) now fails fast on
+    a data dir with no `.bin` files at all, so any test whose `data_dir` fixture used to be
+    an empty directory (to fake "no matching stream" without exercising real archive I/O)
+    needs at least one archive present -- this is the smallest one `BinArchive.open_index()`
+    will parse without error: magic + key + 8 zeroed header dwords (fileSize/dataSize/
+    fileCount/chunkCount/maxChunk all 0), no file table, no chunk table."""
+    path = Path(dest_dir) / "empty.bin"
+    path.write_bytes(struct.pack("<II", 0x20304050, 0) + b"\x00" * 32)
+    return path
 
 
 @pytest.fixture(scope="session", autouse=True)

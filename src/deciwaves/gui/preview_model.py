@@ -104,11 +104,11 @@ class PreviewResolver:
         data_dir, oodle = config.resolve_ds_install(self._cfg)
         if not data_dir or not oodle:
             raise PreviewError("DS install is not configured. Run `deciwaves setup` first.")
-        idx = self._ds_pack_index(data_dir, oodle)
         cache_dir = os.path.join(self._workspace, *_DS_CACHE)
         try:
+            idx = self._ds_pack_index(data_dir, oodle)
             wav_path, _dur = clip_wav(idx, stream_path, cache_dir)
-        except Exception as exc:  # ClipError / decode failure -> friendly, never a GUI crash
+        except Exception as exc:  # ClipError / empty PackIndex / decode failure -> friendly
             raise PreviewError(f"Could not decode audio: {exc}") from exc
         return wav_path
 
