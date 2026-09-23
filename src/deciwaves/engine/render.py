@@ -65,13 +65,91 @@ def encoded_size_mb(total_seconds, kbps, overhead=MP3_OVERHEAD):
     return total_seconds * (kbps * 1000 / 8) * (1 + overhead) / 1_000_000
 
 
+class FilesDoNotFit(ValueError):
+    """:func:`plan_files` found no standard bitrate that packs the audio into the
+    requested file count. `smallest_n`/`smallest_kbps` name the fewest files that
+    DO fit (and the highest bitrate that achieves that count), or are None when no
+    file count fits -- an indivisible episode is over `target_mb` even at the floor."""
+
+    def __init__(self, msg, smallest_n=None, smallest_kbps=None):
+        super().__init__(msg)
+        self.smallest_n = smallest_n
+        self.smallest_kbps = smallest_kbps
+
+
+FilePlan = namedtuple("FilePlan", ["kbps", "files", "seconds"])
+"""Result of :func:`plan_files`: the chosen bitrate, the packed episode groups
+(exactly what :func:`pack_episodes` returns at that bitrate's budget, so exactly
+the files :func:`assemble_reels` will write), and each file's real seconds."""
+
+
+def plan_files(ep_durations, n_files, *, file_seconds=None, target_mb=285.0,
+               overhead=MP3_OVERHEAD, floor_kbps=DEFAULT_FLOOR_KBPS,
+               candidates=STANDARD_MP3_BITRATES):
+    """Highest standard MP3 bitrate from `candidates` at which whole episodes pack
+    into at most `n_files` files of at most `target_mb` each (``--files N``).
+
+    Each candidate is tried highest-first by running the real packer,
+    :func:`pack_episodes`, at that bitrate's :func:`budget_seconds` -- the same
+    budget (``MP3_OVERHEAD`` divisor included) the render then packs with, so the
+    predicted file count IS the rendered file count. A candidate is accepted when
+    it yields <= `n_files` groups and every group's real duration fits the budget.
+
+    `file_seconds(episodes) -> seconds` gives a packed group's real duration.
+    Default: the sum of its episodes' `ep_durations`. The render passes one that
+    also counts the silence :func:`assemble_reels` inserts BETWEEN episodes (which
+    `ep_durations` does not price), so an accepted plan never overflows
+    `target_mb` by those gaps. It also rejects a lone episode longer than the
+    budget, which :func:`pack_episodes` gives its own (oversized) file.
+
+    Only candidates >= `floor_kbps` are considered. Returns a :data:`FilePlan`.
+    Raises :class:`FilesDoNotFit` when none fits, naming the smallest file count
+    that does, rather than letting the render overflow into N+1 files.
+    """
+    if n_files < 1:
+        raise ValueError(f"n_files must be >= 1, got {n_files!r}")
+    ep_durations = sorted(ep_durations)
+    if any(secs < 0 for _, secs in ep_durations):
+        raise ValueError(f"negative duration in {ep_durations!r}")
+    if file_seconds is None:
+        by_ep = dict(ep_durations)
+        file_seconds = lambda eps: sum(by_ep[e] for e in eps)  # noqa: E731
+    best_fallback = None   # (count, kbps): fewest files among fitting candidates
+    for kbps in sorted(candidates, reverse=True):
+        if kbps < floor_kbps:
+            continue
+        budget = budget_seconds(target_mb, overhead, kbps)
+        files = pack_episodes(ep_durations, budget=budget)
+        seconds = [file_seconds(eps) for eps in files]
+        if any(secs > budget for secs in seconds):
+            continue
+        if len(files) <= n_files:
+            return FilePlan(kbps, files, seconds)
+        if best_fallback is None or len(files) < best_fallback[0]:
+            best_fallback = (len(files), kbps)
+    total = sum(secs for _, secs in ep_durations)
+    msg = (f"{total:,.1f}s of audio does not fit in {n_files} file(s) of "
+           f"{target_mb:g} MB at any standard bitrate >= {floor_kbps} kbps")
+    if best_fallback is None:
+        raise FilesDoNotFit(
+            f"{msg}, nor in any number of files: an episode is indivisible and "
+            f"one is longer than a {target_mb:g} MB file holds even at "
+            f"{floor_kbps} kbps")
+    n, kbps = best_fallback
+    raise FilesDoNotFit(
+        f"{msg}; the smallest file count that fits is {n} (at {kbps} kbps)",
+        smallest_n=n, smallest_kbps=kbps)
+
+
 def bitrate_for_single_file(total_seconds, target_mb=285.0, overhead=MP3_OVERHEAD,
                             floor_kbps=DEFAULT_FLOOR_KBPS,
                             candidates=STANDARD_MP3_BITRATES):
     """Highest standard MP3 bitrate from `candidates` whose encoded size for
     `total_seconds` fits `target_mb` -- the inverse of :func:`budget_seconds`,
     which fixes the bitrate and solves for seconds. Deliverable 1 fixes N=1
-    file and solves for the bitrate here.
+    file and solves for the bitrate here: this is :func:`plan_files` with one
+    file holding one indivisible unit, so ``--single-file`` and ``--files 1``
+    share one search.
 
     Only candidates >= `floor_kbps` are considered; if even the floor does not
     fit, raises ``ValueError`` -- the caller renders nothing rather than emit
@@ -80,14 +158,33 @@ def bitrate_for_single_file(total_seconds, target_mb=285.0, overhead=MP3_OVERHEA
     """
     if total_seconds < 0:
         raise ValueError(f"negative duration: {total_seconds!r}")
-    for kbps in sorted(candidates, reverse=True):
-        if kbps < floor_kbps:
-            continue
-        if total_seconds <= budget_seconds(target_mb, overhead, kbps):
-            return kbps
-    raise ValueError(
-        f"{total_seconds:.1f}s of audio does not fit in {target_mb:g} MB at any "
-        f"standard bitrate >= {floor_kbps} kbps")
+    try:
+        return plan_files([(0, total_seconds)], 1, target_mb=target_mb,
+                          overhead=overhead, floor_kbps=floor_kbps,
+                          candidates=candidates).kbps
+    except FilesDoNotFit:
+        raise ValueError(
+            f"{total_seconds:.1f}s of audio does not fit in {target_mb:g} MB at any "
+            f"standard bitrate >= {floor_kbps} kbps") from None
+
+
+def add_files_argument(parser):
+    """Add ``--files N`` to a game's render CLI: pass the parsed value to
+    :func:`finish_render`'s `files` (``None`` when omitted = budget-driven packing
+    at ``--bitrate``, unchanged)."""
+    def _positive_int(text):
+        n = int(text)
+        if n < 1:
+            raise ValueError(text)
+        return n
+    _positive_int.__name__ = "positive integer"   # argparse's error names the type
+    parser.add_argument(
+        "--files", type=_positive_int, default=None, metavar="N",
+        help="pack into at most N files of at most --target-mb each, at the "
+             "highest standard MP3 bitrate that fits; prints the chosen kbps, "
+             "file count and predicted sizes before encoding, and fails naming "
+             "the smallest workable N if none fits (ignores --bitrate). Packs "
+             "whole episodes in ascending order, like the default reel path")
 
 
 def pack_episodes(ep_durations, budget=BUDGET_SECONDS):
@@ -240,6 +337,38 @@ def accumulate_episode_seconds(segs, dur_of, *, gap_key, err_key, errors_path,
     return results, ep_secs, n_failed
 
 
+def _timeline(segs, durations, gap_key):
+    """Yield ``(seg, wav, dur, gap, start)`` for each segment of `segs` present in
+    `durations`, in order: `gap` is the silence spliced in ahead of it (0.0 for
+    the first, SCENE_GAP where `gap_key` changes, LINE_GAP otherwise) and `start`
+    its timestamp. The single source of the gap layout for :func:`assemble_reels`,
+    :func:`assemble_single_file` and :func:`reel_seconds`, so a predicted duration
+    is the assembled one."""
+    t, prev, first = 0.0, None, True
+    for s in segs:
+        if s.line_id not in durations:
+            continue
+        wav, dur = durations[s.line_id]
+        key = gap_key(s)
+        gap = 0.0 if first else (SCENE_GAP if key != prev else LINE_GAP)
+        t += gap
+        yield s, wav, dur, gap, t
+        t += dur
+        prev, first = key, False
+
+
+def reel_seconds(spine, episodes, durations, gap_key):
+    """Real duration of the reel :func:`assemble_reels` builds from `episodes`:
+    its segments' audio plus every gap, including the gaps BETWEEN episodes that
+    the per-episode totals from :func:`accumulate_episode_seconds` leave out."""
+    eps = set(episodes)
+    end = 0.0
+    for _s, _wav, dur, _gap, start in _timeline(
+            (s for s in spine if s.episode in eps), durations, gap_key):
+        end = start + dur
+    return end
+
+
 ReelColumns = namedtuple("ReelColumns", ["header", "row_of"])
 """Per-game tracklist shape for :func:`assemble_reels`.
 
@@ -287,19 +416,14 @@ def assemble_reels(spine, ep_secs, durations, *, out_dir, cache_dir, stem, colum
     n_files = 0
     for fi, eps in enumerate(pack_episodes(list(ep_secs.items()), budget=budget)):
         eps_set = set(eps)
-        file_segs = [s for s in spine if s.episode in eps_set and s.line_id in durations]
-        wav_list, rows, t, prev = [], [], 0.0, None
-        for s in file_segs:
-            wav, dur = durations[s.line_id]
-            key = gap_key(s)
-            new_scene = key != prev
-            if wav_list:
-                wav_list.append(scene_sil if new_scene else line_sil)
-                t += SCENE_GAP if new_scene else LINE_GAP
+        file_segs = [s for s in spine if s.episode in eps_set]
+        wav_list, rows, t = [], [], 0.0
+        for s, wav, dur, gap, start in _timeline(file_segs, durations, gap_key):
+            if gap:
+                wav_list.append(scene_sil if gap == SCENE_GAP else line_sil)
             wav_list.append(wav)
-            rows.append(row_of(s, t))
-            t += dur
-            prev = key
+            rows.append(row_of(s, start))
+            t = start + dur
         if not wav_list:
             continue
         base = os.path.join(out_dir, f"{stem}_{fi:02d}")
@@ -346,7 +470,7 @@ def finish_render(spine, empty_input, errors_path,
                     msg_empty_input, msg_empty_selection,
                     msg_nothing_decoded, msg_zero_files,
                     durations, ep_secs, out_dir, cache_dir, stem, columns, budget, gap_key,
-                    _assemble=assemble_reels,
+                    _assemble=assemble_reels, files=None, target_mb=285.0,
                     **assemble_kwargs):
     """Shared exit-code contract tail for HZD and FW render ``main()`` functions.
 
@@ -374,6 +498,14 @@ def finish_render(spine, empty_input, errors_path,
       guard in case ``assemble_reels``' contract ever changes, since ``run``/the
       GUI trust this stage's rc.
 
+    * **``files=N``** (``--files N``): ignores the caller's `budget` and encode
+      bitrate and picks the highest standard bitrate that packs into at most N
+      files of at most `target_mb` via :func:`plan_files`, printing the bitrate,
+      the file count and each file's predicted size BEFORE encoding. If no
+      bitrate fits N files: rc 1, naming the smallest N that does, and nothing
+      is encoded -- never a silent N+1th file. ``files=None`` (default) is the
+      plain budget-driven packing at the caller's bitrate.
+
     Game-specific message strings (``msg_*``) are supplied by each caller; the control
     flow is identical. ``_assemble`` defaults to this module's :func:`assemble_reels`;
     callers that need testability pass their own import of it (so a monkeypatch on
@@ -387,6 +519,24 @@ def finish_render(spine, empty_input, errors_path,
     if not durations:
         print(msg_nothing_decoded)
         return 1
+    if files is not None:
+        try:
+            plan = plan_files(
+                list(ep_secs.items()), files, target_mb=target_mb,
+                file_seconds=lambda eps: reel_seconds(spine, eps, durations, gap_key))
+        except FilesDoNotFit as e:
+            hint = (f" Re-run with --files {e.smallest_n}." if e.smallest_n
+                    else "")
+            print(f"render: ERROR - --files {files}: {e}.{hint} Nothing encoded.")
+            return 1
+        sizes = " + ".join(f"~{encoded_size_mb(secs, plan.kbps):.1f} MB"
+                           for secs in plan.seconds)
+        print(f"--files {files}: {plan.kbps} kbps (highest standard bitrate that "
+              f"fits) -> {len(plan.files)} file(s) of <= {target_mb:g} MB, "
+              f"predicted {sizes}")
+        budget = budget_seconds(target_mb=target_mb, kbps=plan.kbps)
+        assemble_kwargs["concat_kwargs"] = {
+            **(assemble_kwargs.get("concat_kwargs") or {}), "kbps": plan.kbps}
     n_files = _assemble(
         spine, ep_secs, durations, out_dir=out_dir, cache_dir=cache_dir,
         stem=stem, columns=columns, budget=budget, gap_key=gap_key,
@@ -448,21 +598,14 @@ def assemble_single_file(spine, durations, *, story_predicate,
     scene_sil = silence_fn(SCENE_GAP, cache_dir)
     norm_dir = os.path.join(cache_dir, "norm")
 
-    wav_list, rows, t, prev = [], [], 0.0, None
-    total = 0.0
-    for s in kept:
-        wav, dur = durations[s.line_id]
-        key = gap_key(s)
-        new_scene = key != prev
-        if wav_list:
-            wav_list.append(scene_sil if new_scene else line_sil)
-            total += SCENE_GAP if new_scene else LINE_GAP
-            t += SCENE_GAP if new_scene else LINE_GAP
+    wav_list, rows, t = [], [], 0.0
+    for s, wav, dur, gap, start in _timeline(kept, durations, gap_key):
+        if gap:
+            wav_list.append(scene_sil if gap == SCENE_GAP else line_sil)
         wav_list.append(wav)
-        rows.append(row_of(s, t))
-        total += dur
-        t += dur
-        prev = key
+        rows.append(row_of(s, start))
+        t = start + dur
+    total = t
 
     kbps = bitrate_for_single_file(total, target_mb=target_mb, overhead=overhead,
                                    floor_kbps=floor_kbps, candidates=candidates)

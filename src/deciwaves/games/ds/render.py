@@ -14,8 +14,8 @@ import os
 import re
 
 from deciwaves.engine.render import (
-    accumulate_episode_seconds, assemble_reels, assemble_single_file,
-    budget_seconds, finish_render, finish_single_file,
+    accumulate_episode_seconds, add_files_argument, assemble_reels,
+    assemble_single_file, budget_seconds, finish_render, finish_single_file,
     ReelColumns, DEFAULT_BITRATE_KBPS, format_ts,
 )
 from deciwaves.engine.parallel import default_jobs
@@ -162,7 +162,10 @@ def main(argv=None):
                     help="render ONE story-only MP3 (deliverable 1): drops "
                          "filler, auto-picks the highest standard MP3 bitrate "
                          "that fits --target-mb, and prints the chosen kbps + "
-                         "predicted size before encoding (ignores --bitrate)")
+                         "predicted size before encoding (ignores --bitrate). "
+                         "The story-only form of --files 1: same bitrate search, "
+                         "one unsuffixed file")
+    add_files_argument(ap)
     ap.add_argument("--speech-trim", default=None,
                     help="path to cutscene-keepspans.csv: trim cutscene tracks "
                          "to spoken regions; drop pure-grunt tracks. Omit = use the "
@@ -184,6 +187,9 @@ def main(argv=None):
                          f"vgmstream-cli). Default min(8, cpu_count)={default_jobs()}; "
                          "--jobs 1 forces the old serial decode")
     args = ap.parse_args(argv)
+    if args.single_file and args.files is not None:
+        ap.error("--single-file and --files are mutually exclusive "
+                 "(--single-file is the story-only --files 1)")
 
     # imports deferred into main() (consistent with cutscene_audio.py): avoids
     # constructing PackIndex at module import time; keeps `import games.ds.render` test-clean
@@ -360,6 +366,7 @@ def main(argv=None):
         budget=budget_seconds(target_mb=args.target_mb, kbps=args.bitrate),
         gap_key=lambda s: s.scene,
         _assemble=assemble_reels, concat_kwargs={"kbps": args.bitrate},
+        files=args.files, target_mb=args.target_mb,
         unit_label="segments")
     return decode_failure_rc(rc, len(decoded), n_failed, args.errors)
 

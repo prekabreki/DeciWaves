@@ -19,8 +19,9 @@ import subprocess
 
 from deciwaves.engine.catalog_io import read_csv_rows, CsvFormatError
 from deciwaves.engine.render import (
-    SR, DEFAULT_BITRATE_KBPS, accumulate_episode_seconds, assemble_reels,
-    assemble_single_file, budget_seconds, finish_render, finish_single_file,
+    SR, DEFAULT_BITRATE_KBPS, accumulate_episode_seconds, add_files_argument,
+    assemble_reels, assemble_single_file, budget_seconds, finish_render,
+    finish_single_file,
     format_ts, ReelColumns,
 )
 from deciwaves.engine.render_spine import BOUND_TIERS, RenderItem, build_spine, REQUIRED_COLS  # noqa: F401
@@ -108,6 +109,7 @@ def main(argv=None):
                          "the highest standard MP3 bitrate that fits --target-mb, "
                          "and prints the chosen kbps + predicted size before "
                          "encoding (ignores --bitrate)")
+    add_files_argument(ap)
     ap.add_argument("--bitrate", type=int, default=DEFAULT_BITRATE_KBPS,
                     help="MP3 CBR bitrate in kbps (drives both encode and the "
                          "byte-budget packing math). Default %(default)s")
@@ -118,6 +120,9 @@ def main(argv=None):
                     help="clips are all mono/48k/s16 (FW fast-path): skip normalize, "
                          "direct concat (fast + low disk at bulk scale)")
     a = ap.parse_args(argv)
+    if a.single_file and a.files is not None:
+        ap.error("--single-file and --files are mutually exclusive "
+                 "(--single-file is the story-only --files 1)")
 
     tiers = {t.strip() for t in a.tiers.split(",") if t.strip()}
     try:
@@ -220,7 +225,8 @@ def main(argv=None):
         _assemble=assemble_reels,
         concat_fn=_concat_uniform if a.uniform_mono else None,
         silence_fn=mono_silence_wav if a.uniform_mono else None,
-        concat_kwargs={"kbps": a.bitrate})
+        concat_kwargs={"kbps": a.bitrate},
+        files=a.files, target_mb=a.target_mb)
 
 
 if __name__ == "__main__":
