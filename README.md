@@ -138,7 +138,7 @@ run; it only adds the menu around it. In a non-interactive shell it prints usage
 instead of blocking.
 
 If you'd rather drive it yourself, each game has an explicit `run` command. The global
-`--workspace` flag sets where output lands (default: the current directory) -- it must come
+`--workspace` flag sets where output lands -- it must come
 *before* the game name (`deciwaves --workspace DIR ds run`, not `deciwaves ds --workspace DIR
 run`, which is parsed as that stage's own argument instead). A relative path you pass to a
 stage's own flag (e.g. `--gamescript`) that already exists is resolved against the directory
@@ -146,6 +146,12 @@ you ran `deciwaves` from, not against `--workspace` -- it doesn't need to sit in
 workspace. A relative path that doesn't exist yet (e.g. a stage's own output path) is left
 alone and stays workspace-relative, same as always. A path saved earlier via `deciwaves setup`
 is always absolute regardless.
+
+Without `--workspace`, output lands in the workspace saved by `deciwaves setup --workspace DIR`
+(clear it with `--workspace ""`), or else in the current directory. Save one if you run
+`deciwaves` from a git clone, or every run recreates `out/` inside the checkout. `deciwaves
+doctor` prints the workspace a run would use and where it came from (`--workspace`, `config`
+or `cwd`). The GUI keeps its own workspace setting and always passes it explicitly.
 
 ### Death Stranding (no GPU)
 
