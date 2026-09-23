@@ -27,8 +27,9 @@ import wave
 from deciwaves.engine.catalog_io import read_csv_rows, CsvFormatError
 from deciwaves.engine.parallel import default_jobs
 from deciwaves.engine.render import (
-    DEFAULT_BITRATE_KBPS, accumulate_episode_seconds, assemble_reels,
-    assemble_single_file, budget_seconds, finish_render, finish_single_file,
+    DEFAULT_BITRATE_KBPS, accumulate_episode_seconds, add_files_argument,
+    assemble_reels, assemble_single_file, budget_seconds, finish_render,
+    finish_single_file,
     format_ts, ReelColumns,
 )
 from deciwaves.engine.render_spine import build_spine, REQUIRED_COLS
@@ -67,6 +68,7 @@ def main(argv=None):
                          "the highest standard MP3 bitrate that fits --target-mb, "
                          "and prints the chosen kbps + predicted size before "
                          "encoding (ignores --bitrate)")
+    add_files_argument(ap)
     ap.add_argument("--bitrate", type=int, default=DEFAULT_BITRATE_KBPS,
                     help="MP3 CBR bitrate in kbps (drives both encode and the "
                          "byte-budget packing math). Default %(default)s")
@@ -78,6 +80,9 @@ def main(argv=None):
                          f"read). Default min(8, cpu_count)={default_jobs()}; "
                          "--jobs 1 forces the serial measure")
     a = ap.parse_args(argv)
+    if a.single_file and a.files is not None:
+        ap.error("--single-file and --files are mutually exclusive "
+                 "(--single-file is the story-only --files 1)")
 
     tiers = {t.strip() for t in a.tiers.split(",") if t.strip()}
     try:
@@ -178,6 +183,7 @@ def main(argv=None):
         gap_key=lambda s: s.quest,
         _assemble=assemble_reels,
         concat_kwargs={"kbps": a.bitrate},
+        files=a.files, target_mb=a.target_mb,
         unit_label="lines")
 
 

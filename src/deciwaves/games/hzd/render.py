@@ -26,7 +26,8 @@ import wave
 from dataclasses import dataclass
 
 from deciwaves.engine.render import (
-    accumulate_episode_seconds, assemble_reels, budget_seconds, finish_render,
+    accumulate_episode_seconds, add_files_argument, assemble_reels, budget_seconds,
+    finish_render,
     format_ts, ReelColumns, DEFAULT_BITRATE_KBPS,
 )
 from deciwaves.engine.parallel import KeyedLocks, default_jobs
@@ -208,6 +209,7 @@ def main(argv=None):
     ap.add_argument("--target-mb", type=float, default=285.0,
                     help="Target MB per reel file (default 285; output stays safely "
                          "under the 290 MB buffer)")
+    add_files_argument(ap)
     ap.add_argument("--jobs", type=int, default=default_jobs(),
                     help="number of clips to decode concurrently (each spawns one "
                          f"VGAudioCli). Default min(8, cpu_count)={default_jobs()}; "
@@ -290,7 +292,8 @@ def main(argv=None):
         out_dir=a.out_dir, cache_dir=a.cache, stem=stem, columns=columns,
         budget=budget_seconds(target_mb=a.target_mb, kbps=a.bitrate),
         gap_key=lambda s: s.scene,
-        _assemble=assemble_reels, concat_kwargs={"kbps": a.bitrate})
+        _assemble=assemble_reels, concat_kwargs={"kbps": a.bitrate},
+        files=a.files, target_mb=a.target_mb)
 
 
 if __name__ == "__main__":
