@@ -97,8 +97,10 @@ def test_read_and_read_by_hash_agree():
 def test_empty_data_dir_raises_naming_the_dir(tmp_path):
     empty_dir = tmp_path / "install_root"
     empty_dir.mkdir()
-    with pytest.raises(FileNotFoundError, match=str(empty_dir)):
+    with pytest.raises(FileNotFoundError) as exc_info:
         PackIndex(str(empty_dir), "unused")
+    # Substring, not ``match=``: a Windows path is not a valid regex.
+    assert str(empty_dir) in str(exc_info.value)
 
 
 def test_data_dir_with_unrelated_files_still_raises(tmp_path):

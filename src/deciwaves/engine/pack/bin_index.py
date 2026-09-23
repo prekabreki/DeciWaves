@@ -13,7 +13,7 @@ class PackIndex:
         archive_paths = sorted(glob.glob(os.path.join(data_dir, "*.bin")))
         if not archive_paths:
             raise FileNotFoundError(
-                f"no .bin archives found in {data_dir!r} -- for Death Stranding this should be "
+                f"no .bin archives found in '{data_dir}' -- for Death Stranding this should be "
                 "<install>/data, not the install root"
             )
         for path in archive_paths:
