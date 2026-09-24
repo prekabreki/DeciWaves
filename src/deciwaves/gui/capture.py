@@ -7,11 +7,10 @@ summary, ``doctor --json``'s JSON), so this adds accumulation. Same one-at-a-tim
 terminate-then-kill semantics -- both are read-only/idempotent CLI reads, safe to cancel."""
 from __future__ import annotations
 
-from PySide6.QtCore import QObject, QProcess, QTimer, Signal
+from PySide6.QtCore import QObject, QProcess, Signal
 
 from deciwaves.gui._env import utf8_environment
-
-_KILL_GRACE_MS = 2000  # terminate() then force-kill; Windows consoles ignore WM_CLOSE
+from deciwaves.gui._process import terminate_then_kill
 
 
 class CaptureRunner(QObject):
@@ -54,9 +53,7 @@ class CaptureRunner(QObject):
         p = self._proc
         if p is None or p.state() == QProcess.NotRunning:
             return
-        p.terminate()
-        QTimer.singleShot(_KILL_GRACE_MS,
-                          lambda: p.kill() if p.state() != QProcess.NotRunning else None)
+        terminate_then_kill(p)
 
     def _drain(self) -> None:
         if self._proc is None:
