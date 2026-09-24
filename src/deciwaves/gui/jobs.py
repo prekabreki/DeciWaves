@@ -6,12 +6,10 @@ stdout/stderr as ``output``; ``cancel()`` terminates then kills, which is safe +
 resumable per the CLI's atomic-write / resume-sidecar contract."""
 from __future__ import annotations
 
-from PySide6.QtCore import QObject, QProcess, QTimer, Signal
+from PySide6.QtCore import QObject, QProcess, Signal
 
 from deciwaves.gui._env import utf8_environment
-
-_KILL_GRACE_MS = 2000  # after terminate(), force-kill if still alive (Windows consoles
-# ignore the WM_CLOSE that terminate() sends, so the kill is what actually stops them)
+from deciwaves.gui._process import terminate_then_kill
 
 
 class JobRunner(QObject):
@@ -59,9 +57,7 @@ class JobRunner(QObject):
         if p is None or p.state() == QProcess.NotRunning:
             return
         self._was_cancelled = True
-        p.terminate()
-        QTimer.singleShot(_KILL_GRACE_MS,
-                          lambda: p.kill() if p.state() != QProcess.NotRunning else None)
+        terminate_then_kill(p)
 
 
 
