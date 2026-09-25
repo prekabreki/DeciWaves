@@ -374,28 +374,100 @@ def test_backfill_empty_csv_nothing_to_do(tmp_path, monkeypatch):
 # stale-header guard (issue #388 amendment)
 # ---------------------------------------------------------------------------
 
-def test_extract_refuses_stale_header_without_region(tmp_path, monkeypatch, capsys):
-    out_dir = str(tmp_path / "ds2")
+_PRE_388_COLS = ["line_id", "group_id", "lssr_index", "file_index",
+                 "offset", "clip_bytes", "wav"]
+
+
+def _write_stale_workspace(out_dir):
+    """A pre-#388 manifest (no 'region' column) plus its processed sidecar.
+    Returns the manifest path and the bytes of both files, for untouched checks."""
     os.makedirs(out_dir)
     manifest_path = os.path.join(out_dir, "clip-index.csv")
-    old_cols = ["line_id", "group_id", "lssr_index", "file_index",
-                "offset", "clip_bytes", "wav"]
     _write_manifest_csv(manifest_path, [
         {"line_id": "g1_0000", "group_id": "1", "lssr_index": "0",
          "file_index": "0", "offset": "100", "clip_bytes": "32",
          "wav": "audio/g1_0000.wav"},
-    ], old_cols)
-    # Also need a processed sidecar so prune_incomplete_rows doesn't
-    # "reconstruct" — we just want a stale-header detection.
-    with open(os.path.join(out_dir, "clip-index-processed.txt"), "w") as pf:
+        {"line_id": "g2_0000", "group_id": "2", "lssr_index": "0",
+         "file_index": "1", "offset": "200", "clip_bytes": "48",
+         "wav": "audio/g2_0000.wav"},
+    ], _PRE_388_COLS)
+    # g2_0000 is deliberately NOT confirmed, so a resume prune WOULD rewrite
+    # the manifest if the guard ran after it.
+    processed_path = os.path.join(out_dir, "clip-index-processed.txt")
+    with open(processed_path, "w") as pf:
         pf.write("g1_0000\n")
+    with open(manifest_path, "rb") as f:
+        manifest_bytes = f.read()
+    with open(processed_path, "rb") as f:
+        processed_bytes = f.read()
+    return manifest_path, manifest_bytes, processed_path, processed_bytes
 
-    lines = _fake_lines(2)
+
+def _suggested_command(out: str) -> list[str]:
+    """The backticked command in the guard's message, split into argv."""
+    import shlex
+    cmd = out.split("`")[1]
+    return [t.strip('"') for t in shlex.split(cmd, posix=False)]
+
+
+def test_extract_raises_on_stale_header_before_touching_anything(tmp_path, monkeypatch):
+    out_dir = str(tmp_path / "ds2")
+    manifest_path, manifest_bytes, processed_path, processed_bytes = \
+        _write_stale_workspace(out_dir)
+    _install_ds2_stubs(monkeypatch, _fake_lines(2))
+
+    def _no_graph(path):
+        raise AssertionError("graph loaded before the stale-header refusal")
+    monkeypatch.setattr(fx.StreamingGraph, "from_file", staticmethod(_no_graph))
     vg = tmp_path / "vg.exe"; vg.write_bytes(b"x")
-    _install_ds2_stubs(monkeypatch, lines)
 
-    stats = fx.extract("pkg", out_dir, decode=True, vgmstream=str(vg), jobs=1)
-    assert stats.ok == 0
-    captured = capsys.readouterr()
-    assert "region" in captured.out
-    assert "--backfill" in captured.out
+    with pytest.raises(fx.StaleManifestError, match="--backfill"):
+        fx.extract("pkg", out_dir, decode=True, vgmstream=str(vg), jobs=1)
+    with open(manifest_path, "rb") as f:
+        assert f.read() == manifest_bytes
+    with open(processed_path, "rb") as f:
+        assert f.read() == processed_bytes
+    assert not os.path.exists(os.path.join(out_dir, "extract-errors.log"))
+
+
+def test_main_exits_nonzero_on_stale_header(tmp_path, monkeypatch, capsys):
+    out_dir = str(tmp_path / "ds2")
+    _write_stale_workspace(out_dir)
+    _install_ds2_stubs(monkeypatch, _fake_lines(2))
+    vg = tmp_path / "vg.exe"; vg.write_bytes(b"x")
+    monkeypatch.setenv("DECIWAVES_VGMSTREAM", str(vg))
+
+    rc = fx.main(["--package", "pkg", "--out-dir", out_dir])
+    assert rc != 0
+    out = capsys.readouterr().out
+    assert "ERROR" in out and "region" in out
+    assert "resolved=" not in out  # no clean-run summary line for a refusal
+
+
+def test_stale_header_hint_backfills_the_right_manifest_from_any_cwd(tmp_path, monkeypatch, capsys):
+    # A path with a space (a "DEATH STRANDING 2" install) must survive
+    # copy-paste, and the command must target THIS out-dir, not the default
+    # out/ds2 relative to wherever it's pasted.
+    ws = tmp_path / "my workspace"
+    out_dir = str(ws / "ds2")
+    manifest_path, *_ = _write_stale_workspace(out_dir)
+    pkg = str(tmp_path / "DEATH STRANDING 2" / "package")
+    _install_ds2_stubs(monkeypatch, _fake_lines(2))
+    vg = tmp_path / "vg.exe"; vg.write_bytes(b"x")
+    monkeypatch.setenv("DECIWAVES_VGMSTREAM", str(vg))
+    monkeypatch.chdir(ws)
+
+    assert fx.main(["--package", pkg, "--out-dir", "ds2"]) != 0
+    argv = _suggested_command(capsys.readouterr().out)
+    assert argv[:3] == ["python", "-m", "deciwaves.games.ds2.extract"]
+    assert argv[argv.index("--out-dir") + 1] == os.path.abspath(out_dir)
+    assert argv[argv.index("--package") + 1] == os.path.abspath(pkg)
+
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    monkeypatch.setattr(fx.StreamingGraph, "from_file",
+                        staticmethod(lambda path: _make_backfill_graph()))
+    assert fx.main(argv[3:]) == 0
+    from deciwaves.engine.catalog_io import read_csv_rows
+    assert [r["region"] for r in read_csv_rows(manifest_path)] == ["l200_aus", "root"]

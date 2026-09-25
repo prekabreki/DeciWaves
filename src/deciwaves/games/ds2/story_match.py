@@ -30,11 +30,15 @@ from deciwaves.engine.subtitle_match import (
 ORPHAN_BASE = 10_000_000
 
 # Region progression order (content-validated — see
-# .memories/ds2-story-order-signals.md). `root` is deliberately last: it is
-# 38.3% of lines and mixes system/ambient with story — last is the honest
-# position. An unrecognised region sorts after `root` rather than crashing.
+# .memories/ds2-story-order-signals.md). These are all nine regions of the
+# retail graph. The numbered `l###` regions run in numeric order; `l800_fra`
+# (1 clip) is placed by that numbering, not by transcription. `root` follows
+# them: it is 63.4% of lines (10,687 of 16,854) and mixes system/ambient with
+# story, so after the numbered regions is the honest position. `remain` (280
+# clips) is last of all: it is unvalidated mixed content with no story
+# position. An unrecognised region sorts after `remain` rather than crashing.
 _REGION_ORDER = ["l100_mex", "l200_aus", "l400_nr1", "l500_nr2",
-                 "l600_nr3", "l700_bea", "root"]
+                 "l600_nr3", "l700_bea", "l800_fra", "root", "remain"]
 REGION_RANK = {r: i for i, r in enumerate(_REGION_ORDER)}
 
 

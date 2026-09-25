@@ -392,3 +392,20 @@ def test_root_sorts_last_among_regions(tmp_path):
     u_regions = [r["line_id"] for r in sorted(unmatched,
                   key=lambda r: int(r["gamescript_index"]))]
     assert u_regions == ["o100", "o200", "oRoot"]
+
+
+# Every region the retail graph actually has (post-#391, 16,854 clips). A tenth
+# appearing silently would sort after `remain` with no story position -- add it
+# here AND to _REGION_ORDER in its real place.
+RETAIL_REGIONS = ["l100_mex", "l200_aus", "l400_nr1", "l500_nr2", "l600_nr3",
+                  "l700_bea", "l800_fra", "root", "remain"]
+
+
+def test_all_retail_regions_are_ranked_in_story_order():
+    assert set(RETAIL_REGIONS) <= set(story_match.REGION_RANK)
+    assert sorted(RETAIL_REGIONS, key=story_match._region_rank) == RETAIL_REGIONS
+
+
+def test_unknown_region_sorts_after_every_ranked_region():
+    unknown = story_match._region_rank("l900_new")
+    assert all(unknown > story_match._region_rank(r) for r in RETAIL_REGIONS)
