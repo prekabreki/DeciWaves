@@ -39,6 +39,7 @@ module docstring ("murmur ... decrypt ... Oodle"):
   means `oodle_decompress()` itself has no synthetic-bytes coverage here.
 """
 import struct
+import sys
 
 import pytest
 
@@ -286,8 +287,9 @@ def test_encrypted_archive_round_trips(tmp_path):
 # --- Oodle loader: per-path caching --------------------------------------
 #
 # _load_oodle can't be exercised against a real oo2core DLL in CI (no game
-# install), so ctypes.WinDLL itself is faked -- this only targets the
-# caching/argtypes contract, not the real Kraken decompress call.
+# install), so the module's DLL loader (ctypes.WinDLL on Windows) is faked --
+# this only targets the caching/argtypes contract, not the real Kraken
+# decompress call.
 
 class _FakeOodleLib:
     def __init__(self, dll_path):
@@ -313,12 +315,12 @@ def test_load_oodle_caches_per_dll_path(monkeypatch):
         constructed.append(path)
         return _FakeOodleLib(path)
 
-    monkeypatch.setattr(bin_archive.ctypes, "WinDLL", _fake_windll)
+    monkeypatch.setattr(bin_archive, "_OodleDLL", _fake_windll)
 
     lib_a = bin_archive._load_oodle("path_a.dll")
     lib_b = bin_archive._load_oodle("path_b.dll")
 
-    assert constructed == ["path_a.dll", "path_b.dll"]  # one WinDLL() call per distinct path
+    assert constructed == ["path_a.dll", "path_b.dll"]  # one DLL load per distinct path
     assert lib_a is not lib_b
     assert lib_a.dll_path == "path_a.dll"
     assert lib_b.dll_path == "path_b.dll"
@@ -332,7 +334,7 @@ def test_load_oodle_reuses_same_dll_path(monkeypatch):
         constructed.append(path)
         return _FakeOodleLib(path)
 
-    monkeypatch.setattr(bin_archive.ctypes, "WinDLL", _fake_windll)
+    monkeypatch.setattr(bin_archive, "_OodleDLL", _fake_windll)
 
     lib_1 = bin_archive._load_oodle("same.dll")
     lib_2 = bin_archive._load_oodle("same.dll")
@@ -344,9 +346,25 @@ def test_load_oodle_reuses_same_dll_path(monkeypatch):
 def test_load_oodle_declares_argtypes(monkeypatch):
     """OodleLZ_Decompress.argtypes must be explicitly declared (not left to
     ctypes' fragile default int marshalling) alongside its .restype."""
-    monkeypatch.setattr(bin_archive.ctypes, "WinDLL", lambda path: _FakeOodleLib(path))
+    monkeypatch.setattr(bin_archive, "_OodleDLL", lambda path: _FakeOodleLib(path))
 
     lib = bin_archive._load_oodle("argtypes.dll")
 
     assert lib.OodleLZ_Decompress.argtypes is not None
     assert len(lib.OodleLZ_Decompress.argtypes) == 14  # matches the 14-arg call in oodle_decompress()
+
+
+def test_load_oodle_without_windll_fails_clearly(monkeypatch):
+    """Off Windows there is no ctypes.WinDLL: _load_oodle must raise a RuntimeError
+    that says so, not an AttributeError from inside ctypes."""
+    monkeypatch.setattr(bin_archive, "_OodleDLL", None)
+
+    with pytest.raises(RuntimeError, match="needs Windows"):
+        bin_archive._load_oodle("nowindll.dll")
+    assert bin_archive._oodle_cache == {}  # nothing half-cached
+
+
+def test_oodle_loader_is_windll_on_windows_only():
+    """The loader is exactly ctypes.WinDLL where it exists, and absent elsewhere."""
+    assert bin_archive._OodleDLL is getattr(bin_archive.ctypes, "WinDLL", None)
+    assert (bin_archive._OodleDLL is not None) == (sys.platform == "win32")

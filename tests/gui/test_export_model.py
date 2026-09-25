@@ -398,15 +398,19 @@ def test_resolve_ds_install_matches_cli():
     """The shared helper produces the same (data_dir, oodle) that the CLI's
     own code path does for a given config (regression guard: the helper and
     CLI must agree so preview/export don't silently resolve differently)."""
-    cfg = {"ds_install": r"C:\DS"}
+    # Built with the platform's own separator: the helper joins with os.path, so a
+    # hard-coded backslash path only ever matched on Windows.
+    install = os.path.join(os.sep, "Games", "DS")
+    cfg = {"ds_install": install}
     data_dir, oodle = resolve_ds_install(cfg)
-    assert data_dir == r"C:\DS\data"
-    assert oodle == r"C:\DS\oo2core_7_win64.dll"
+    assert data_dir == install + os.sep + "data"
+    assert oodle == install + os.sep + "oo2core_7_win64.dll"
 
-    cfg_override = {"ds_install": r"C:\DS", "oodle_dll": r"D:\oo.dll"}
+    override = os.path.join(os.sep, "elsewhere", "oo.dll")
+    cfg_override = {"ds_install": install, "oodle_dll": override}
     data_dir2, oodle2 = resolve_ds_install(cfg_override)
-    assert data_dir2 == r"C:\DS\data"
-    assert oodle2 == r"D:\oo.dll"
+    assert data_dir2 == install + os.sep + "data"
+    assert oodle2 == override
 
     # Unconfigured -> (None, None)
     assert resolve_ds_install({}) == (None, None)

@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QMessageBox  # noqa: E402
 from deciwaves.gui.export import DumpRunner  # noqa: E402
 from deciwaves.gui.jobs import JobRunner  # noqa: E402
 from deciwaves.gui.shell import MainWindow  # noqa: E402
+from deciwaves.gui.views.library import _TableModel  # noqa: E402
 
 _SLOW = "import time\nfor i in range(200):\n print(i, flush=True); time.sleep(0.02)"
 
@@ -91,7 +92,17 @@ def test_qsettings_round_trip_saves_and_restores_state(tmp_path, qtbot):
 
     w1.bar.select_game("hzd")
     w1.bar.set_workspace("/test/workspace")
-    w1_header = w1.library._table.horizontalHeader().saveState()
+
+    # A user drag on an Interactive column, so a restore that silently fell back to
+    # the default widths could not match the saved state.
+    table1 = w1.library._table
+    header1 = table1.horizontalHeader()
+    header1.resizeSection(_TableModel.COL_SPEAKER, 150)
+    # saveState() does not flush a posted section resize, so snapshot only once the
+    # Stretch column has absorbed the viewport. Comparing a pre-layout snapshot with
+    # the settled, restored window is what failed on Linux; it was never QSettings.
+    qtbot.waitUntil(lambda: header1.length() == table1.viewport().width(), timeout=2000)
+    w1_header = header1.saveState()
 
     w1.close()
 
@@ -106,8 +117,10 @@ def test_qsettings_round_trip_saves_and_restores_state(tmp_path, qtbot):
     assert w2.bar.current_game() == "hzd"
     assert w2.bar.workspace() == "/test/workspace"
 
-    qtbot.wait(50)
-    assert w2.library._table.horizontalHeader().saveState() == w1_header
+    # The header restore is deferred to the event loop (QTimer.singleShot(0)).
+    header2 = w2.library._table.horizontalHeader()
+    qtbot.waitUntil(lambda: header2.saveState() == w1_header, timeout=2000)
+    assert header2.sectionSize(_TableModel.COL_SPEAKER) == 150
 
 
 def test_minimum_width_fits_1366(qtbot):
