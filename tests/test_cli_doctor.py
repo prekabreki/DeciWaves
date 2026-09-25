@@ -3,6 +3,7 @@ resolution, matching engine/audio_clip.py / games/fw/extract.py /
 games/hzd/atrac9.py) plus the run_doctor() wiring and exit-code contract.
 """
 
+import sys
 
 from deciwaves.cli import config
 from deciwaves.cli import doctor
@@ -26,7 +27,11 @@ def test_check_tool_env_var_bare_name_resolves_on_path(tmp_path, monkeypatch):
     to subprocess.run, where PATH lookup works, so doctor's is_file()-only check
     used to fail a genuinely-working config. Restores the env-on-PATH coverage the
     deleted test_check_tool_found_via_env used to give."""
-    (tmp_path / "vgmstream-cli.exe").write_bytes(b"x")
+    # A platform-correct executable: shutil.which wants a PATHEXT suffix on Windows
+    # and the execute bit everywhere else.
+    exe = tmp_path / ("vgmstream-cli.exe" if sys.platform == "win32" else "vgmstream-cli")
+    exe.write_bytes(b"x")
+    exe.chmod(0o755)
     monkeypatch.setenv("PATH", str(tmp_path))
     monkeypatch.setenv("PATHEXT", ".EXE")
     monkeypatch.setenv("DECIWAVES_VGMSTREAM", "vgmstream-cli")  # bare name, on PATH

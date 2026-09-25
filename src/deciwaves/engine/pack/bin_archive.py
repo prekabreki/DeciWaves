@@ -93,7 +93,12 @@ def _decrypt_chunk_data(key_block: bytes, data: bytearray):
         data[i] ^= digest[i % 16]
 
 
-_oodle_cache: dict[str, ctypes.WinDLL] = {}
+# oo2core_7_win64.dll is a Windows DLL and ctypes only defines WinDLL on Windows, so
+# the loader is resolved behind a platform check: importing this module (and the
+# Oodle-free index/lookup stage) stays usable elsewhere, and only an actual
+# decompress fails, with a message that names the reason.
+_OodleDLL = getattr(ctypes, "WinDLL", None)
+_oodle_cache: dict[str, ctypes.CDLL] = {}
 _oodle_lock = threading.Lock()
 
 _OODLE_DECOMPRESS_ARGTYPES = [
@@ -115,9 +120,13 @@ def _load_oodle(dll_path: str):
     # PackIndex pointed at a different Oodle DLL doesn't silently reuse the
     # first one ever loaded.
     if dll_path not in _oodle_cache:
+        if _OodleDLL is None:
+            raise RuntimeError(
+                f"Oodle decompression needs Windows: {dll_path} is a Windows DLL and "
+                f"this platform has no ctypes.WinDLL to load it.")
         with _oodle_lock:
             if dll_path not in _oodle_cache:
-                lib = ctypes.WinDLL(dll_path)
+                lib = _OodleDLL(dll_path)
                 lib.OodleLZ_Decompress.restype = ctypes.c_int64
                 lib.OodleLZ_Decompress.argtypes = _OODLE_DECOMPRESS_ARGTYPES
                 _oodle_cache[dll_path] = lib

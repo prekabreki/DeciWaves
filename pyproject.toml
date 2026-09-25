@@ -57,8 +57,11 @@ testpaths = ["tests"]
 # worktree import its own source regardless of the shared .pth. Env-independent:
 # .venv is affected too, so "use the venv" does NOT fix it on its own.
 # See .memories/worktree-editable-install-contamination.md.
+# "." (the rootdir) is there for `from tools import ...` in tests/: `python -m pytest`
+# puts the cwd on sys.path as a side effect, the bare `pytest` / `uv run pytest`
+# entry point does not, and collection failed under it.
 addopts = "--timeout=60 --timeout-method=thread"
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 markers = [
     "allow_dialogs: permit modal dialogs (QMessageBox, QDialog.exec/exec_) in this test without failing; patched methods return QMessageBox.Yes",
 ]
