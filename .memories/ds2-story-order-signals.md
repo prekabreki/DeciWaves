@@ -32,6 +32,11 @@ region for free from [[ds2-audio-binding]]'s existing resolver:
 
 (`l800_fra` holds zero dialogue -- see [[ds2-audio-binding]].)
 
+**Superseded counts (post-#391, 16,854-clip `clip-index.csv`, measured for #404):** the retail
+graph has **nine** regions, not seven. `root` is now 63.4% (10,687), `l800_fra` holds **1** clip,
+and a ninth region `remain` holds 280 clips of unvalidated mixed content. `story_match` ranks
+`l800_fra` by its number (after `l700_bea`), then `root`, then `remain` last.
+
 ## It really is story order -- validated by content, not assumed
 
 Six clips sampled evenly by offset from each region, decoded and transcribed (faster-whisper

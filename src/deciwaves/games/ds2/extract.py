@@ -88,6 +88,13 @@ class DecodeError(Exception):
     pass
 
 
+class StaleManifestError(Exception):
+    """An existing ``clip-index.csv`` predates the ``region`` column (#388).
+
+    Raised instead of appending, so ``main`` exits non-zero and a chained
+    ``deciwaves ds2 run`` stops rather than recording extract as done."""
+
+
 def backfill_region(package_dir: str, out_dir: str = "out/ds2") -> int:
     """One-shot: add a ``region`` column to an existing ``clip-index.csv``
     without re-decoding any audio.
@@ -177,6 +184,32 @@ class ExtractStats:
     failed: int = 0     # per-line failures this run
 
 
+def _quote(path: str) -> str:
+    return f'"{path}"' if " " in path else path
+
+
+def _refuse_stale_manifest(manifest_path: str, package_dir: str, out_dir: str) -> None:
+    """Raise :class:`StaleManifestError` if *manifest_path* predates #388's
+    'region' column: appending 8-field rows under a 7-field header silently
+    corrupts the CSV and surfaces one stage later in story_match as a missing
+    column. Checked before the graph load or the resume prune, so a refused
+    run is fast and leaves every output file untouched."""
+    if not os.path.isfile(manifest_path) or os.path.getsize(manifest_path) == 0:
+        return
+    with open(manifest_path, "r", encoding="utf-8-sig") as f:
+        header = f.readline().rstrip("\r\n")
+    if header and "region" not in header.split(","):
+        # Absolute paths, so the hint targets THIS manifest when pasted from
+        # any cwd -- without --out-dir it would backfill the default out/ds2
+        # relative to wherever it's run, and report "nothing to do" at exit 0.
+        raise StaleManifestError(
+            f"existing {manifest_path} lacks the 'region' column (it was created "
+            f"before #388). Run the one-shot region backfill: "
+            f"`python -m deciwaves.games.ds2.extract --backfill "
+            f"--package {_quote(os.path.abspath(package_dir))} "
+            f"--out-dir {_quote(os.path.abspath(out_dir))}` and re-run extract.")
+
+
 def extract(package_dir: str, out_dir: str = "out/ds2", *,
             limit: int | None = None, decode: bool = True,
             vgmstream: str = None, jobs: int | None = None) -> ExtractStats:
@@ -211,6 +244,7 @@ def extract(package_dir: str, out_dir: str = "out/ds2", *,
     manifest_path = os.path.join(out_dir, "clip-index.csv")
     processed_path = os.path.join(out_dir, "clip-index-processed.txt")
     errors_path = os.path.join(out_dir, "extract-errors.log")
+    _refuse_stale_manifest(manifest_path, package_dir, out_dir)
     os.makedirs(audio_dir, exist_ok=True)
 
     graph = StreamingGraph.from_file(os.path.join(package_dir, "streaming_graph.core"))
@@ -261,18 +295,6 @@ def extract(package_dir: str, out_dir: str = "out/ds2", *,
             return ln, None, f"{type(exc).__name__}: {exc}"
 
     new_manifest = not os.path.isfile(manifest_path) or os.path.getsize(manifest_path) == 0
-    # Guard against a stale manifest from before #388 added the 'region'
-    # column: appending 8-field rows under a 7-field header silently corrupts
-    # the CSV and surfaces one stage later in story_match as a missing column.
-    if not new_manifest:
-        with open(manifest_path, "r", encoding="utf-8-sig") as _f:
-            _header = _f.readline().rstrip("\r\n")
-        if _header and "region" not in _header:
-            print(f"extract: ERROR - existing {manifest_path} lacks the 'region' "
-                  f"column (it was created before #388). Run the one-shot region "
-                  f"backfill: `python -m deciwaves.games.ds2.extract --backfill "
-                  f"--package <package_dir>` and re-run extract.")
-            return ExtractStats()
     # errors_path is opened "w" (rewritten from scratch), NOT "a": failed lines are
     # retried on every resume, so appending across runs would grow one duplicate
     # entry per resume for a persistently-failing line. Truncating means the log
@@ -320,8 +342,12 @@ def main(argv=None) -> int:
     if a.backfill:
         backfill_region(a.package, a.out_dir)
         return 0
-    stats = extract(a.package, a.out_dir, limit=a.limit, decode=not a.no_decode,
-                    jobs=a.jobs)
+    try:
+        stats = extract(a.package, a.out_dir, limit=a.limit, decode=not a.no_decode,
+                        jobs=a.jobs)
+    except StaleManifestError as exc:
+        print(f"extract: ERROR - {exc}")
+        return 1
     msg = (f"resolved={stats.resolved} ok={stats.ok} skipped={stats.skipped} "
            f"failed={stats.failed}")
     if stats.failed:
