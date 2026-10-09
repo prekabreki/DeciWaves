@@ -59,10 +59,28 @@ def test_none_path_is_omitted_so_setup_keeps_the_saved_value():
 
 def test_all_path_flags_present_when_given():
     argv = build_setup_argv(BASE, ds_install="a", hzd_package="b", fw_package="c",
-                            fw_gamescript="d", fw_types="f", tools_dir="e")
-    for flag in ("--ds-install", "--hzd-package", "--fw-package",
-                 "--fw-gamescript", "--fw-types", "--tools-dir"):
+                            ds2_package="g", fw_gamescript="d", ds2_gamescript="h",
+                            fw_types="f", tools_dir="e")
+    for flag in ("--ds-install", "--hzd-package", "--fw-package", "--ds2-package",
+                 "--fw-gamescript", "--ds2-gamescript", "--fw-types", "--tools-dir"):
         assert flag in argv
+
+
+def test_ds2_path_flags_are_absolutized(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    argv = build_setup_argv(BASE, ds2_package="pkg", ds2_gamescript="script.txt")
+    assert argv[argv.index("--ds2-package") + 1] == os.path.abspath("pkg")
+    assert argv[argv.index("--ds2-gamescript") + 1] == os.path.abspath("script.txt")
+
+
+def test_ds2_empty_string_passes_through_to_clear():
+    argv = build_setup_argv(BASE, ds2_gamescript="")
+    assert argv[argv.index("--ds2-gamescript") + 1] == ""
+
+
+def test_ds2_none_is_omitted():
+    argv = build_setup_argv(BASE, ds2_package=None, ds2_gamescript=None)
+    assert "--ds2-package" not in argv and "--ds2-gamescript" not in argv
 
 
 def test_fw_types_path_is_absolutized(tmp_path, monkeypatch):
@@ -125,6 +143,14 @@ def test_parses_missing_and_not_set_rows(capsys):
     # unset games are neither ok nor failed -- neutral
     assert not rows["hzd_pkg"].ok and not rows["hzd_pkg"].failed
     assert not rows["fw_pkg"].ok and not rows["fw_pkg"].failed
+
+
+def test_parses_ds2_package_and_gamescript_rows(capsys):
+    out = _real_summary(capsys, [], ds2_package=r"C:\DS2",
+                        ds2_gamescript=r"C:\DS2\script.md")
+    rows = {r.label: r for r in parse_setup_summary(out)}
+    assert rows["ds2_pkg"].ok
+    assert rows["ds2_script"].ok
 
 
 def test_parse_ignores_non_summary_lines():

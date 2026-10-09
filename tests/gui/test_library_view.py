@@ -356,6 +356,43 @@ def test_fw_lengths_fill_via_background_pass(qtbot, tmp_path):
     assert v._model.data(idx, Qt.DisplayRole) != "—"
 
 
+def test_runtime_estimate_fills_with_fw_lengths(qtbot, tmp_path):
+    """The running total next to the checked count sums known lengths and estimates size."""
+    ws = str(tmp_path)
+    _write_wav(os.path.join(ws, "out", "fw", "audio", "f1.wav"), seconds=10.0)
+    _write_wav(os.path.join(ws, "out", "fw", "audio", "f2.wav"), seconds=20.0)
+    rows = [{"line_id": "f1", "wav": "audio/f1.wav", "speaker": "Varl", "subtitle": "a",
+             "gamescript_index": "1", "quest": "MQ", "tier": "S", "score": "9",
+             "transcript": "a"},
+            {"line_id": "f2", "wav": "audio/f2.wav", "speaker": "Varl", "subtitle": "b",
+             "gamescript_index": "2", "quest": "MQ", "tier": "S", "score": "9",
+             "transcript": "b"}]
+    _write_csv(os.path.join(ws, "out", "fw", "full-reel-manifest.csv"), FW_FULL, rows)
+    v = LibraryView()
+    qtbot.addWidget(v)
+    v.refresh("fw", ws)
+    v._wait_for_parse()
+    assert v.runtime_estimate_text() == ""        # lengths not probed yet -> nothing to add
+
+    v._duration_pool.waitForDone()
+    QApplication.processEvents()
+    text = v.runtime_estimate_text()
+    assert "0:00:30 runtime" in text
+    assert "@128k" in text and "fits one file" in text
+    assert text in v.status_text()                # shown next to the checked count
+
+
+def test_runtime_estimate_empty_for_ds(qtbot, tmp_path):
+    """DS carries no per-line duration, so no running total is shown (never a fake 0)."""
+    ws = str(tmp_path)
+    _write_ds_catalog(ws, [_cat_row(line_id="a")])
+    v = LibraryView()
+    qtbot.addWidget(v)
+    v.refresh("ds", ws)
+    v._wait_for_parse()
+    assert v.runtime_estimate_text() == ""
+
+
 def test_stale_duration_task_results_are_dropped(qtbot, tmp_path, monkeypatch):
     """When refresh() fires while a prior duration probe is still in flight, the stale
     result must be discarded — the generation tag prevents double-population and races."""

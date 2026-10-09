@@ -588,7 +588,7 @@ class LibraryView(QWidget):
 
         self._apply_filters()
 
-        if self._game == "fw" and self._rows:
+        if self._game in ("fw", "ds2") and self._rows:
             task = _DurationTask(
                 self._duration_signaller, self._duration_generation, list(self._rows))
             self._duration_pool.start(task)
@@ -641,13 +641,13 @@ class LibraryView(QWidget):
         if has_len:
             tip = ("Unchecks every line shorter than this many seconds "
                    "(uses each line's decoded audio length).")
-        elif self._game == "fw":
+        elif self._game in ("fw", "ds2"):
             tip = ("Line durations are still loading — this filter enables once "
                    "they're ready.")
         else:
             tip = ("Not available for this game: filtering by length needs each line's "
-                   "audio duration, which only Forbidden West provides. DS/HZD lines "
-                   "carry no duration (the Length column shows “—”).")
+                   "audio duration, which Forbidden West and Death Stranding 2 provide. "
+                   "DS/HZD lines carry no duration (the Length column shows “—”).")
         self._short_secs.setToolTip(tip)
         self._uncheck_short_btn.setToolTip(tip)
 
@@ -842,7 +842,34 @@ class LibraryView(QWidget):
         base = f"{self.checked_count()} checked · {self.visible_count()} visible · {self.total_count()} total"
         if self._sort_key is None:
             base += " · story order"
+        estimate = self.runtime_estimate_text()
+        if estimate:
+            base += f" · {estimate}"
         return base
+
+    def runtime_estimate_text(self) -> str:
+        """A running total next to the checked count: summed duration of the checked rows
+        that have a known length, plus the MP3 size estimate at the panel's bitrate and
+        whether that fits one reel (the ~290 MB cap, spec §8.2). Empty when no checked row
+        has a known length yet (DS has no per-line duration; FW/DS2 fill in as their WAV
+        probe finishes). Rows of unknown length are called out so a partial total is never
+        mistaken for the whole selection."""
+        checked = [r for r in self._rows if r.line_id not in self._unchecked]
+        known = [r.length_s for r in checked if r.length_s is not None]
+        if not known:
+            return ""
+        total = sum(known)
+        kbps = self.export.bitrate()
+        mb = total * kbps * 1000 / 8 / 1_000_000
+        h, rem = divmod(int(round(total)), 3600)
+        m, s = divmod(rem, 60)
+        text = f"≈{h}:{m:02d}:{s:02d} runtime"
+        unknown = len(checked) - len(known)
+        if unknown:
+            text += f" (+{unknown} unknown)"
+        text += f", ~{mb:.0f} MB @{kbps}k"
+        text += " (fits one file)" if mb <= 290 else " (splits)"
+        return text
 
     def _wait_for_parse(self) -> None:
         """Wait for any in-flight parse task to finish and deliver its result to the

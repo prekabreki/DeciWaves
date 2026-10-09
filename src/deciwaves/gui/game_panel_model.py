@@ -34,6 +34,9 @@ _CONTROLS = {
     "ds": frozenset({CTRL_TRANSCRIPT, CTRL_MAIN_STORY}),
     "hzd": frozenset({CTRL_GPU, CTRL_SAMPLE_CAP, CTRL_SPINE_ONLY}),
     "fw": frozenset({CTRL_GPU, CTRL_TYPES_JSON, CTRL_GAMESCRIPT, CTRL_TIERS}),
+    # DS2 has a GPU asr stage + a BYO gamescript, but no types.json (the DS2 object
+    # reader is unsolved, #370) and no tier/sample-cap controls.
+    "ds2": frozenset({CTRL_GPU, CTRL_GAMESCRIPT}),
 }
 
 # The HZD ASR sample cap the panel's first bind applies (spec §7): a bounded default so the
@@ -70,6 +73,7 @@ _SCAN_WARNINGS = {
     "ds": "Scan runs in minutes on CPU.",
     "hzd": "Scan is quick; bind may take hours (GPU).",
     "fw": "Scan is quick; asr may take hours (GPU).",
+    "ds2": "Scan extracts clips; asr may take hours (GPU).",
 }
 
 
