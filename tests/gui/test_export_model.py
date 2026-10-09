@@ -667,3 +667,110 @@ def test_round_trip_export_reorder_import_render_selection(tmp_path):
     with open(sel, encoding="utf-8-sig") as f:
         rows = list(csv.DictReader(f))
     assert [r["line_id"] for r in rows] == ["c", "a"]
+
+
+# --- Export order CSV: stable n + duration_s columns (issue #385 comment) ----
+
+def test_write_order_export_adds_n_first_and_duration_last(tmp_path):
+    from deciwaves.gui import export_model as em
+
+    ws = str(tmp_path)
+    _make_ds_playlist(ws, ["a", "b", "c"])
+    dest = os.path.join(ws, "order-export.csv")
+    n = em.write_order_export(ws, "ds", dest)
+    assert n == 3
+    with open(dest, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        cols = reader.fieldnames
+        rows = list(reader)
+    assert cols[0] == "n" and cols[-1] == "duration_s"
+    assert [r["n"] for r in rows] == ["1", "2", "3"]
+    # DS has no per-line duration source -> blank, never a guessed value.
+    assert [r["duration_s"] for r in rows] == ["", "", ""]
+
+
+def test_write_order_export_joins_hzd_duration_from_clip_index(tmp_path):
+    from deciwaves.gui import export_model as em
+
+    ws = str(tmp_path)
+    _make_hzd_manifest(ws, ["x"])   # _hzd_row uses clip_row "1"
+    _write_csv(os.path.join(ws, "out", "hzd", "clip-index.csv"),
+               ["clip_row", "offset", "b_samples"],
+               [{"clip_row": "1", "offset": "0", "b_samples": "48000"}])
+    dest = os.path.join(ws, "order.csv")
+    em.write_order_export(ws, "hzd", dest)
+    with open(dest, newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    assert rows[0]["duration_s"] == "1.000"
+
+
+def test_write_order_export_no_source_raises(tmp_path):
+    from deciwaves.gui import export_model as em
+
+    try:
+        em.write_order_export(str(tmp_path), "ds", os.path.join(str(tmp_path), "x.csv"))
+    except ExportError:
+        return
+    raise AssertionError("expected ExportError when there is no render input")
+
+
+def test_import_order_accepts_n_column_without_line_id(tmp_path):
+    from deciwaves.gui import export_model as em
+
+    ws = str(tmp_path)
+    _write_playlist(ws, ["a", "b", "c"])
+    src = os.path.join(ws, "edited.csv")
+    # an agent stripped line_id and reordered by the stable ordinal
+    _write_user_csv(src, ["3", "1"], header="n,note\n")
+    res = em.import_order(ws, "ds", src)
+    assert res.ok and res.count == 2 and not res.errors
+    with open(em.imported_order_path(ws, "ds"), encoding="utf-8-sig") as f:
+        assert [r["line_id"] for r in csv.DictReader(f)] == ["c", "a"]
+
+
+def test_import_order_rejects_out_of_range_n(tmp_path):
+    from deciwaves.gui import export_model as em
+
+    ws = str(tmp_path)
+    _write_playlist(ws, ["a", "b"])
+    src = os.path.join(ws, "edited.csv")
+    _write_user_csv(src, ["9"], header="n\n")
+    res = em.import_order(ws, "ds", src)
+    assert not res.ok and not em.has_imported_order(ws, "ds")
+    assert "outside" in " ".join(res.errors)
+
+
+def test_import_order_prefers_line_id_when_both_columns_present(tmp_path):
+    from deciwaves.gui import export_model as em
+
+    ws = str(tmp_path)
+    _write_playlist(ws, ["a", "b"])
+    src = os.path.join(ws, "edited.csv")
+    _write_user_csv(src, ["2,b"], header="n,line_id\n")   # line_id wins over a disagreeing n
+    res = em.import_order(ws, "ds", src)
+    assert res.ok
+    with open(em.imported_order_path(ws, "ds"), encoding="utf-8-sig") as f:
+        assert [r["line_id"] for r in csv.DictReader(f)] == ["b"]
+
+
+def test_order_export_round_trips_through_n(tmp_path):
+    from deciwaves.gui import export_model as em
+
+    ws = str(tmp_path)
+    _make_ds_playlist(ws, ["a", "b", "c"])
+    dest = os.path.join(ws, "exported.csv")
+    em.write_order_export(ws, "ds", dest)
+    with open(dest, newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    edited = os.path.join(ws, "edited.csv")
+    _write_user_csv(edited, [rows[2]["n"], rows[0]["n"]], header="n\n")
+    assert em.import_order(ws, "ds", edited).ok
+    sel = em.write_render_selection(ws, "ds", unchecked=set())
+    with open(sel, encoding="utf-8-sig") as f:
+        assert [r["line_id"] for r in csv.DictReader(f)] == ["c", "a"]
+
+
+def test_round_trip_instructions_mention_n_column():
+    from deciwaves.gui.export_model import ROUND_TRIP_INSTRUCTIONS
+
+    assert "sort by n" in ROUND_TRIP_INSTRUCTIONS

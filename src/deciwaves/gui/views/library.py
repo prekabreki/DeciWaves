@@ -842,7 +842,34 @@ class LibraryView(QWidget):
         base = f"{self.checked_count()} checked · {self.visible_count()} visible · {self.total_count()} total"
         if self._sort_key is None:
             base += " · story order"
+        estimate = self.runtime_estimate_text()
+        if estimate:
+            base += f" · {estimate}"
         return base
+
+    def runtime_estimate_text(self) -> str:
+        """A running total next to the checked count: summed duration of the checked rows
+        that have a known length, plus the MP3 size estimate at the panel's bitrate and
+        whether that fits one reel (the ~290 MB cap, spec §8.2). Empty when no checked row
+        has a known length yet (DS has no per-line duration; FW/DS2 fill in as their WAV
+        probe finishes). Rows of unknown length are called out so a partial total is never
+        mistaken for the whole selection."""
+        checked = [r for r in self._rows if r.line_id not in self._unchecked]
+        known = [r.length_s for r in checked if r.length_s is not None]
+        if not known:
+            return ""
+        total = sum(known)
+        kbps = self.export.bitrate()
+        mb = total * kbps * 1000 / 8 / 1_000_000
+        h, rem = divmod(int(round(total)), 3600)
+        m, s = divmod(rem, 60)
+        text = f"≈{h}:{m:02d}:{s:02d} runtime"
+        unknown = len(checked) - len(known)
+        if unknown:
+            text += f" (+{unknown} unknown)"
+        text += f", ~{mb:.0f} MB @{kbps}k"
+        text += " (fits one file)" if mb <= 290 else " (splits)"
+        return text
 
     def _wait_for_parse(self) -> None:
         """Wait for any in-flight parse task to finish and deliver its result to the

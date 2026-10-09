@@ -266,8 +266,9 @@ ROUND_TRIP_INSTRUCTIONS = (
     "Custom order — how it works. Export the CSV, open it in a spreadsheet, then drag "
     "rows to reorder and delete rows to drop those lines. Import it back and your reels "
     "play in that exact order.\n"
-    "• Only the line_id column matters — reorder/delete whole rows; don't worry about the "
-    "other columns.\n"
+    "• Reorder/delete whole rows. Keep either the line_id column or its stable 1-based n "
+    "column (sort by n to get back to the original order); don't worry about the other "
+    "columns.\n"
     "• You can reorder or subset the lines that were exported; ids that aren't in the "
     "current list are rejected on import.\n"
     "• Import updates the Library and future exports — it does not rewrite reels you already "
@@ -282,6 +283,87 @@ ROUND_TRIP_INSTRUCTIONS = (
 )
 
 
+# Columns the user-facing "Export order CSV" adds on top of the pipeline's own schema.
+# ``n`` is a stable 1-based ordinal of the ORIGINAL export order, so an agent editing the
+# CSV can re-emit a short integer instead of a 54-char UUID (and a human can sort back).
+ORDINAL_COLUMN = "n"
+# Per-line duration in seconds, blank when the game's schema has no duration source (DS).
+DURATION_COLUMN = "duration_s"
+
+
+def _row_durations(workspace: str, game: str, rows: list[dict]) -> dict[str, float | None]:
+    """``line_id -> seconds`` for *rows*, or ``None`` per row where no duration source exists.
+
+    HZD joins ``clip_index.csv`` ``b_samples`` / 48 kHz (the same proxy the Library uses);
+    FW/DS2 probe each row's extracted WAV header. DS carries no per-line duration (its
+    playlists are whole-scene Wwise tracks with no per-line length), so every value is
+    ``None`` -- ``duration_s`` is left blank rather than guessed."""
+    if game == "hzd":
+        root = out_dir(workspace, "hzd")
+        samples: dict[str, int] = {}
+        for r in _read_csv_rows(os.path.join(root, "clip-index.csv")):
+            try:
+                n = int(r.get("b_samples") or 0)
+            except ValueError:
+                n = 0
+            if n > 0:
+                samples[r.get("clip_row", "")] = n
+        return {r.get("line_id", ""): (samples.get(r.get("clip_row", ""), 0) / 48000.0 or None)
+                for r in rows}
+    if game in ("fw", "ds2"):
+        from deciwaves.gui.library_model import wav_duration_seconds
+        root = out_dir(workspace, game)
+        out: dict[str, float | None] = {}
+        for r in rows:
+            wav = r.get("wav")
+            path = os.path.normpath(os.path.join(root, wav)) if wav else None
+            out[r.get("line_id", "")] = wav_duration_seconds(path)
+        return out
+    return {r.get("line_id", ""): None for r in rows}
+
+
+def _read_csv_rows(path: str) -> list[dict]:
+    """BOM-tolerant ``csv.DictReader`` rows for *path* (``[]`` if absent/unreadable)."""
+    if not os.path.isfile(path):
+        return []
+    with open(path, "r", newline="", encoding="utf-8-sig") as f:
+        return list(csv.DictReader(f))
+
+
+def write_order_export(workspace: str, game: str, dest: str) -> int:
+    """Write the user-facing order CSV: the effective render input plus a leading 1-based
+    ``n`` column and a trailing ``duration_s`` column, atomically. Returns the row count.
+
+    The render input is copied column-for-column (its schema is the GUI<->CLI contract), so
+    re-importing the augmented file still works: :func:`import_order` keys on ``line_id``, or
+    on ``n`` when the id column was stripped. Raises :class:`ExportError` when there is no
+    render input yet."""
+    src = render_input_source(workspace, game)
+    if src is None:
+        raise ExportError(_missing_source_message(game))
+    with open(src, "r", newline="", encoding="utf-8-sig") as f:
+        reader = csv.DictReader(f)
+        base_cols = list(reader.fieldnames or [])
+        rows = list(reader)
+    durations = _row_durations(workspace, game, rows)
+    fieldnames = [ORDINAL_COLUMN, *base_cols, DURATION_COLUMN]
+
+    def _write(tmp_path: str) -> None:
+        with open(tmp_path, "w", newline="", encoding="utf-8") as out:
+            w = csv.DictWriter(out, fieldnames=fieldnames, extrasaction="ignore")
+            w.writeheader()
+            for i, r in enumerate(rows, start=1):
+                row = dict(r)
+                row[ORDINAL_COLUMN] = i
+                dur = durations.get(r.get("line_id", ""))
+                row[DURATION_COLUMN] = "" if dur is None else f"{dur:.3f}"
+                w.writerow(row)
+
+    os.makedirs(os.path.dirname(os.path.abspath(dest)), exist_ok=True)
+    atomic_write(dest, _write)
+    return len(rows)
+
+
 @dataclass(frozen=True)
 class ImportResult:
     """Outcome of :func:`import_order`. ``ok`` True -> ``path`` is the written override and
@@ -293,12 +375,30 @@ class ImportResult:
     errors: list[str]
 
 
+def _line_id_for_ordinal(raw, base_order_ids: list[str], bad_n: list[str]) -> str:
+    """Map an export CSV's 1-based ``n`` value to the base artifact's ``line_id``.
+
+    A blank/non-integer or out-of-range value is recorded in *bad_n* (the import then
+    fails loudly rather than silently dropping the row) and returns ``""``."""
+    try:
+        idx = int(raw)
+    except (TypeError, ValueError):
+        bad_n.append(str(raw or ""))
+        return ""
+    if 1 <= idx <= len(base_order_ids):
+        return base_order_ids[idx - 1]
+    bad_n.append(str(idx))
+    return ""
+
+
 def import_order(workspace: str, game: str, src_csv: str) -> ImportResult:
-    """Turn a user-edited CSV into a manual-order override. Row order = play order; the only
-    required column is ``line_id`` (others are re-joined from the pipeline artifact). Validates
-    atomically -- unknown ids, duplicate ids, a missing ``line_id`` column, an empty file, or a
-    missing pipeline artifact all abort with nothing written. On success writes
-    :func:`imported_order_path` (base schema, base row data, the user's order)."""
+    """Turn a user-edited CSV into a manual-order override. Row order = play order. The key
+    column is ``line_id``; when it is absent a stable 1-based ``n`` column (the Export order
+    CSV's ordinal) is accepted instead and joined back to the pipeline artifact's own row
+    order. Validates atomically -- unknown ids, duplicate ids, a missing ``line_id``/``n``
+    column, an out-of-range ``n``, an empty file, or a missing pipeline artifact all abort
+    with nothing written. On success writes :func:`imported_order_path` (base schema, base row
+    data, the user's order)."""
     base_src = pipeline_render_input(workspace, game)
     if base_src is None:
         return ImportResult(False, None, 0, [_missing_source_message(game)])
@@ -306,23 +406,43 @@ def import_order(workspace: str, game: str, src_csv: str) -> ImportResult:
     with open(base_src, "r", newline="", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
         fieldnames = reader.fieldnames or []
-        by_id = {r.get("line_id", ""): r for r in reader if r.get("line_id", "")}
+        base_rows = [r for r in reader if r.get("line_id", "")]
+        by_id = {r["line_id"]: r for r in base_rows}
+    # ``n`` is 1-based over the pipeline artifact's own row order. That matches the exported
+    # order whenever no manual-order override is active (the normal round-trip).
+    base_order_ids = [r["line_id"] for r in base_rows]
 
     try:
         with open(src_csv, "r", newline="", encoding="utf-8-sig") as f:
             reader = csv.DictReader(f)
-            if "line_id" not in (reader.fieldnames or []):
+            cols = reader.fieldnames or []
+            has_id = "line_id" in cols
+            has_n = ORDINAL_COLUMN in cols
+            if not has_id and not has_n:
                 return ImportResult(False, None, 0, [
-                    "CSV has no 'line_id' column -- export a fresh copy and keep that column."])
+                    "CSV has no 'line_id' (or 'n') column -- export a fresh copy and keep "
+                    "one of those columns."])
             # enumerate from 2: row 1 is the header, so row numbers match the spreadsheet
-            ordered = [((r.get("line_id") or "").strip(), n)
-                       for n, r in enumerate(reader, start=2)]
+            ordered = []
+            bad_n: list[str] = []
+            for n, r in enumerate(reader, start=2):
+                if has_id:
+                    lid = (r.get("line_id") or "").strip()
+                else:
+                    lid = _line_id_for_ordinal(r.get(ORDINAL_COLUMN), base_order_ids, bad_n)
+                ordered.append((lid, n))
     except (OSError, UnicodeDecodeError, csv.Error) as exc:
         # UnicodeDecodeError is the LIKELY real failure: Excel's plain "CSV (comma
         # delimited)" saves cp1252, so any accented char blows up the utf-8-sig read.
         return ImportResult(False, None, 0, [
             "Could not read the CSV -- is it saved as UTF-8? (Excel's plain "
             f"'CSV (comma delimited)' is not; use 'CSV UTF-8'.) Details: {exc}"])
+
+    if bad_n:
+        sample = ", ".join(bad_n[:5]) + (" ..." if len(bad_n) > 5 else "")
+        return ImportResult(False, None, 0, [
+            f"{len(bad_n)} row(s) have an 'n' outside 1..{len(base_order_ids)}: "
+            f"{sample} -- export a fresh copy (its 'n' column is definitive)."])
 
     ordered = [(lid, n) for lid, n in ordered if lid]  # drop blank-id rows (trailing lines)
     if not ordered:
