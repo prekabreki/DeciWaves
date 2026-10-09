@@ -18,6 +18,7 @@ def test_out_dir_ds_is_out_root():
 def test_out_dir_other_games_are_namespaced():
     assert out_dir("/ws", "hzd") == os.path.join("/ws", "out", "hzd")
     assert out_dir("/ws", "fw") == os.path.join("/ws", "out", "fw")
+    assert out_dir("/ws", "ds2") == os.path.join("/ws", "out", "ds2")
 
 
 def _touch(path):
@@ -49,6 +50,13 @@ def test_pipeline_render_input_fw_prefers_full_reel(tmp_path):
     assert pipeline_render_input(ws, "fw").endswith("subtitle-manifest-full.csv")
     _touch(os.path.join(ws, "out", "fw", "full-reel-manifest.csv"))
     assert pipeline_render_input(ws, "fw").endswith("full-reel-manifest.csv")
+
+
+def test_pipeline_render_input_ds2_story_manifest(tmp_path):
+    ws = str(tmp_path)
+    assert pipeline_render_input(ws, "ds2") is None
+    _touch(os.path.join(ws, "out", "ds2", "story-manifest.csv"))
+    assert pipeline_render_input(ws, "ds2").endswith("story-manifest.csv")
 
 
 def test_pipeline_render_input_unknown_game_is_none(tmp_path):

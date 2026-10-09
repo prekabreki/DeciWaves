@@ -9,8 +9,8 @@ it imports and unit-tests on the base ``.[test]`` install with no PySide6. The t
 
 Per game (mirrors each render stage's call site):
 
-- **FW** -- ``LineRow.audio_path`` already points at ``out/fw/<wav>`` (extract writes the WAVs
-  to disk), so preview just returns it; no decode.
+- **FW** / **DS2** -- ``LineRow.audio_path`` already points at ``out/<game>/<wav>`` (extract
+  writes the WAVs to disk), so preview just returns it; no decode.
 - **DS** -- ``LineRow.audio_path`` *is* the Decima ``.core.stream`` virtual path; decode via
   ``engine.audio_clip.clip_wav`` against a ``PackIndex`` (globs+hashes every ``.bin`` -- built
   once per resolver and cached), writing to render's ``out/wav-cache`` (``engine/render.py``).
@@ -79,17 +79,17 @@ class PreviewResolver:
         """Return a playable WAV path for *line_id*, decoding+caching on a miss. *audio_path*
         is the row's ``audio_path`` (FW WAV / DS stream path; unused for HZD, whose coords come
         from the manifests). Raises :class:`PreviewError` with friendly text on any failure."""
-        if self._game == "fw":
-            return self._resolve_fw(audio_path)
+        if self._game in ("fw", "ds2"):
+            return self._resolve_extracted(audio_path)
         if self._game == "ds":
             return self._resolve_ds(audio_path)
         if self._game == "hzd":
             return self._resolve_hzd(line_id)
         raise PreviewError(f"Preview is not supported for game {self._game!r}.")
 
-    # --- FW ----------------------------------------------------------------
+    # --- FW / DS2 (WAVs already extracted to disk) -------------------------
 
-    def _resolve_fw(self, audio_path: str | None) -> str:
+    def _resolve_extracted(self, audio_path: str | None) -> str:
         if not audio_path:
             raise PreviewError("This line has no extracted audio.")
         if not os.path.isfile(audio_path):

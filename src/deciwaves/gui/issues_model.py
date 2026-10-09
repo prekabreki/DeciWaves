@@ -17,6 +17,7 @@ _ERROR_LOGS = {
             "hzd/wem-metadata-errors.log", "hzd/asr-manifest-errors.log",
             "hzd/render-errors.log"],
     "fw": ["fw/extract-errors.log", "fw/render-errors.log"],
+    "ds2": ["ds2/extract-errors.log", "ds2/render-errors.log"],
 }
 # within-scene dupes the render stage drops (DS only), relative to out/.
 _DUPES = {"ds": "render-dupes.csv"}

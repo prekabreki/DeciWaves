@@ -77,7 +77,7 @@ def _make_norm_wavs(ws, game, count):
 
 
 def _make_reel_mp3s(ws, game, count):
-    subdir = {"ds": "audio", "hzd": "audio", "fw": "reels"}[game]
+    subdir = {"ds": "audio", "hzd": "audio", "fw": "reels", "ds2": "reels"}[game]
     d = os.path.join(_out(ws, game), subdir)
     os.makedirs(d, exist_ok=True)
     for i in range(count):
@@ -311,6 +311,34 @@ def test_probe_render_fw_dirs(tmp_path):
     assert signals[0].current == 8
     assert signals[1].current == 2
     assert signals[2].current == 1
+
+
+def test_probe_render_ds2_dirs(tmp_path):
+    _make_wavs(str(tmp_path), "ds2", 8)
+    _make_norm_wavs(str(tmp_path), "ds2", 2)
+    _make_reel_mp3s(str(tmp_path), "ds2", 1)
+    signals = probe_progress(str(tmp_path), "ds2", "render")
+    assert signals[0].current == 8
+    assert signals[1].current == 2
+    assert signals[2].current == 1
+
+
+def test_probe_ds2_extract_csv(tmp_path):
+    _write_csv(str(tmp_path), "ds2", "clip-index.csv", rows=12)
+    signals = probe_progress(str(tmp_path), "ds2", "extract")
+    assert any(s.current == 12 for s in signals)
+
+
+def test_probe_ds2_asr_transcripts(tmp_path):
+    _write_csv(str(tmp_path), "ds2", "transcripts.csv", rows=42)
+    signals = probe_progress(str(tmp_path), "ds2", "asr")
+    assert any(s.current == 42 for s in signals)
+
+
+def test_probe_ds2_match_story_manifest(tmp_path):
+    _write_csv(str(tmp_path), "ds2", "story-manifest.csv", rows=7)
+    signals = probe_progress(str(tmp_path), "ds2", "match")
+    assert any(s.current == 7 for s in signals)
 
 
 def test_probe_render_wav_cache_progress_still_usable(tmp_path):

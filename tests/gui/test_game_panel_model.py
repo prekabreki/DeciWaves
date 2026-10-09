@@ -48,6 +48,15 @@ def test_controls_for_fw_is_gpu_types_gamescript_tiers():
     assert "main_story" not in fw and "spine_only" not in fw
 
 
+def test_controls_for_ds2_is_gpu_and_gamescript():
+    ds2 = controls_for("ds2")
+    assert ds2 == {"gpu", "gamescript"}
+    # DS2 has a GPU asr stage + a BYO gamescript, but no types.json (object reader
+    # unsolved, #370) and no sample-cap/spine/tiers controls.
+    assert "types_json" not in ds2 and "tiers" not in ds2
+    assert "sample_cap" not in ds2 and "transcript" not in ds2
+
+
 def test_controls_for_unknown_game_is_empty():
     assert controls_for("nope") == set()
 
@@ -91,6 +100,7 @@ def test_scan_warning_per_game():
     assert "CPU" in scan_warning("ds")
     assert "hours" in scan_warning("hzd") and "GPU" in scan_warning("hzd")
     assert "asr" in scan_warning("fw") and "hours" in scan_warning("fw")
+    assert "asr" in scan_warning("ds2") and "GPU" in scan_warning("ds2")
     assert scan_warning("nope") == ""
 
 
@@ -107,6 +117,9 @@ def test_render_scope_defaults_per_game():
     assert render_scope_defaults("hzd") == {"spine_only": False}
     assert render_scope_defaults("fw") == {"tiers": FW_TIERS_DEFAULT}
     assert FW_TIERS_DEFAULT == "1,2,S"
+    # DS2 has no panel render-scope control: its render tier union is computed from the
+    # checked rows at export time (like FW), not chosen in the panel.
+    assert render_scope_defaults("ds2") == {}
     assert render_scope_defaults("nope") == {}
 
 

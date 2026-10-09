@@ -588,7 +588,7 @@ class LibraryView(QWidget):
 
         self._apply_filters()
 
-        if self._game == "fw" and self._rows:
+        if self._game in ("fw", "ds2") and self._rows:
             task = _DurationTask(
                 self._duration_signaller, self._duration_generation, list(self._rows))
             self._duration_pool.start(task)
@@ -641,13 +641,13 @@ class LibraryView(QWidget):
         if has_len:
             tip = ("Unchecks every line shorter than this many seconds "
                    "(uses each line's decoded audio length).")
-        elif self._game == "fw":
+        elif self._game in ("fw", "ds2"):
             tip = ("Line durations are still loading — this filter enables once "
                    "they're ready.")
         else:
             tip = ("Not available for this game: filtering by length needs each line's "
-                   "audio duration, which only Forbidden West provides. DS/HZD lines "
-                   "carry no duration (the Length column shows “—”).")
+                   "audio duration, which Forbidden West and Death Stranding 2 provide. "
+                   "DS/HZD lines carry no duration (the Length column shows “—”).")
         self._short_secs.setToolTip(tip)
         self._uncheck_short_btn.setToolTip(tip)
 

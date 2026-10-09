@@ -82,6 +82,35 @@ def test_load_missing_returns_empty(tmp_path):
     assert load_lines(ws, "ds") == []
     assert load_lines(ws, "hzd") == []
     assert load_lines(ws, "fw") == []
+    assert load_lines(ws, "ds2") == []
+
+
+DS2_STORY = ["line_id", "wav", "speaker", "subtitle", "gamescript_index", "quest",
+             "tier", "score", "transcript"]
+DS2_CLIPIDX = ["line_id", "group_id", "lssr_index", "file_index", "offset",
+               "clip_bytes", "wav", "region"]
+
+
+def test_ds2_under_game_dir_story_manifest_preferred(tmp_path):
+    ws = str(tmp_path)
+    wav_rel = "audio/d1.wav"
+    _write_csv(os.path.join(ws, "out", "ds2", "clip-index.csv"), DS2_CLIPIDX,
+               [{"line_id": "d1", "group_id": "0", "lssr_index": "0", "file_index": "0",
+                 "offset": "0", "clip_bytes": "10", "wav": wav_rel, "region": "root"}])
+    rows = load_lines(ws, "ds2")
+    assert [r.line_id for r in rows] == ["d1"]
+    assert rows[0].audio_path == os.path.normpath(os.path.join(ws, "out", "ds2", wav_rel))
+    assert rows[0].has_subtitle is False   # clip-index carries no subtitle
+
+    # story-manifest wins once present; carries speaker/subtitle/tier, quest -> scene.
+    _write_csv(os.path.join(ws, "out", "ds2", "story-manifest.csv"), DS2_STORY,
+               [{"line_id": "d1", "wav": wav_rel, "speaker": "Sam", "subtitle": "Hello",
+                 "gamescript_index": "0", "quest": "q1", "tier": "1", "score": "100",
+                 "transcript": "hello"}])
+    rows = load_lines(ws, "ds2")
+    assert rows[0].speaker == "Sam" and rows[0].subtitle == "Hello"
+    assert rows[0].scene == "q1" and rows[0].tier == "1"
+    assert rows[0].has_subtitle is True
 
 
 def test_ds_artifacts_in_out_root_and_playlist_preferred(tmp_path):

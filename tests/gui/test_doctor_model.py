@@ -7,10 +7,12 @@ from deciwaves.gui.doctor_model import (
     SEV_OK,
     SEV_WARN,
     DoctorItem,
+    checks_for,
     load_doctor_payload,
     overall_ok,
     parse_doctor_payload,
     pill_for,
+    setup_path_labels_for,
     severity,
 )
 
@@ -74,11 +76,31 @@ def test_asr_and_cuda_promoted_to_warn_for_hzd_and_fw_when_unavailable():
     assert severity(_item("cuda", "unavailable"), "fw") == SEV_WARN
 
 
+def test_asr_and_cuda_promoted_to_warn_for_ds2_when_unavailable():
+    # DS2's default chain has a GPU asr stage, so its readiness items are first-class
+    # exactly like HZD/FW.
+    assert severity(_item("asr_extra", "unavailable"), "ds2") == SEV_WARN
+    assert severity(_item("cuda", "unavailable"), "ds2") == SEV_WARN
+    assert pill_for(_item("cuda", "unavailable"), "ds2") is None  # not Optional on a GPU game
+
+
 def test_absent_asr_and_cuda_stay_neutral_for_ds():
     # DS's default chain needs no GPU, so an ABSENT GPU extra is only informational
     # for DS -- neutral, never a warning/failure.
     assert severity(_item("asr_extra", "unavailable"), "ds") == SEV_NEUTRAL
     assert severity(_item("cuda", "unavailable"), "ds") == SEV_NEUTRAL
+
+
+# --- per-game check visibility (ds2 wiring) --------------------------------
+
+def test_checks_for_ds2_scopes_to_its_package_and_gamescript():
+    names = checks_for("ds2")
+    assert {"ds2_package", "ds2_gamescript"} <= names
+    assert "fw_package" not in names and "ds_install" not in names
+
+
+def test_setup_path_labels_for_ds2():
+    assert setup_path_labels_for("ds2") == {"ds2_pkg", "ds2_script"}
 
 
 def test_installed_asr_and_cuda_are_green_even_for_ds():

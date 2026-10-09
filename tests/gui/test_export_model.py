@@ -64,6 +64,18 @@ def _fw_row(line_id, tier="1", **kw):
     return base
 
 
+_DS2_COLS = ["line_id", "wav", "speaker", "subtitle", "gamescript_index", "quest",
+             "tier", "score", "transcript"]
+
+
+def _ds2_row(line_id, tier="1", **kw):
+    base = dict(line_id=line_id, wav=f"audio/{line_id}.wav", speaker="Sam",
+                subtitle="Hello", gamescript_index="0", quest="q1", tier=tier,
+                score="100", transcript="hello")
+    base.update(kw)
+    return base
+
+
 def _make_ds_playlist(ws, ids):
     _write_csv(os.path.join(ws, "out", "playlist.csv"), PLAYLIST_COLUMNS,
                [_ds_row(i) for i in ids])
@@ -137,7 +149,7 @@ def test_fw_falls_back_to_subtitle_manifest(tmp_path):
 
 
 def test_missing_source_raises_export_error(tmp_path):
-    for game in ("ds", "hzd", "fw"):
+    for game in ("ds", "hzd", "fw", "ds2"):
         try:
             write_render_selection(str(tmp_path), game, unchecked=set())
         except ExportError:
@@ -187,6 +199,11 @@ def test_can_export_mp3_reflects_render_input_presence(tmp_path):
     _write_csv(os.path.join(ws, "out", "fw", "subtitle-manifest-full.csv"), FW_COLS,
                [_fw_row("s")])
     assert can_export_mp3(ws, "fw") is True
+
+    assert can_export_mp3(ws, "ds2") is False
+    _write_csv(os.path.join(ws, "out", "ds2", "story-manifest.csv"), _DS2_COLS,
+               [_ds2_row("d")])
+    assert can_export_mp3(ws, "ds2") is True
 
 
 # --- render_selection_argv (validated against the REAL render argparse) -----
@@ -343,6 +360,25 @@ def test_fw_default_tiers_keep_w_and_d_rows(tmp_path, parsed_stage_args):
     assert {i.line_id for i in kept} == {"wav1", "wav2"}
 
 
+def test_ds2_argv_tier_union_covers_every_tier_present(tmp_path, parsed_stage_args):
+    from deciwaves.games.ds2 import render as ds2_render
+    ws = str(tmp_path)
+    # a tier-1 gamescript bind and a tier-R region-ordered fallback: both must survive.
+    _write_csv(os.path.join(ws, "out", "ds2", "story-manifest.csv"), _DS2_COLS, [
+        _ds2_row("a", tier="1"), _ds2_row("b", tier="R", speaker=""),
+    ])
+    csv_path = write_render_selection(ws, "ds2", unchecked=set())
+    argv = render_selection_argv(default_base(), ws, "ds2", csv_path, bitrate=128, cfg={})
+    assert "--main-story" not in argv and "--uniform-mono" not in argv
+    ns = parsed_stage_args(ds2_render.main, _stage_tokens(argv))
+    assert ns.manifest == os.path.abspath(csv_path)
+    assert {t.strip() for t in ns.tiers.split(",") if t.strip()} == {"1", "R"}
+
+    # write_render_selection_with_tiers returns the same union for the controller path.
+    _, tiers = write_render_selection_with_tiers(ws, "ds2", unchecked=set())
+    assert {t.strip() for t in tiers.split(",") if t.strip()} == {"1", "R"}
+
+
 def test_fw_explicit_tiers_replace_union_and_can_drop_a_row(tmp_path, parsed_stage_args):
     from deciwaves.games.fw import render as fw_render
     ws = str(tmp_path)
@@ -390,6 +426,12 @@ def test_catalog_source_fw_uses_clip_index(tmp_path):
     os.makedirs(fw_dir, exist_ok=True)
     open(os.path.join(fw_dir, "clip-index.csv"), "w").close()
     assert catalog_source_path(ws, "fw") == os.path.join(fw_dir, "clip-index.csv")
+
+    assert catalog_source_path(ws, "ds2") is None   # DS2 has no catalog either
+    ds2_dir = os.path.join(ws, "out", "ds2")
+    os.makedirs(ds2_dir, exist_ok=True)
+    open(os.path.join(ds2_dir, "clip-index.csv"), "w").close()
+    assert catalog_source_path(ws, "ds2") == os.path.join(ds2_dir, "clip-index.csv")
 
 
 # --- resolve_ds_install: shared helper matches CLI's resolution ------------

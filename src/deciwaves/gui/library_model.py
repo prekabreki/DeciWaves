@@ -105,6 +105,8 @@ def load_lines(workspace: str, game: str) -> list[LineRow]:
         rows = _load_hzd(workspace)
     elif game == "fw":
         rows = _load_fw(workspace)
+    elif game == "ds2":
+        rows = _load_ds2(workspace)
     else:
         rows = []
     rows = _mark_dupes(rows)
@@ -193,10 +195,47 @@ def _load_fw(workspace: str) -> list[LineRow]:
     # clip-index: ids + wav paths only, no subtitle/speaker yet (pre subtitle-bind).
     out = []
     for i, r in enumerate(_read_csv(os.path.join(root, "clip-index.csv"))):
-        audio = _fw_audio_path(root, r.get("wav"))
+        audio = _manifest_audio_path(root, r.get("wav"))
         out.append(LineRow(
             line_id=r.get("line_id", ""), audio_path=audio,
             length_s=None, has_subtitle=False, order_index=i))
+    return out
+
+
+def _load_ds2(workspace: str) -> list[LineRow]:
+    """DS2 list artifact under ``out/ds2/``: the gamescript-bound ``story-manifest.csv``
+    (line_id/wav/speaker/subtitle/gamescript_index/quest/tier/score/transcript) is the
+    story-order source; pre-``match``, ``clip-index.csv`` (ids + wav only, no speaker or
+    subtitle) is the fallback. A manual-order override is story-manifest-shaped, so it reads
+    through the same mapping."""
+    root = out_dir(workspace, "ds2")
+    override = imported_order_path(workspace, "ds2")
+    if os.path.isfile(override):
+        return _load_ds2_manifest(root, override)
+    story = os.path.join(root, "story-manifest.csv")
+    if os.path.isfile(story):
+        return _load_ds2_manifest(root, story)
+    out = []
+    for i, r in enumerate(_read_csv(os.path.join(root, "clip-index.csv"))):
+        audio = _manifest_audio_path(root, r.get("wav"))
+        out.append(LineRow(
+            line_id=r.get("line_id", ""), audio_path=audio,
+            length_s=None, has_subtitle=False, order_index=i))
+    return out
+
+
+def _load_ds2_manifest(root: str, path: str) -> list[LineRow]:
+    """Parse DS2's story manifest (``games/ds2/story_match.py MANIFEST_COLS``). ``subtitle`` is
+    the ASR transcript standing in for a caption; ``quest`` becomes the scene column."""
+    out = []
+    for i, r in enumerate(_read_csv(path)):
+        sub = r.get("subtitle")
+        audio = _manifest_audio_path(root, r.get("wav"))
+        out.append(LineRow(
+            line_id=r.get("line_id", ""), speaker=r.get("speaker") or None,
+            subtitle=sub, scene=r.get("quest") or None, tier=r.get("tier") or None,
+            audio_path=audio, length_s=None,
+            has_subtitle=_has_subtitle(sub), order_index=i))
     return out
 
 
@@ -206,7 +245,7 @@ def _load_fw_manifest(root: str, path: str) -> list[LineRow]:
     out = []
     for i, r in enumerate(_read_csv(path)):
         sub = r.get("subtitle")
-        audio = _fw_audio_path(root, r.get("wav"))
+        audio = _manifest_audio_path(root, r.get("wav"))
         out.append(LineRow(
             line_id=r.get("line_id", ""), speaker=r.get("speaker") or None,
             subtitle=sub, scene=r.get("quest") or None, tier=r.get("tier") or None,
@@ -215,11 +254,12 @@ def _load_fw_manifest(root: str, path: str) -> list[LineRow]:
     return out
 
 
-def _fw_audio_path(fw_root: str, wav_rel: str | None) -> str | None:
-    """Resolve a FW manifest ``wav`` (relative to ``out/fw/``) to an absolute path."""
+def _manifest_audio_path(game_root: str, wav_rel: str | None) -> str | None:
+    """Resolve a manifest ``wav`` (relative to ``out/<game>/``) to a normalised path.
+    Shared by the FW and DS2 manifests, which store ``wav`` the same way."""
     if not wav_rel:
         return None
-    return os.path.normpath(os.path.join(fw_root, wav_rel))
+    return os.path.normpath(os.path.join(game_root, wav_rel))
 
 
 def _mark_dupes(rows: list[LineRow]) -> list[LineRow]:
@@ -472,7 +512,7 @@ def preview_available(row: LineRow, game: str, *, bind_done: bool) -> bool:
     rows: DS always (on-demand decode); HZD only once ``bind`` has produced clips (a single
     per-refresh bool); FW iff the row carries a WAV path -- extract writes the WAVs to disk
     right after extract (spec §6.2), so a non-empty ``audio_path`` means playable, no ``stat``."""
-    if game == "fw":
+    if game in ("fw", "ds2"):
         return bool(row.audio_path)
     if game == "ds":
         return True
@@ -492,6 +532,6 @@ def preview_unavailable_tooltip(game: str, *, bind_done: bool) -> str:
     without a WAV has no audio; anything else is a generic pending message."""
     if game == "hzd" and not bind_done:
         return "Preview available after bind"
-    if game == "fw":
+    if game in ("fw", "ds2"):
         return "No audio for this line"
     return "Preview unavailable"

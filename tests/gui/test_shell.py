@@ -26,6 +26,26 @@ def test_game_change_updates_install_status(qtbot):
     assert w.bar._status.text() != ""                 # some found/not-configured line rendered
 
 
+def test_ds2_game_change_updates_install_status(qtbot):
+    w = MainWindow(); qtbot.addWidget(w)
+    w.bar.select_game("ds2")
+    assert w.bar.current_game() == "ds2"
+    assert w.bar._status.text() != ""                 # ds2_package check rendered
+
+
+def test_gamescript_pick_persists_under_current_game_key(qtbot, monkeypatch):
+    w = MainWindow(); qtbot.addWidget(w)
+    calls = []
+    monkeypatch.setattr(w.pipeline.setup_doctor.setup, "run",
+                        lambda **kw: calls.append(kw))
+    w.bar.select_game("ds2")
+    w._on_gamescript_picked("/tmp/ds2.txt")
+    assert calls[-1] == {"skip_downloads": True, "ds2_gamescript": "/tmp/ds2.txt"}
+    w.bar.select_game("fw")
+    w._on_gamescript_picked("/tmp/fw.txt")
+    assert calls[-1] == {"skip_downloads": True, "fw_gamescript": "/tmp/fw.txt"}
+
+
 def test_runner_output_appends_to_log(qtbot):
     w = MainWindow(); qtbot.addWidget(w)
     w._controller.runner.output.emit("hello-log\n")

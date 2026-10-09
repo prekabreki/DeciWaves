@@ -70,6 +70,7 @@ _EXPORT_DIRS = {
     "ds": "out/audio",
     "hzd": "out/hzd/audio",
     "fw": "out/fw/reels",
+    "ds2": "out/ds2/reels",
 }
 
 

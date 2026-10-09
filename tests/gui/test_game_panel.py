@@ -48,6 +48,26 @@ def test_set_game_fw_shows_only_fw_controls(qtbot):
     assert p.visible_controls() == {"gpu", "types_json", "gamescript", "tiers"}
 
 
+def test_set_game_ds2_shows_only_gpu_and_gamescript(qtbot):
+    p = GamePanel()
+    qtbot.addWidget(p)
+    p.set_game("ds2")
+    assert p.visible_controls() == {"gpu", "gamescript"}
+    # render_scope has no DS2-specific controls
+    assert p.render_scope() == {}
+
+
+def test_ds2_context_reads_ds2_gamescript_key(qtbot, tmp_path):
+    p = GamePanel()
+    qtbot.addWidget(p)
+    p.set_game("ds2")
+    assert p._gamescript_key() == "ds2_gamescript"
+    p.set_context(str(tmp_path), {"ds2_gamescript": ""}, None)
+    assert p._gamescript_edit.text() == ""
+    p.set_context(str(tmp_path), {"fw_gamescript": "/should/not/apply"}, None)
+    assert p._gamescript_edit.text() == ""   # DS2 ignores the FW key
+
+
 def test_controls_are_hidden_not_disabled(qtbot):
     # spec §7: irrelevant controls are HIDDEN, never greyed. The DS main-story control widget
     # exists but is not visible under HZD, and is still enabled (not disabled).
@@ -291,6 +311,19 @@ def test_fw_gamescript_pick_emits_persist_intent(qtbot, tmp_path, monkeypatch):
     p.set_game("fw")
     picked = tmp_path / "gamescript.txt"
     picked.write_text("...", encoding="utf-8")
+    monkeypatch.setattr(QFileDialog, "getOpenFileName",
+                        lambda *a, **k: (str(picked), "All (*.*)"))
+    with qtbot.waitSignal(p.gamescript_picked) as blocker:
+        p._gamescript_browse.click()
+    assert blocker.args == [str(picked)]
+
+
+def test_ds2_gamescript_pick_emits_persist_intent(qtbot, tmp_path, monkeypatch):
+    p = GamePanel()
+    qtbot.addWidget(p)
+    p.set_game("ds2")
+    picked = tmp_path / "ds2-script.txt"
+    picked.write_text("Sam: Hello.\n", encoding="utf-8")
     monkeypatch.setattr(QFileDialog, "getOpenFileName",
                         lambda *a, **k: (str(picked), "All (*.*)"))
     with qtbot.waitSignal(p.gamescript_picked) as blocker:

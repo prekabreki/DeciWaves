@@ -153,10 +153,10 @@ def write_render_selection_with_tiers(workspace: str, game: str,
 
 
 def _collect_tiers(game: str, rows: list[dict]) -> str:
-    """Compute the FW tier union from already-filtered *rows* in first-seen order.
-    Returns ``""`` for non-FW games; falls back to ``_FW_ALL_TIERS`` when no tier
+    """Compute the FW/DS2 tier union from already-filtered *rows* in first-seen order.
+    Returns ``""`` for the other games; falls back to ``_FW_ALL_TIERS`` when no tier
     values are present (degenerate/empty selection -- render no-ops on it anyway)."""
-    if game != "fw":
+    if game not in ("fw", "ds2"):
         return ""
     tiers: list[str] = []
     for r in rows:
@@ -169,7 +169,8 @@ def _collect_tiers(game: str, rows: list[dict]) -> str:
 def _missing_source_message(game: str) -> str:
     hint = {"ds": "run `deciwaves ds order` first",
             "hzd": "run `deciwaves hzd bind` first",
-            "fw": "run `deciwaves fw subtitle-bind` (or full-reel) first"}.get(game, "run the pipeline first")
+            "fw": "run `deciwaves fw subtitle-bind` (or full-reel) first",
+            "ds2": "run `deciwaves ds2 match` first"}.get(game, "run the pipeline first")
     return f"No render input for {game} yet -- {hint}."
 
 
@@ -222,6 +223,12 @@ def render_selection_argv(base: list[str], workspace: str, game: str, csv_path: 
         # default already points at the extracted WAVs).
         scope_tiers = tiers if tiers is not None else _fw_tiers(csv_abs)
         tokens = ["render", "--manifest", csv_abs, "--tiers", scope_tiers, "--uniform-mono"]
+    elif game == "ds2":
+        # Same tier-union contract as FW so the filtered manifest renders exactly the checked
+        # rows ("1"/"2" gamescript binds plus the tier-R region-ordered fallback). DS2 render's
+        # --audio-root/--out-dir defaults already match out/ds2, and it has no --uniform-mono.
+        scope_tiers = tiers if tiers is not None else _fw_tiers(csv_abs)
+        tokens = ["render", "--manifest", csv_abs, "--tiers", scope_tiers]
     else:
         raise ExportError(f"Export is not supported for game {game!r}.")
     return build_cli_command(base, workspace, game, *tokens)
@@ -351,9 +358,9 @@ def import_order(workspace: str, game: str, src_csv: str) -> ImportResult:
 
 def catalog_source_path(workspace: str, game: str) -> str | None:
     """The on-disk catalog CSV Export-catalog copies: DS ``out/catalog.csv``, HZD
-    ``out/hzd/catalog.csv``; FW has no catalog, so its ``out/fw/clip-index.csv`` (ids + wav
-    paths) stands in. ``None`` when the file doesn't exist yet."""
+    ``out/hzd/catalog.csv``; FW and DS2 have no catalog, so their ``out/<game>/clip-index.csv``
+    (ids + wav paths) stands in. ``None`` when the file doesn't exist yet."""
     root = out_dir(workspace, game)
-    name = "clip-index.csv" if game == "fw" else "catalog.csv"
+    name = "clip-index.csv" if game in ("fw", "ds2") else "catalog.csv"
     path = os.path.join(root, name)
     return path if os.path.isfile(path) else None

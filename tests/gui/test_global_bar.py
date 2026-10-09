@@ -19,6 +19,17 @@ def test_game_combo_has_tooltip(qtbot):
     assert bar._combo.toolTip(), "Game combo should have a non-empty tooltip"
 
 
+def test_ds2_offered_as_game(qtbot):
+    bar = GlobalBar()
+    qtbot.addWidget(bar)
+    i = bar._combo.findData("ds2")
+    assert i >= 0, "DS2 must be offered in the game dropdown"
+    assert bar._combo.itemText(i) == "Death Stranding 2"
+    bar.select_game("ds2")
+    assert bar.current_game() == "ds2"
+    assert bar.current_game_label() == "Death Stranding 2"
+
+
 def test_browse_button_has_tooltip(qtbot):
     bar = GlobalBar()
     qtbot.addWidget(bar)

@@ -16,6 +16,7 @@ import json
 from dataclasses import dataclass
 
 from deciwaves.cli.doctor import Availability
+from deciwaves.gui.cuda_probe import GPU_GAMES
 
 # doctor.Availability.value strings, as they appear in each check's "status" field.
 # Only the three that are actually branched on (here and in setup_model).
@@ -58,7 +59,6 @@ def install_status_attrs(status: Availability) -> tuple[str, str]:
 
 # Checks the GUI promotes to first-class readiness for the GPU games (spec §3).
 _GPU_READINESS = frozenset({"asr_extra", "cuda"})
-_GPU_GAMES = frozenset({"hzd", "fw"})
 
 # Per-game doctor check names — path checks scoped to each game (mirrors
 # game_panel_model._CONTROLS). Non-path checks (asr_extra, cuda, config_file,
@@ -67,6 +67,7 @@ _CHECK_NAMES = {
     "ds": frozenset({"ds_install", "oodle"}),
     "hzd": frozenset({"hzd_package"}),
     "fw": frozenset({"fw_package", "fw_gamescript"}),
+    "ds2": frozenset({"ds2_package", "ds2_gamescript"}),
 }
 
 _ALWAYS_SHOWN = frozenset({
@@ -81,6 +82,7 @@ _SETUP_PATH_LABELS = {
     "ds": frozenset({"ds_install", "oodle_dll"}),
     "hzd": frozenset({"hzd_pkg"}),
     "fw": frozenset({"fw_pkg", "fw_script"}),
+    "ds2": frozenset({"ds2_pkg", "ds2_script"}),
 }
 
 
@@ -163,7 +165,7 @@ def severity(item: DoctorItem, game: str) -> str:
         return SEV_OK
     # Not OK (unavailable/absent): a real readiness gap for a promoted GPU extra ONLY on a
     # GPU game; for DS (no GPU stage in its default chain) it stays informational (spec §3).
-    if item.name in _GPU_READINESS and game in _GPU_GAMES:
+    if item.name in _GPU_READINESS and game in GPU_GAMES:
         return SEV_WARN
     return SEV_NEUTRAL
 
@@ -175,7 +177,7 @@ def pill_for(item: DoctorItem, game: str) -> tuple[str, str] | None:
     extras (CUDA / ASR) read as an explicit "Optional" pill for a non-GPU game
     like DS instead of a bare grey dash, and a genuinely broken required tool
     reads as "Needed"."""
-    if item.name in _GPU_READINESS and game not in _GPU_GAMES:
+    if item.name in _GPU_READINESS and game not in GPU_GAMES:
         return ("Optional", "optional")
     if severity(item, game) == SEV_ERROR:
         return ("Needed", "needed")

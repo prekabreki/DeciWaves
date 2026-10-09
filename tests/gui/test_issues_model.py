@@ -40,3 +40,11 @@ def test_ds_render_dupes_counts_data_rows(tmp_path):
 def test_empty_error_log_is_not_a_group(tmp_path):
     _write(str(tmp_path), "out/fw/extract-errors.log", "")
     assert gather_issues(str(tmp_path), "fw") == []
+
+
+def test_ds2_extract_and_render_errors_gathered(tmp_path):
+    _write(str(tmp_path), "out/ds2/extract-errors.log", "id1\tValueError: boom\n")
+    _write(str(tmp_path), "out/ds2/render-errors.log", "audio/a.wav\tOSError: missing\n")
+    groups = {g.source: g for g in gather_issues(str(tmp_path), "ds2")}
+    assert groups["extract-errors.log"].count == 1
+    assert groups["render-errors.log"].count == 1
