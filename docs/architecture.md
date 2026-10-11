@@ -339,7 +339,11 @@ kept duration against the *decoded track length* (`speech_trim.looks_truncated`)
 against the scene's subtitle word count or its `speech_ratio`: the catalog holds more
 subtitle lines than a track voices (alternate takes), and `speech_ratio` is speech/total,
 so `sq_cs00_s00100` scores 0.132 while keeping 24.7 s of its 25.8 s track. The track length
-needs a decode, so that check is opt-in, not free. Pre-rendered video (studio logos, recaps, credits) is a
+needs a decode, so that check is opt-in, not free. A `dropped=1` row never renders at all,
+so `deciwaves ds check-trim` (`games/ds/keepspans_check.py`) decodes those tracks and
+level-gates them, failing on any with audio that is not in the packaged reviewed list
+`ds/cutscene-keepspans-reviewed.csv`. Its `--emit` writes gate spans for named dropped rows
+only, behind `speech_trim.refuse_replacement`. Pre-rendered video (studio logos, recaps, credits) is a
 small, separate, optional pass outside this workflow.
 
 ## Horizon Zero Dawn Remastered

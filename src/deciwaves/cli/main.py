@@ -13,6 +13,7 @@ STAGES = {
         "catalog":   ("deciwaves.games.ds.catalog",         "Build the line catalog from your install"),
         "cutscenes": ("deciwaves.games.ds.cutscene_audio",  "Resolve cutscene voice tracks"),
         "trim":      ("deciwaves.games.ds.cutscene_trim",   "[GPU] Rebuild the speech-trim manifest"),
+        "check-trim": ("deciwaves.games.ds.keepspans_check", "Flag dropped trim rows that still carry audio"),
         "order":     ("deciwaves.games.ds.story_order",     "Build the story-ordered playlist"),
         "dump":      ("deciwaves.games.ds.dump",      "Decode selected lines to WAV files"),
         "render":    ("deciwaves.games.ds.render",       "Render MP3 reels + tracklists"),
