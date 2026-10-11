@@ -334,7 +334,12 @@ instead of per *line* — `games/ds/cutscene_audio.py` locates the scene's whole
 voice file(s) under a separate Wwise cinematics path and hands them to
 `games/ds/speech_trim.py`, which computes speech-region keep-spans (from an externally
 supplied speech-segment list) so dead air and back-to-back grunts between cues get
-trimmed out of the rendered track. Pre-rendered video (studio logos, recaps, credits) is a
+trimmed out of the rendered track. To check a keep-span row for truncation, compare its
+kept duration against the *decoded track length* (`speech_trim.looks_truncated`), never
+against the scene's subtitle word count or its `speech_ratio`: the catalog holds more
+subtitle lines than a track voices (alternate takes), and `speech_ratio` is speech/total,
+so `sq_cs00_s00100` scores 0.132 while keeping 24.7 s of its 25.8 s track. The track length
+needs a decode, so that check is opt-in, not free. Pre-rendered video (studio logos, recaps, credits) is a
 small, separate, optional pass outside this workflow.
 
 ## Horizon Zero Dawn Remastered
