@@ -1,4 +1,7 @@
-from deciwaves.games.ds.speech_trim import keep_spans, format_spans, parse_spans
+import pytest
+
+from deciwaves.games.ds.speech_trim import (keep_spans, format_spans, parse_spans,
+                                         kept_fraction, looks_truncated)
 
 
 def test_keep_spans_pads_and_clamps_to_track_bounds():
@@ -46,3 +49,30 @@ def test_format_and_parse_spans_roundtrip():
 def test_format_empty_and_parse_empty():
     assert format_spans([]) == ""
     assert parse_spans("") == []
+
+
+# sq_cs00_s00100 as packaged: speech_ratio 0.132, one kept span 0.677:25.423 on a
+# 25.8 s decoded track. Its subtitle word count implies far more audio than the
+# track holds, which is how a words-vs-duration oracle wrongly called it truncated.
+_CS00_SPANS = parse_spans("0.677:25.423")
+_CS00_TRACK = 25.8
+_CS00_SPEECH_RATIO = 0.132
+
+
+def test_low_speech_ratio_row_keeping_almost_all_of_its_track_is_not_flagged():
+    assert _CS00_SPEECH_RATIO < 0.5  # low enough that a ratio-based check would fire
+    assert kept_fraction(_CS00_SPANS, _CS00_TRACK) == pytest.approx(24.746 / 25.8)
+    assert looks_truncated(_CS00_SPANS, _CS00_TRACK) is False
+
+
+def test_row_keeping_a_small_share_of_its_track_is_flagged():
+    assert looks_truncated([(0.5, 3.0), (10.0, 12.0)], 25.8) is True  # 4.5 of 25.8 s
+
+
+def test_kept_fraction_sums_every_span():
+    assert kept_fraction([(0.0, 1.0), (2.0, 4.0)], 6.0) == pytest.approx(0.5)
+
+
+def test_kept_fraction_rejects_non_positive_track_length():
+    with pytest.raises(ValueError):
+        kept_fraction([(0.0, 1.0)], 0.0)
