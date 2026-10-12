@@ -7,7 +7,11 @@ the ``cuda`` check from a `doctor --json` payload (issue #65 already runs
 warn, rather than let the user unknowingly start a days-long CPU run."""
 from __future__ import annotations
 
-_GPU_GAMES = frozenset({"hzd", "fw"})
+# The games whose default chain contains a GPU (ASR) stage. Single source of truth:
+# the pre-bind CUDA probe (needs_gpu_warning), the Doctor panel's promotion of the
+# asr_extra/cuda checks (doctor_model), and the two view widgets that show the ASR
+# install hint all read this, so adding a GPU game can never half-wire one of them.
+GPU_GAMES = frozenset({"hzd", "fw", "ds2"})
 
 GPU_WARNING_TEXT = "No GPU visible — this stage may take days on CPU. Continue?"
 
@@ -56,7 +60,7 @@ def asr_extra_installed(payload: dict | None) -> bool:
 
 
 def needs_gpu_warning(game: str, payload: dict | None) -> bool:
-    """True when starting a GPU stage for HZD/FW without doctor confirming a CUDA GPU."""
-    if game not in _GPU_GAMES:
+    """True when starting a GPU stage for a GPU game without doctor confirming a CUDA GPU."""
+    if game not in GPU_GAMES:
         return False
     return cuda_status(payload) != "ok"

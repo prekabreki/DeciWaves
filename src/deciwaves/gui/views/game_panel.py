@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
 
 from deciwaves.gui.theme import ERROR, NEUTRAL, OK, WARN
 from deciwaves.gui.widgets import AsrInstallHint, HelpIcon
-from deciwaves.gui.cuda_probe import asr_extra_installed, cuda_display_text
+from deciwaves.gui.cuda_probe import GPU_GAMES, asr_extra_installed, cuda_display_text
 from deciwaves.gui.game_panel_model import (
     FW_TIERS_DEFAULT,
     FW_TIERS_HINT,
@@ -209,7 +209,7 @@ class GamePanel(QWidget):
                 QLabel("Gamescript:"), HelpIcon(
                     "BYO (Bring Your Own): an optional file that adds speaker "
                     "labels + story ordering when supplied. Persisted via setup. "
-                    "Same file as deciwaves fw run --gamescript.\n\n"
+                    "Same file as the current game's `run --gamescript` flag.\n\n"
                     + GAMESCRIPT_FORMAT_HINT),
                 self._gamescript_edit, self._gamescript_browse),
             self._row(self._gamescript_status))
@@ -300,7 +300,7 @@ class GamePanel(QWidget):
         self._cfg = cfg or {}
         self._refresh_types_status()
         self._refresh_gpu_status(payload)
-        configured = self._cfg.get("fw_gamescript", "") or ""
+        configured = self._cfg.get(self._gamescript_key(), "") or ""
         self._gamescript_edit.setText(configured)
         # Grade an already-configured path too, so a file that silently stopped parsing (moved,
         # edited, replaced) surfaces on load rather than only at the next Browse.
@@ -331,8 +331,7 @@ class GamePanel(QWidget):
         else:
             self._gpu_label.setStyleSheet(f"color: {WARN};")
 
-        _GPU_GAMES = frozenset({"hzd", "fw"})
-        if self._game in _GPU_GAMES and not asr_extra_installed(payload):
+        if self._game in GPU_GAMES and not asr_extra_installed(payload):
             self._asr_hint.setVisible(True)
         else:
             self._asr_hint.setVisible(False)
@@ -357,9 +356,15 @@ class GamePanel(QWidget):
         if path and os.path.isfile(path):   # hygiene: verify existence at pick time (spec §7)
             self.types_picked.emit(path)
 
+    def _gamescript_key(self) -> str:
+        """The config key the gamescript picker persists under -- DS2 has its own
+        (``ds2_gamescript``); FW is the other user of this picker."""
+        return "ds2_gamescript" if self._game == "ds2" else "fw_gamescript"
+
     def _on_gamescript_browse(self) -> None:
+        label = {"ds2": "Death Stranding 2"}.get(self._game, "Forbidden West")
         path, _f = QFileDialog.getOpenFileName(
-            self, "Choose Forbidden West gamescript", self._workspace,
+            self, f"Choose {label} gamescript", self._workspace,
             "Text files (*.md *.txt);;All files (*.*)")
         if path and os.path.isfile(path):   # hygiene: verify existence at pick time (spec §7)
             self._grade_gamescript(path)

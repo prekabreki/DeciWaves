@@ -24,8 +24,13 @@ from deciwaves.gui.doctor_model import (
 
 # Labels setup prints in its summary (setup._print_summary): the three fetched tools plus
 # the derived path rows. Used to pick summary lines out of the surrounding chatter.
+# `fw_types` is deliberately NOT here: unlike the script/install rows it has its own picker
+# and status line in the FW game panel (and its config value is what that panel reads), so
+# duplicating it in the Setup path rows would show the same fact twice. `ds2_pkg`/`ds2_script`
+# are the DS2 install + BYO gamescript rows, mirroring hzd_pkg/fw_script.
 _TOOL_LABELS = ("vgmstream", "VGAudio", "ffmpeg")
-_PATH_LABELS = ("ds_install", "oodle_dll", "hzd_pkg", "fw_pkg", "fw_script")
+_PATH_LABELS = ("ds_install", "oodle_dll", "hzd_pkg", "fw_pkg", "ds2_pkg",
+                "fw_script", "ds2_script")
 _SUMMARY_LABELS = frozenset(_TOOL_LABELS + _PATH_LABELS)
 
 _OK_PREFIXES = ("ok", "found", "fetched")
@@ -41,7 +46,8 @@ class SetupRow:
 
 def build_setup_argv(base: list[str], *, force: bool = False, skip_downloads: bool = False,
                      ds_install: str | None = None, hzd_package: str | None = None,
-                     fw_package: str | None = None, fw_gamescript: str | None = None,
+                     fw_package: str | None = None, ds2_package: str | None = None,
+                     fw_gamescript: str | None = None, ds2_gamescript: str | None = None,
                      fw_types: str | None = None, tools_dir: str | None = None) -> list[str]:
     """``base + setup + flags``. A ``None`` path is omitted (setup keeps the saved value);
     ``""`` is passed through to clear it; any real path is absolutized (spec §4)."""
@@ -51,7 +57,9 @@ def build_setup_argv(base: list[str], *, force: bool = False, skip_downloads: bo
     if skip_downloads:
         argv.append("--skip-downloads")
     for flag, val in (("--ds-install", ds_install), ("--hzd-package", hzd_package),
-                      ("--fw-package", fw_package), ("--fw-gamescript", fw_gamescript),
+                      ("--fw-package", fw_package), ("--ds2-package", ds2_package),
+                      ("--fw-gamescript", fw_gamescript),
+                      ("--ds2-gamescript", ds2_gamescript),
                       ("--fw-types", fw_types), ("--tools-dir", tools_dir)):
         if val is None:
             continue

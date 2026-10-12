@@ -27,6 +27,7 @@ _RENDER_INPUT_CANDIDATES = {
     "ds": ("playlist.csv",),
     "hzd": ("asr-manifest.csv",),
     "fw": ("full-reel-manifest.csv", "subtitle-manifest-full.csv"),
+    "ds2": ("story-manifest.csv",),
 }
 
 

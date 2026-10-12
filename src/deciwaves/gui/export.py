@@ -32,8 +32,9 @@ from PySide6.QtWidgets import (
 
 from deciwaves.gui.export_model import (
     ROUND_TRIP_INSTRUCTIONS,
+    ExportError,
     catalog_source_path,
-    render_input_source,
+    write_order_export,
 )
 from deciwaves.gui.theme import NEUTRAL
 from deciwaves.gui.preview_model import PreviewError
@@ -401,9 +402,9 @@ class _CatalogCopyWorker(QRunnable):
     """Copy an artifact CSV to *dest* on a pool thread and emit the result
     message via :class:`_CatalogCopySignals.finished`. No QWidget access in ``run()`` —
     the result is marshalled back to the main thread by Qt's signal queuing.
-    *kind* picks the source resolver: ``"catalog"`` uses :func:`catalog_source_path`,
-    ``"order"`` uses :func:`render_input_source` (the current effective render-input,
-    override-aware)."""
+    *kind* picks the source: ``"catalog"`` copies the on-disk catalog via
+    :func:`catalog_source_path` (a plain copy); ``"order"`` writes the effective render
+    input through :func:`write_order_export`, which adds the ``n``/``duration_s`` columns."""
 
     def __init__(self, game: str, workspace: str, dest: str, signals: _CatalogCopySignals,
                  kind: str = "catalog"):
@@ -416,18 +417,29 @@ class _CatalogCopyWorker(QRunnable):
 
     @Slot()
     def run(self) -> None:
-        src = (render_input_source if self._kind == "order"
-               else catalog_source_path)(self._workspace, self._game)
-        noun = "order CSV" if self._kind == "order" else "catalog"
+        if self._kind == "order":
+            try:
+                n = write_order_export(self._workspace, self._game, self._dest)
+            except ExportError as exc:
+                self._signals.finished.emit(f"export: {exc}\n")
+                return
+            except OSError as exc:
+                self._signals.finished.emit(
+                    f"export: could not write order CSV: {exc}\n")
+                return
+            self._signals.finished.emit(
+                f"export: order CSV written to {self._dest} ({n} row(s)).\n")
+            return
+        src = catalog_source_path(self._workspace, self._game)
         if src is None:
             self._signals.finished.emit(
-                f"export: no {noun} artifact yet for this game.\n")
+                "export: no catalog artifact yet for this game.\n")
             return
         try:
             os.makedirs(os.path.dirname(os.path.abspath(self._dest)), exist_ok=True)
             shutil.copyfile(src, self._dest)
             self._signals.finished.emit(
-                f"export: {noun} copied to {self._dest}\n")
+                f"export: catalog copied to {self._dest}\n")
         except OSError as exc:
             self._signals.finished.emit(
-                f"export: could not write {noun}: {exc}\n")
+                f"export: could not write catalog: {exc}\n")

@@ -30,12 +30,13 @@ _CHECKS = {
     "ds": lambda cfg: doctor.check_ds_install(cfg.get("ds_install", "")),
     "hzd": lambda cfg: doctor.check_hzd_package(cfg.get("hzd_package", "")),
     "fw": lambda cfg: doctor.check_fw_package(cfg.get("fw_package", "")),
+    "ds2": lambda cfg: doctor.check_ds2_package(cfg.get("ds2_package", "")),
 }
 
 
 def _first_owned_game(cfg) -> str:
     """First game that is configured/owned, or ``"ds"`` as fallback."""
-    for key in ("ds", "hzd", "fw"):
+    for key in ("ds", "hzd", "fw", "ds2"):
         if _CHECKS[key](cfg).status is not doctor.Availability.NOT_CONFIGURED:
             return key
     return "ds"
@@ -131,8 +132,9 @@ class MainWindow(QMainWindow):
         # BYO FW pickers persist through the setup path (merge/absolutize/clear + re-doctor),
         # NOT a direct config.save. skip_downloads=True: persist the path + re-check only, so
         # picking a file never triggers a surprise ~200 MB tool fetch (spec §7 / issue #103).
-        self.game_panel.gamescript_picked.connect(
-            lambda p: self.pipeline.setup_doctor.setup.run(fw_gamescript=p, skip_downloads=True))
+        # The gamescript picker is shared by FW and DS2, so the persisted config key is
+        # chosen from the game selected at pick time (types.json is FW-only).
+        self.game_panel.gamescript_picked.connect(self._on_gamescript_picked)
         self.game_panel.types_picked.connect(
             lambda p: self.pipeline.setup_doctor.setup.run(fw_types=p, skip_downloads=True))
         # "I've installed it — re-check" in the ASR hint re-runs Doctor offline; its
@@ -174,7 +176,7 @@ class MainWindow(QMainWindow):
             self.bar.set_workspace(ws)
 
         game = self._settings.value("game")
-        if game in ("ds", "hzd", "fw"):
+        if game in ("ds", "hzd", "fw", "ds2"):
             self.bar.select_game(game)
             if game == "ds":
                 # select_game("ds") leaves the combo on its existing index 0,
@@ -362,6 +364,12 @@ class MainWindow(QMainWindow):
             self.bar.current_game(), self._workspace(), path)
         if not ok:
             self.pipeline.append_log("re-order: a job is already running.\n")
+
+    def _on_gamescript_picked(self, path: str) -> None:
+        """Persist a BYO gamescript through the setup path (merge/absolutize/clear +
+        re-doctor) under the current game's config key -- FW and DS2 share the picker."""
+        key = "ds2_gamescript" if self.bar.current_game() == "ds2" else "fw_gamescript"
+        self.pipeline.setup_doctor.setup.run(skip_downloads=True, **{key: path})
 
     def _on_rerun(self, stage: str) -> None:
         if not self._has_workspace():

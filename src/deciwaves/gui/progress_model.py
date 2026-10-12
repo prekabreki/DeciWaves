@@ -104,7 +104,7 @@ def wav_cache_progress(workspace: str, game: str) -> StageProgress:
 # ---------------------------------------------------------------------------
 
 def _render_out_dir(workspace: str, game: str) -> str:
-    subdir = {"ds": "audio", "hzd": "audio", "fw": "reels"}.get(game, "audio")
+    subdir = {"ds": "audio", "hzd": "audio", "fw": "reels", "ds2": "reels"}.get(game, "audio")
     return os.path.join(out_dir(workspace, game), subdir)
 
 
@@ -202,6 +202,9 @@ def probe_progress(workspace: str, game: str, stage: str) -> list[StageProgress]
         ("fw", "asr"): "transcripts.csv",
         ("fw", "subtitle-bind"): "subtitle-manifest-full.csv",
         ("fw", "full-reel"): "full-reel-manifest.csv",
+        ("ds2", "extract"): "clip-index.csv",
+        ("ds2", "asr"): "transcripts.csv",
+        ("ds2", "match"): "story-manifest.csv",
     }
     csv_name = output_csvs.get((game, stage))
     if csv_name:

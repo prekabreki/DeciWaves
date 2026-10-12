@@ -64,6 +64,18 @@ def _fw_row(line_id, tier="1", **kw):
     return base
 
 
+_DS2_COLS = ["line_id", "wav", "speaker", "subtitle", "gamescript_index", "quest",
+             "tier", "score", "transcript"]
+
+
+def _ds2_row(line_id, tier="1", **kw):
+    base = dict(line_id=line_id, wav=f"audio/{line_id}.wav", speaker="Sam",
+                subtitle="Hello", gamescript_index="0", quest="q1", tier=tier,
+                score="100", transcript="hello")
+    base.update(kw)
+    return base
+
+
 def _make_ds_playlist(ws, ids):
     _write_csv(os.path.join(ws, "out", "playlist.csv"), PLAYLIST_COLUMNS,
                [_ds_row(i) for i in ids])
@@ -137,7 +149,7 @@ def test_fw_falls_back_to_subtitle_manifest(tmp_path):
 
 
 def test_missing_source_raises_export_error(tmp_path):
-    for game in ("ds", "hzd", "fw"):
+    for game in ("ds", "hzd", "fw", "ds2"):
         try:
             write_render_selection(str(tmp_path), game, unchecked=set())
         except ExportError:
@@ -187,6 +199,11 @@ def test_can_export_mp3_reflects_render_input_presence(tmp_path):
     _write_csv(os.path.join(ws, "out", "fw", "subtitle-manifest-full.csv"), FW_COLS,
                [_fw_row("s")])
     assert can_export_mp3(ws, "fw") is True
+
+    assert can_export_mp3(ws, "ds2") is False
+    _write_csv(os.path.join(ws, "out", "ds2", "story-manifest.csv"), _DS2_COLS,
+               [_ds2_row("d")])
+    assert can_export_mp3(ws, "ds2") is True
 
 
 # --- render_selection_argv (validated against the REAL render argparse) -----
@@ -343,6 +360,25 @@ def test_fw_default_tiers_keep_w_and_d_rows(tmp_path, parsed_stage_args):
     assert {i.line_id for i in kept} == {"wav1", "wav2"}
 
 
+def test_ds2_argv_tier_union_covers_every_tier_present(tmp_path, parsed_stage_args):
+    from deciwaves.games.ds2 import render as ds2_render
+    ws = str(tmp_path)
+    # a tier-1 gamescript bind and a tier-R region-ordered fallback: both must survive.
+    _write_csv(os.path.join(ws, "out", "ds2", "story-manifest.csv"), _DS2_COLS, [
+        _ds2_row("a", tier="1"), _ds2_row("b", tier="R", speaker=""),
+    ])
+    csv_path = write_render_selection(ws, "ds2", unchecked=set())
+    argv = render_selection_argv(default_base(), ws, "ds2", csv_path, bitrate=128, cfg={})
+    assert "--main-story" not in argv and "--uniform-mono" not in argv
+    ns = parsed_stage_args(ds2_render.main, _stage_tokens(argv))
+    assert ns.manifest == os.path.abspath(csv_path)
+    assert {t.strip() for t in ns.tiers.split(",") if t.strip()} == {"1", "R"}
+
+    # write_render_selection_with_tiers returns the same union for the controller path.
+    _, tiers = write_render_selection_with_tiers(ws, "ds2", unchecked=set())
+    assert {t.strip() for t in tiers.split(",") if t.strip()} == {"1", "R"}
+
+
 def test_fw_explicit_tiers_replace_union_and_can_drop_a_row(tmp_path, parsed_stage_args):
     from deciwaves.games.fw import render as fw_render
     ws = str(tmp_path)
@@ -390,6 +426,12 @@ def test_catalog_source_fw_uses_clip_index(tmp_path):
     os.makedirs(fw_dir, exist_ok=True)
     open(os.path.join(fw_dir, "clip-index.csv"), "w").close()
     assert catalog_source_path(ws, "fw") == os.path.join(fw_dir, "clip-index.csv")
+
+    assert catalog_source_path(ws, "ds2") is None   # DS2 has no catalog either
+    ds2_dir = os.path.join(ws, "out", "ds2")
+    os.makedirs(ds2_dir, exist_ok=True)
+    open(os.path.join(ds2_dir, "clip-index.csv"), "w").close()
+    assert catalog_source_path(ws, "ds2") == os.path.join(ds2_dir, "clip-index.csv")
 
 
 # --- resolve_ds_install: shared helper matches CLI's resolution ------------
@@ -625,3 +667,110 @@ def test_round_trip_export_reorder_import_render_selection(tmp_path):
     with open(sel, encoding="utf-8-sig") as f:
         rows = list(csv.DictReader(f))
     assert [r["line_id"] for r in rows] == ["c", "a"]
+
+
+# --- Export order CSV: stable n + duration_s columns (issue #385 comment) ----
+
+def test_write_order_export_adds_n_first_and_duration_last(tmp_path):
+    from deciwaves.gui import export_model as em
+
+    ws = str(tmp_path)
+    _make_ds_playlist(ws, ["a", "b", "c"])
+    dest = os.path.join(ws, "order-export.csv")
+    n = em.write_order_export(ws, "ds", dest)
+    assert n == 3
+    with open(dest, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        cols = reader.fieldnames
+        rows = list(reader)
+    assert cols[0] == "n" and cols[-1] == "duration_s"
+    assert [r["n"] for r in rows] == ["1", "2", "3"]
+    # DS has no per-line duration source -> blank, never a guessed value.
+    assert [r["duration_s"] for r in rows] == ["", "", ""]
+
+
+def test_write_order_export_joins_hzd_duration_from_clip_index(tmp_path):
+    from deciwaves.gui import export_model as em
+
+    ws = str(tmp_path)
+    _make_hzd_manifest(ws, ["x"])   # _hzd_row uses clip_row "1"
+    _write_csv(os.path.join(ws, "out", "hzd", "clip-index.csv"),
+               ["clip_row", "offset", "b_samples"],
+               [{"clip_row": "1", "offset": "0", "b_samples": "48000"}])
+    dest = os.path.join(ws, "order.csv")
+    em.write_order_export(ws, "hzd", dest)
+    with open(dest, newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    assert rows[0]["duration_s"] == "1.000"
+
+
+def test_write_order_export_no_source_raises(tmp_path):
+    from deciwaves.gui import export_model as em
+
+    try:
+        em.write_order_export(str(tmp_path), "ds", os.path.join(str(tmp_path), "x.csv"))
+    except ExportError:
+        return
+    raise AssertionError("expected ExportError when there is no render input")
+
+
+def test_import_order_accepts_n_column_without_line_id(tmp_path):
+    from deciwaves.gui import export_model as em
+
+    ws = str(tmp_path)
+    _write_playlist(ws, ["a", "b", "c"])
+    src = os.path.join(ws, "edited.csv")
+    # an agent stripped line_id and reordered by the stable ordinal
+    _write_user_csv(src, ["3", "1"], header="n,note\n")
+    res = em.import_order(ws, "ds", src)
+    assert res.ok and res.count == 2 and not res.errors
+    with open(em.imported_order_path(ws, "ds"), encoding="utf-8-sig") as f:
+        assert [r["line_id"] for r in csv.DictReader(f)] == ["c", "a"]
+
+
+def test_import_order_rejects_out_of_range_n(tmp_path):
+    from deciwaves.gui import export_model as em
+
+    ws = str(tmp_path)
+    _write_playlist(ws, ["a", "b"])
+    src = os.path.join(ws, "edited.csv")
+    _write_user_csv(src, ["9"], header="n\n")
+    res = em.import_order(ws, "ds", src)
+    assert not res.ok and not em.has_imported_order(ws, "ds")
+    assert "outside" in " ".join(res.errors)
+
+
+def test_import_order_prefers_line_id_when_both_columns_present(tmp_path):
+    from deciwaves.gui import export_model as em
+
+    ws = str(tmp_path)
+    _write_playlist(ws, ["a", "b"])
+    src = os.path.join(ws, "edited.csv")
+    _write_user_csv(src, ["2,b"], header="n,line_id\n")   # line_id wins over a disagreeing n
+    res = em.import_order(ws, "ds", src)
+    assert res.ok
+    with open(em.imported_order_path(ws, "ds"), encoding="utf-8-sig") as f:
+        assert [r["line_id"] for r in csv.DictReader(f)] == ["b"]
+
+
+def test_order_export_round_trips_through_n(tmp_path):
+    from deciwaves.gui import export_model as em
+
+    ws = str(tmp_path)
+    _make_ds_playlist(ws, ["a", "b", "c"])
+    dest = os.path.join(ws, "exported.csv")
+    em.write_order_export(ws, "ds", dest)
+    with open(dest, newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    edited = os.path.join(ws, "edited.csv")
+    _write_user_csv(edited, [rows[2]["n"], rows[0]["n"]], header="n\n")
+    assert em.import_order(ws, "ds", edited).ok
+    sel = em.write_render_selection(ws, "ds", unchecked=set())
+    with open(sel, encoding="utf-8-sig") as f:
+        assert [r["line_id"] for r in csv.DictReader(f)] == ["c", "a"]
+
+
+def test_round_trip_instructions_mention_n_column():
+    from deciwaves.gui.export_model import ROUND_TRIP_INSTRUCTIONS
+
+    assert "sort by n" in ROUND_TRIP_INSTRUCTIONS

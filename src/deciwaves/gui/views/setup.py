@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 from deciwaves.gui.theme import ERROR, NEUTRAL, OK, WARN
 from deciwaves.gui.capture import CaptureRunner
 from deciwaves.gui.cli_command import default_base
+from deciwaves.gui.cuda_probe import GPU_GAMES
 from deciwaves.gui.doctor_model import (
     SEV_ERROR,
     SEV_NEUTRAL,
@@ -124,8 +125,6 @@ class DoctorPanel(QWidget):
         super().showEvent(event)
         self.auto_check()
 
-    _GPU_GAMES = frozenset({"hzd", "fw"})
-
     def render_payload(self, payload: dict) -> None:
         self._payload = payload
         self._items = parse_doctor_payload(payload)
@@ -136,7 +135,7 @@ class DoctorPanel(QWidget):
             self._rows_layout.addWidget(self._row_widget(item))
             if (item.name == "asr_extra"
                     and item.status == "unavailable"
-                    and self._game in self._GPU_GAMES):
+                    and self._game in GPU_GAMES):
                 self._rows_layout.addWidget(AsrInstallHint())
 
     def items(self) -> list[DoctorItem]:

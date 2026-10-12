@@ -23,7 +23,8 @@ _JOB_CHIP_COLOURS = {
 # (key, menu label) -- keys match the CLI game tokens / doctor check map.
 _GAMES = [("ds", "Death Stranding"),
           ("hzd", "Horizon Zero Dawn"),
-          ("fw", "Horizon Forbidden West")]
+          ("fw", "Horizon Forbidden West"),
+          ("ds2", "Death Stranding 2")]
 
 
 class GlobalBar(QWidget):

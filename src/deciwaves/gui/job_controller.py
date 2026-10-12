@@ -124,7 +124,7 @@ class JobController(QObject):
             csv_path, fw_tiers = write_render_selection_with_tiers(
                 workspace, game, unchecked_ids)
             scope = render_scope_kwargs or {}
-            if game == "fw" and "tiers" not in scope:
+            if game in ("fw", "ds2") and "tiers" not in scope:
                 scope["tiers"] = fw_tiers
             argv = render_selection_argv(default_base(), workspace, game, csv_path,
                                           bitrate=bitrate, cfg=config.load(),
@@ -245,7 +245,7 @@ class JobController(QObject):
     def _report_export_result(self, game: str | None, code: int) -> str:
         if code == 0:
             out = {"ds": "out/audio", "hzd": "out/hzd/audio",
-                   "fw": "out/fw/reels"}.get(game or "", "out/")
+                   "fw": "out/fw/reels", "ds2": "out/ds2/reels"}.get(game or "", "out/")
             return (f"export: done — reels + tracklist sidecars written "
                     f"under {out}.\n")
         return (

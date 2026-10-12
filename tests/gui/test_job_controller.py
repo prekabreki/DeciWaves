@@ -435,7 +435,7 @@ def test_start_catalog_copy_missing_source_reports_error(qtbot, tmp_path):
     assert "no catalog artifact" in blocker.args[0].lower()
 
 
-def test_start_order_copy_copies_render_input(qtbot, tmp_path):
+def test_start_order_copy_writes_render_input_with_n_and_duration_columns(qtbot, tmp_path):
     ws = str(tmp_path)
     p = os.path.join(ws, "out", "playlist.csv")
     os.makedirs(os.path.dirname(p), exist_ok=True)
@@ -445,10 +445,13 @@ def test_start_order_copy_copies_render_input(qtbot, tmp_path):
     dest = os.path.join(ws, "exported-order.csv")
     with qtbot.waitSignal(ctrl.log_message, timeout=5000) as blocker:
         ctrl.start_order_copy("ds", ws, dest)
-    assert "copied" in blocker.args[0].lower()
+    assert "written" in blocker.args[0].lower()
     assert os.path.isfile(dest)
     with open(dest, encoding="utf-8-sig") as f:
-        assert "line_id" in f.read()
+        rows = list(csv.DictReader(f))
+    assert list(rows[0].keys())[0] == "n"            # stable ordinal is the first column
+    assert rows[0]["n"] == "1" and rows[0]["line_id"] == "a"
+    assert "duration_s" in rows[0]                    # duration column appended (blank for DS)
 
 
 # -- _report_export_result --------------------------------------------------
